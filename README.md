@@ -5,7 +5,7 @@ PLAN is an all-in-one visual communication and organizational tool for real-worl
 go-PLAN is the official Go implementation of PLAN's p2p client-serving node.
 
 
-## License:
+## License
 
 GPL-v3 
 https://www.gnu.org/licenses/gpl-3.0.en.html
