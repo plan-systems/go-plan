@@ -1,19 +1,24 @@
 
+
 package main
 
 import (
 	"database/sql"
-	"fmt"
+    //"fmt"
+    "flag"
 	"log"
     "os"
     "io"
+    "io/ioutil"
 	"strings"
     "sync"
     "time"
     //"sort"
     "encoding/hex"
+    "encoding/json"
+    "encoding/base64"
 
-    "github.com/tidwall/redcon"
+    //"github.com/tidwall/redcon"
 
     "github.com/plan-tools/go-plan/plan"
 
@@ -28,163 +33,192 @@ import (
     
     //"crypto/md5"
     //"hash"
-    "encoding/base64"
+    "crypto/rand"
 
     //"github.com/stretchr/testify/assert"
+
+	"github.com/ethereum/go-ethereum/rlp"
+    "github.com/ethereum/go-ethereum/common/hexutil"
+
 )
 
-
+/*
 const (
     DEBUG     = true
 )
+*/
 
 
 
-type pnodeGlobals struct {
-	repos                  map[*plan.IdentityAddr]*CommunityRepo
+
+
+const (
+	noErr = 0
+
+	// The signature on the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
+	InvalidEntrySignature = 5000 + iota
+
+	// The given author was not found in the given access control list.
+	AuthorNotFound = 5001
+
+	// The given access control reference was not found
+	AccessChannelNotFound = 5002
+
+    InvalidAccessChannel
+
+    ExpiredAccessChannel 
+
+    FailedToCreateChannelOnDisk
+
+    NotAnAccessChannel
+
+    ChannelAlreadyExistsErr
+
+	// The given entry's author does not have write permission to the associated channel
+	AuthorLacksWritePermission = 5003
+
+	// The the entry's encrypted data failed to decode using the author's verification key.
+	AuthorAuthFailed = 5004
+
+	// The given timestamp is either excessively in the future or past
+    BadTimestampErr = 5005
+    
+
+)
+
+
+
+
+// ServerSession is an interface available to clients to call against
+type PnodeAPI interface {
+
+    // PublishEntry accepts a pdi entry from a live client and attempts to post it to this community repo
+    PublishEntry( inEntry *plan.PDIEntryCrypt )
 }
 
-
-
-
-
-func init() {
-
-}
 
 
 type ClientInfo struct {
 
-    UserId                  plan.IdentityAddr        // Creator of this entry (and signer of .Sig)
-
+    UserID                  plan.IdentityAddr        // Creator of this entry (and signer of .Sig)    
 }
 
 type ClientSession interface {
     ClientInfo() *ClientInfo
 
-    OnLogin()
+    OnLogin( inAPI PnodeAPI )
     OnLogout()
 
     // Encrypts/Decrypts the given data, given a community key id.
-    DecryptCommunityData( inCommunityKey plan.AccessCtrlId, inEncrypted []byte ) ( []byte, error )
-    EncryptCommunityData( inCommunityKey plan.AccessCtrlId, inData      []byte ) ( []byte, error )
+    DecryptCommunityData( inCommunityKey plan.CommunityKeyID, inEncrypted []byte ) ( []byte, error )
+    EncryptCommunityData( inCommunityKey plan.CommunityKeyID, inData      []byte ) ( []byte, error )
 }
 
-
-type FakeSession struct {
-
-    keys             map[plan.AccessCtrlId]byte;
-
-}
-
-
-
-var (
-    CommunutyKey1 = plan.AccessCtrlId{ 1, 1, }
-    CommunutyKey2 = plan.AccessCtrlId{ 2, 2, }
-    CommunutyKey3 = plan.AccessCtrlId{ 3, 3, }
-)
-
-func (S *FakeSession) OnLogin() {
-
-    // "Load" community keys
-    S.keys = make( map[plan.AccessCtrlId]byte )
-    S.keys[CommunutyKey1] = 0x01
-    S.keys[CommunutyKey2] = 0x02
-    S.keys[CommunutyKey3] = 0x03
-}
-
-func (S *FakeSession) OnLogout() {
-
-    // "Unload" key store from memory
-    S.keys = nil
-}
-
-
-func (S *FakeSession) DecryptCommunityData( inKeyId plan.AccessCtrlId, inEncrypted []byte ) ( []byte, error ) {
-
-    d := make( []byte, len(inEncrypted))
-    k := S.keys[inKeyId]
-
-    for i, c := range inEncrypted {
-        d[i] = c ^ k
-    }
-
-    return d, nil
-}
-
-
-func (S *FakeSession) EncryptCommunityData( inKeyId plan.AccessCtrlId, inData []byte ) ( []byte, error ) {
-
-    d := make( []byte, len(inData))
-    k := S.keys[inKeyId]
-
-    for i, c := range inData {
-        d[i] = c ^ k
-    }
-
-    return d, nil
-
-}
 
 
 type ChannelStoreLookup struct {
     sync.RWMutex
-	table map[plan.ChannelId]*ChannelStore
+
+	table                   map[plan.ChannelID]*ChannelStore
 }
 
 
-type ACStoreLookup struct {
-    sync.RWMutex
-	table map[plan.AccessCtrlId]*ACStore
+
+
+type CommunutyRepoInfo struct {
+	CommunityName           string                  `json:"communityName"`
+    CommunityID             hexutil.Bytes           `json:"communityID"`
+    RepoPath                string                  `json:"repoPath"`
+    ChannelPath             string                  `json:"channelPath"`
 }
 
 
 // Community Data Repository
 type CommunityRepo struct {
-	communityName           string
-    communityAddr           plan.CommunityAddr
-    clientSession           ClientSession
+    Info                    *CommunutyRepoInfo
 
-	basePath                string
-	channelPath             string // subdir containing data for each channel
-    acPath                  string // subdir containing all the access control dbs
-
-    // Decrypted entries ready to be written to the community's common db (on local disk)
-    entriesToStore          chan *plan.PDIEntry
-
-    // Incoming encrypted entries "off the wire" that are ready to be processed
-    entriesToProcess        chan *plan.PDIEntryCrypt
-
-    dirEncoding             *base64.Encoding
+    // This will move and is just a hack for now
+    activeSession           ClientSession
 
     DefaultFileMode         os.FileMode
+    DirEncoding             *base64.Encoding
 
-    channelStores           ChannelStoreLookup      // Turns a plan.ChannelId into a *ChannelStore
-	acStores                ACStoreLookup           // Turns a plan.AccessCtrlId into an *ACStore
+    // Incoming encrypted entries "off the wire" that are ready to be processed (and written to local community repo)
+    entriesToProcess        chan *plan.PDIEntryCrypt
+
+
+    channelStores           ChannelStoreLookup      // Turns a plan.ChannelID into a *ChannelStore
 }
 
 
 
-// Initializes a new channel store
-// CR is read-only since this can called from any thread!
-func (CR *CommunityRepo) InitChannel( inChannelId *plan.ChannelId ) *ChannelStore {
 
-    CS := new( ChannelStore )
 
-    CS.ChannelId    = *inChannelId    //CR.chNameHasher.Sum( []byte( NormalizeChannelName( CS.channelName ) ) )
-    CS.channelDir   = CR.channelPath + CR.dirEncoding.EncodeToString( inChannelId[:] ) + "/"
+func (CR *CommunityRepo) InitChannelStore( CS *ChannelStore, inCreateNew bool ) error {
 
-    os.Mkdir( CS.channelDir, CR.DefaultFileMode )
+    CS.Lock()
 
     CR.channelStores.Lock()
-    CR.channelStores.table[CS.ChannelId] = CS
+    CR.channelStores.table[CS.Properties.ChannelID] = CS
     CR.channelStores.Unlock()
 
-    return CS
+    CS.channelDir = CR.Info.ChannelPath + CR.DirEncoding.EncodeToString( CS.Properties.ChannelID[:] ) + "/"
+
+    if inCreateNew {
+
+        err := os.Mkdir( CS.channelDir, CR.DefaultFileMode )
+        if err != nil {
+            return plan.Errorf( FailedToCreateChannelOnDisk, "Failed to create channel dir on disk %T", err )
+        }
+
+        buf, err := json.Marshal( &CS.ChannelAdmin )
+        if err == nil {
+            err = ioutil.WriteFile( CS.channelDir + ChannelAdminFilename, buf, CR.DefaultFileMode )
+        }
+    
+        buf, err = json.Marshal( &CS.Properties )
+        if err == nil {
+            err = ioutil.WriteFile( CS.channelDir + ChannelPropertiesFilename, buf, CR.DefaultFileMode )
+        }
+
+    } else {
+
+        buf, err := ioutil.ReadFile( CS.channelDir + ChannelAdminFilename )
+        if err == nil {
+            err = json.Unmarshal( buf, &CS.ChannelAdmin )
+        }
+
+        buf, err = ioutil.ReadFile( CS.channelDir + ChannelPropertiesFilename )
+        if err == nil {
+            err = json.Unmarshal( buf, &CS.Properties )
+        }
+
+    }
+
+
+    if CS.Properties.IsAccessChannel {
+
+        CS.ACStore = new( ACStore )
+
+        if inCreateNew {
+
+        } else {
+
+        }
+    }
+
+    return nil
 }
 
 
+
+
+
+
+func (CR *CommunityRepo) PublishEntry( inEntry *plan.PDIEntryCrypt ) {
+
+    CR.entriesToProcess <- inEntry
+}
 
 
 
@@ -193,30 +227,37 @@ func (CR *CommunityRepo) EntryProcessor() {
 
     for entry := range CR.entriesToProcess {
 
-        err := CR.ProcessEntry( entry )
+        CR.processEntry( entry )
     }
 }
 
 
 
-func (CR *CommunityRepo) ProcessEntry( ioEntry *plan.PDIEntryCrypt ) error {
+
+
+func (CR *CommunityRepo) processEntry( ioEntry *plan.PDIEntryCrypt ) error {
+
+    entry := new( plan.PDIEntry )
+    entry.PDIEntryCrypt = ioEntry
 
     var err error
-    ioEntry.Hash, err = ioEntry.ComputeHash()
-    if err != nil {
-        return err
-    }
 
-    ioEntry.HeaderBuf, err = CR.DecryptCommunityData( ioEntry.CommunityKeyRev, ioEntry.HeaderCrypt )
+    // Community data is keyed using one of the community keys.
+    entry.HeaderBuf, err = CR.DecryptCommunityData( ioEntry.CommunityKeyID, ioEntry.HeaderCrypt )
     if err != nil {
         return err
     }
 
     // Deserialize inEntry.Headerbuf into inEntry.Header
-    err = ioEntry.DeserializeHeader()
+    entry.Header = new( plan.PDIEntryHeader )
+    err = rlp.DecodeBytes( entry.HeaderBuf, entry.Header )
     if err != nil {
         return err
     }
+
+    // Used in various places
+    ioEntry.Hash = new( plan.PDIEntryHash )
+    ioEntry.ComputeHash( ioEntry.Hash )
 
     // Now that we've decrypted and deserialized the header, we can verify the entry's signature
     err = CR.VerifySig( ioEntry )
@@ -224,105 +265,381 @@ func (CR *CommunityRepo) ProcessEntry( ioEntry *plan.PDIEntryCrypt ) error {
         return err
     }
 
+    // Fetch (or load and fetch) the ChannelStore assicated with the given channel
+    CS, err := CR.GetChannelStore( &entry.Header.ChannelID, PostingToChannel | LoadIfNeeded )
 
-    // With the header 
-    info, err := ioCR.QueryAccessCtrl( ioEntry.Header.AccessCtrlId, ioEntry.Header.Author )
-    if err != noErr {
-        return err
-    }
+    verb := entry.Header.Verb
+    switch ( verb ) {
 
-    if ! info.AuthorHasWriteAccess {
-        return AuthorLacksWritePermission
-    }
+        case plan.PDIEntryVerbPostEntry:
 
-    CR.entriesToStore <- ioEntry
+            // First, we must validate the access channel cited by the header used by the author to back permissions for posting this entry.
+            // This checks that the author didn't use an invalid or expired access channel to post this entry.  Once we validate this, 
+            //    we can trust and use that access channel to check permissons further.
+            err = CS.ValidateCitedAccessChannel( entry.Header );
 
+            err = CR.VerifyWriteAccess( CS, entry.Header )
+            if err != nil {
+                return err
+            }
+
+            err := CS.WriteEntryToStorage( entry )
+            if err != nil {
+                return err
+            }
+
+        case plan.PDIEntryVerbChannelAdmin:
+
+            // In general, if the channel already exists, it's an error.  Howeever we need to check if this entry 
+            if CS != nil {
+                //err = plan.Error( )
+            }
+
+        default:
+            plan.Assert( false, "Unhandled verb" )
+
+    } 
+
+
+
+    return err
 
 }
 
-func (CR *CommunityRepo) EntryStorageWriter() {
 
 
-    for entry := range CR.entriesToStore {
+const (
+    AuthorHasReadAccess        = 0x01
+    AuthorHasWriteAccess       = 0x02
+    AuthorHasOwnAccess         = 0x04
+)
 
-        CR.channelStores.RLock()
-        CS := CR.channelStores.table[entry.Header.ChannelId]
-        CR.channelStores.RUnlock()
-
-        // Init/Create a channel storage handler for this channelId
-        if CS == nil {
-            CS = CR.InitChannel( &entry.Header.ChannelId )
-        }
-    
-        err := CS.WriteEntryToStorage( entry )
-
-    }
-}
+type AuthorAccessFlags  uint32
 
 
-func (CR *CommunityRepo) DecryptCommunityData( inKeyRev plan.CommunityKeyRev, inEncrypted []byte ) ( []byte, error ) {
-
-    return CR.clientSession.DecryptCommunityData( inKeyRev, inEncrypted )
-
-}
-
-func (CR *CommunityRepo) EncryptCommunityData( inKeyRev plan.CommunityKeyRev, inData []byte ) ( []byte, error ) {
-
-    return CR.clientSession.EncryptCommunityData( inKeyRev, inData )
-    
-}
 
 /*
-func (CR *CommunityRepo) Sign( inEntropy io.Reader, inPrivateKey *PrivateKey, inHash []byte ) ( []byte, err error ) {
+There are 6 user channel access states:
 
-    return CR.clientSession.EncryptCommunityData( inKeyRev, inData )
+I) Channel community-public or private?
+    (a) community-public -- entry body encrypted with a community (symmetric) key and the listed AccessChannelID specifies
+                            what default permissions are and what users are excluded from that (e.g. default read-only but
+                            users Alice and Bob have write access, while only Bob has own access)
+    (b) private          -- entry body encrypted with the channel key "sent" to users via AccessChannelID.  Users are granted the key for
+                            read access, and potentially an additional "write" or "own" flag (that pnodes verify/enforce)
+
+II) AccessChannelID privilege levels:
+    (1) read-only        -- User have symettric key access but pnodes reject posts if the author only had read permissions 
+    (2) read + write     -- Users have additional post flag set (so pnodes see a given author is permitted to post a new entry)
+    (3) owner            -- Can read, write, and grant others users read and write access privs.
+
+
+*/
+
+type GetChannelStoreFlags int32
+const (
+    ReadingFromChannel          = 0x01
+    PostingToChannel            = 0x02
+
+    IsAccessChannel             = 0x10
+
+    LoadIfNeeded                = 0x30
+)
+
+func (CR *CommunityRepo) GetChannelStore( inChannelID *plan.ChannelID, inFlags GetChannelStoreFlags ) ( *ChannelStore, error ) {
+
+    CR.channelStores.RLock()
+    CS := CR.channelStores.table[*inChannelID]
+    CR.channelStores.RUnlock()
+
+    var err error
+    var hasWriteLock bool
+
+    if CS == nil && ( inFlags & LoadIfNeeded ) != 0 {
+        CS = new( ChannelStore )
+        CS.Properties.ChannelID = *inChannelID
+
+        err = CR.InitChannelStore( CS, false )
+        if err != nil {
+            CR.channelStores.Lock()
+            delete( CR.channelStores.table, *inChannelID )
+            CR.channelStores.Unlock()
+            CS = nil
+
+            // TODO: keep log of failed CS that are fail to be loaded
+        } else {
+            hasWriteLock = true
+        }
+    }
+
+    if err == nil {
+        if ( inFlags & PostingToChannel ) != 0 {
+            if ! hasWriteLock {
+                CS.Lock()
+            }
+        } else if ( inFlags & ReadingFromChannel ) != 0 {
+            if hasWriteLock {
+                CS.Unlock()
+            }
+            CS.RLock()
+        } 
+    }
+
+
+    return CS, err
+}
+
+
+
+
+// VerifyAccess checks that the given PDI Entry has the proper permissions to do what it says it wants to do and that
+//    the AccessChannelID cited is in fact a valid access channel to cite (given the timestamp of the entry, etc)
+func (CR *CommunityRepo) VerifyWriteAccess( CS *ChannelStore, inHeader *plan.PDIEntryHeader ) error {
+
+    // Get/Load/Create the data structure container for the cited access channel
+    AC, _ := CR.GetChannelStore( &inHeader.AccessChannelID, IsAccessChannel | ReadingFromChannel | LoadIfNeeded )
+    if AC == nil {
+        return plan.Errorf( AccessChannelNotFound, "cited access channel 0x%x not found", inHeader.AccessChannelID )
+    }
+    if AC.ACStore == nil {
+        return plan.Errorf( NotAnAccessChannel, "cited access channel 0x%x not actually an access channel", inHeader.AccessChannelID )
+    }
+
+    // Entries posted to a channel cite (and use) the latest/current AccessChannelID assiciated with the channel.
+    // ...but pnodes must check this!
+
+
+    {
+        access := AC.ACStore.AccessByAuthor[inHeader.Author]
+        if ( access & AuthorHasWriteAccess ) == 0 {
+            return plan.Error( AuthorLacksWritePermission, "Author does not have write access to channel" )
+        }
+    }
+
+    return nil
+
+}
+
+
+// ValidateCitedAccessChannel checks inHeader.AccessChannel is valid to cite for the given channel store.
+func (CS *ChannelStore) ValidateCitedAccessChannel( inHeader *plan.PDIEntryHeader ) error {
+
+    var err error
+
+    {
+        expireTime := plan.DistantFuture
+        var acaMatch *AccessChannelAssignment
+
+        acHistory := &CS.ChannelAdmin.AccessChannelHistory
+        for i := len(*acHistory) - 1; i >= 0; i-- {
+            aca := &(*acHistory)[i]
+            if aca.AccessChannelID == inHeader.AccessChannelID {
+                if aca.InEffect <= inHeader.Time && inHeader.Time < expireTime {
+                    acaMatch = aca
+                    break
+                } else {
+                    err = plan.Errorf( ExpiredAccessChannel, "The entry cited access channel 0x%x is expired", inHeader.AccessChannelID )  
+                }
+            }
+            expireTime = aca.InEffect
+        }
+
+        if acaMatch == nil {
+            if err == nil {
+                err = plan.Errorf( InvalidAccessChannel, "The access channel 0x%x was not found for channel 0x%x", inHeader.AccessChannelID, inHeader.ChannelID )
+            }
+            return err       
+        }
+    }
+
+    return err
+}
+
+
+
+
+
+
+
+func (CR *CommunityRepo) DecryptCommunityData( inKeyID plan.CommunityKeyID, inEncrypted []byte ) ( []byte, error ) {
+
+    return CR.activeSession.DecryptCommunityData( inKeyID, inEncrypted )
+
+}
+
+func (CR *CommunityRepo) EncryptCommunityData( inKeyID plan.CommunityKeyID, inData []byte ) ( []byte, error ) {
+
+    return CR.activeSession.EncryptCommunityData( inKeyID, inData )
     
 }
-*/
+
+
 
 // inSig is the sig data block
 // inHash specifies how inHashed was created (or 0 if not inHashed is not hashed)
 // inHashed is the hash digest that is said to be signed by inSigner into inSig
 // This function verifies that inSig a signature of inHashed from the private key associated with inSigner
-func (CR *CommunityRepo) VerifySig( inEntry *plan.PDIEntry ) error {
+
+func (CR *CommunityRepo) VerifySig( inEntry *plan.PDIEntryCrypt ) error {
+
+    //var err error
+
+    
+    // For next step, see:
+    // https://github.com/ethereum/go-ethereum/blob/master/crypto/crypto_test.go
+    // https://github.com/ethereum/go-ethereum/tree/master/crypto
 
     return nil
     
 }
 
 
+/*
+func (CR *CommunityRepo) HashAndSign( ioEntry *plan.PDIEntry ) error {
+
+    entryHash := inEntry.ComputeHash()
+
+    // See above
+
+    return nil
+    
+}
+
+*/
+
+
 
 const (
     ChannelIndexFilename        = "idx.db"
     ChannelTomeFilename         = "01"
-    ChannelAccessCtrlFilename   = "ac.db"
+    ChannelAdminFilename        = "ChannelAdmin.db.json"
+    ChannelPropertiesFilename   = "ChannelPropertiesFilename.json"
+    PnodeConfigFilename         = "config.json"
 
     kTomeNumShift               = byte( 64 - 16 )
     kTomeNumMask                = 0xFFFF << kTomeNumShift
     kTomeOffsetMask             = ( 1 << kTomeNumShift ) - 1
 )
 
-// TODO: Use file pool that auto-flushes and closes files after X seconds or as file access goes past N txns, etc.
-// TODO: make an explicit command that creates a new channel -- this enforces channel case-sensitive names
 
+type ChannelActionVerb string
+const (
+
+    // VerbChannelGeneis creates a new channel, specifying a complete set of channel properties via an encoded form of ChannelProperties
+    VerbChannelGeneis               = "genesis"
+
+    // VerbChannelSetProperties sets a specified number of channel properties.  .VerbData is a json encoded list of param keys and new values.
+    VerbChannelSetProperties        = "set"
+
+)
+
+
+// ChannelStore manages a memory-resident representation of any PLAN channel
 type ChannelStore struct {
-    ChannelId               plan.ChannelId
+    sync.RWMutex
+
+    Properties              plan.ChannelProperties
 
     channelDir              string
 
-	acStore                 *ACStore
+    // ChannelActionLog is an ordered list of ChannelAction executed on this channel, starting from when the channel was first created,
+    //    all the way up to the present moment.  This log allows a pnode to verify that a given post to a channel is citing
+    //    a valid, available, and legal access channel (given an author and timestamp)
+	ChannelAdmin             ChannelAdmin
 
     db                      *sql.DB
     select_timeMatch        *sql.Stmt
     select_hashMatch        *sql.Stmt
     insert_entry            *sql.Stmt
 
-	tome_file               *os.File
+    tome_file               *os.File
+    
+    // ACStore is ONLY set if this channel is being used as an AccessChannel.
+    ACStore                 *ACStore
+}
+
+
+type AccessGrant struct {
+    Timestamp               plan.Time
+
+    Granter                 plan.IdentityAddr
+    Grantee                 plan.IdentityAddr
+
+    // When a channel owner grants access to someone, she is really using the grantee's public key to encrypt 
+    //    the AccessCtrl's master/private key and posting it to the access control list.  Keep in mind that pnodes
+    //    validate incoming grants by ensuring that .Granter has ownership-level permissions.
+    // Since some permissions changes don't require the key to be resent, this value is sometimes nil.
+    EncryptedChannelKey     *plan.EncryptedChannelKey
+
+    // 
+    UpdatedAccess           AuthorAccessFlags
+}
+
+// ACStore reperesents an permissions/access control container.  Entries to a AccessChannelID appear as
+//     a given public 
+type ACStore struct {
+
+    // This represetns the db that contains a sequentual list of 
+    RunningHistory          []AccessGrant
+
+    // This is a composite of all entries posted to this access channel.  This table is built up by compositing
+    //    all access grant history posted to this access channell, going in order of time. 
+    AccessByAuthor          map[plan.IdentityAddr]AuthorAccessFlags
+
 }
 
 
 
 
+
+const (
+
+    // PDIEntryVerbCreateChannel creates a new channel (not common)
+   ChannelAdminSetAccessChannel       = "set"
+
+)
+
+// ChannelAdminAction is a record of a change of one or more channel peoperties *or* an action associated with the channel (e.g. channel rekey event) 
+// During a channel's lifetime, it be set so that a different access channel governs permissions for this channel.
+type ChannelAdminAction struct {
+
+   // The time of this channel admin action
+   Time                    plan.Time                    `json:"when"`
+
+   // Who authored this action (only channel owners are allowd to insert channel admin actions)
+   Author                  plan.IdentityAddr            `json:"author"`
+
+   // ChannelAction is a json encoding of a sequence of channel params and actions that are set/executed.
+   ChannelAction           []byte                       `json:"action"`
+ 
+}
+
+type AccessChannelAssignment struct {
+ 
+   // The time of this channel admin action
+   InEffect                plan.Time                   `json:"when"`
+
+   AccessChannelID         plan.ChannelID              `json:"acID"`
+
+   AccessChannelRev        int                         `json:"acRev"`
+}
+
+// ChannelAdmin is a time-seqential list of channel meta chanages
+type ChannelAdmin struct {
+
+   AccessChannelHistory    []AccessChannelAssignment   `json:"acHistory"`
+
+   ActionHistory           []ChannelAdminAction        `json:"actionLog"`
+
+}
+
+
+
+
+func (CS *ChannelStore) IsAccessControlChannel() *ACStore {
+
+    return CS.ACStore
+}
 
 
 func (CS *ChannelStore) AppendToTome( inTomeNum int64, inBlob []byte ) ( TomePosEncoding, error ) {
@@ -375,6 +692,8 @@ func (CS *ChannelStore) OpenIndexDB() error {
     if CS.db == nil {
         filename := CS.channelDir + ChannelIndexFilename
         var err error
+
+        // TODO: Use file pool that auto-flushes and closes files after X seconds or as file access goes past N txns, etc.
         CS.db, err = sql.Open( "sqlite3", filename )
 		if err != nil {
             log.Printf( "Error opening channel index db '%s'\n", filename )
@@ -426,22 +745,7 @@ func (CS *ChannelStore) OpenIndexDB() error {
 }
 
 
-// Computes a hash digest for this entry
-func ( inEntry *plan.PDIEntryCrypt ) ComputeHash() *plan.PDIEntryHash {
 
-
-}
-
-
-func ( ioEntry *plan.PDIEntryCrypt ) HashEntry() *plan.PDIEntryHash {
-
-    if ioEntry.Hash != nil {
-        return &ioEntry.Hash
-    }
-
-
-
-}
 
 
 
@@ -449,7 +753,7 @@ func ( ioEntry *plan.PDIEntryCrypt ) HashEntry() *plan.PDIEntryHash {
 // Pre: CS.channelName == inEntries[:].data.channelName
 func (CS *ChannelStore) WriteEntryToStorage( inEntry *plan.PDIEntry ) error {
 
-    plan.Assert( inEntry.Header.ChannelId == CS.ChannelId, "Bad channel given to InsertEntriesToChannel" )
+    plan.Assert( inEntry.Header.ChannelID == CS.Properties.ChannelID, "Bad channel given to InsertEntriesToChannel" )
 
 
     err := CS.OpenIndexDB()
@@ -462,13 +766,13 @@ func (CS *ChannelStore) WriteEntryToStorage( inEntry *plan.PDIEntry ) error {
         var matchRow int 
 
         {
-            err = CS.select_timeMatch.QueryRow( inEntry.Header.Timestamp ).Scan( &matchRow )
+            err = CS.select_timeMatch.QueryRow( inEntry.Header.Time ).Scan( &matchRow )
             if err == sql.ErrNoRows {
 
             } else {
                 log.Printf( "got possible dupe!" )
 
-                err = CS.select_timeMatch.QueryRow( matchRow, *inEntry.Crypt.Hash ).Scan( &matchRow )
+                err = CS.select_timeMatch.QueryRow( matchRow, *inEntry.PDIEntryCrypt.Hash ).Scan( &matchRow )
 
                 log.Printf( "got dupe!" )
                 return nil
@@ -505,11 +809,6 @@ func (CS *ChannelStore) WriteEntryToStorage( inEntry *plan.PDIEntry ) error {
 }
 
 
-type ACStore struct {
-	accessCtrlId            plan.AccessCtrlId
-	//accessFlags             map[string]AccessFlags
-	db                      *sql.DB
-}
 
 
 
@@ -529,155 +828,12 @@ type ACStore struct {
 //          ...placed on a ban list.  Similar to the a write access hack, a banned user's entry will be rejected by other swarm nodes.
 //              - This allows a channel to be offer community-public write access, except for explicitly named user or group id.
 
-type AuthorCredentials struct {
-	hasReadAccess           bool
-	hasWriteAccess          bool
-	hasOwnership            bool
-	verifyKey               string // (multibase) -- key used to verify than an entry is signed by the author it says its authored by
-}
-
-*/
-
-/*
-func (CR *CommunityRepo) AccessChannel(inChannelName string) ChannelStore {
-
-	CR.ChannelHashFunction
-}
-*/
-
-
-
-func (CR *CommunityRepo) ProcessEntryFromWire( inEntry *plan.PDIEntryCrypt ) error {
-
-
-    /*
-    if info.IsPublicChannel {
-        ioEntry.BodyBuf, err = CR.DecryptCommunityData( ioEntry.CommunityKeyRev, ioEntry.BodyCrypt )
-        if err != noErr {
-            return err
-        }
-
-    } else
-
-
-	if !authorCred.hasWriteAccess {
-		return AuthorLacksWritePermission
-	}
-
-	authoredData, err := ioEntry.DecryptWithVerifyKey(authorCred.verifyKey)
-	if err != noErr {
-		return err
-	}
-
-	// yikes, below we won't be able to decrypt if we don't have access to this channel.
-	// so every channel's basically stores itself in an encrypted state and decrypts on the fly
-
-	ioEntry.data, err := CR.DecryptEntry( ioEntry, authoredData )
-	if err != noErr {
-		return err
-	}
-
-    err = ioCR.appendEntryData(ioEntry)
-    
-
-    if ( )
-    err = CR.Decrypt */
-
-}
-
-
-
-
-func (CR *CommunityRepo) BootstrapCDS() {
-
-	{
-		var b strings.Builder
-		remapCharset := map[rune]rune{
-			' ':  '-',
-			'.':  '-',
-			'?':  '-',
-			'\\': '+',
-			'/':  '+',
-			'&':  '+',
-		}
-
-		for _, r := range strings.ToLower(CR.communityName) {
-			if replace, ok := remapCharset[r]; ok {
-				if replace != 0 {
-					b.WriteRune(replace)
-				}
-			} else {
-				b.WriteRune(r)
-			}
-		}
-
-
-		CR.basePath = b.String() + "-" //+ hex.EncodeToString( CR.address[:8] )
-		CR.channelPath      = CR.basePath + "/ch/"
-		CR.acPath           = CR.basePath + "/ac/"
-        CR.dirEncoding      = base64.RawURLEncoding
-        CR.clientSession    = new( FakeSession )
-        CR.entriesToStore   = make( chan *PDIEntry,         32 )
-        CR.entriesToProcess = make( chan *PDIEntryCrypt,    32 )
-        CR.DefaultFileMode  = os.FileMode(0775)
-	}
-
-	os.MkdirAll(CR.basePath, CR.DefaultFileMode )
-
-	os.Mkdir(CR.channelPath, CR.DefaultFileMode )
-
-
-    go CR.EntryWriter( CR.entryInbox )
-}
-
-
-
-
-/*
-func (CR *CommunityRepo) GetChannel( inChannel string ) *ChannelStore {
-
-    // Standardize case of incoming channel?
-    stdChName = strings.ToLower( inChannel )
-
-    chStore := CR.channelStores[stdChName]
-    if chStore == nil {
-        chStore = new(ChannelStore)
-        chStore.entry_db_filename = CR.channelPath + stdChName 
-
-
-        CR.channelStores[inChannel] = chStore
-    }
-}
-
-
-type PError int
-
-const (
-	noErr = 0
-
-	// The signature on the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
-	InvalidEntrySignature = 5000
-
-	// The given author was not found in the given access control list.
-	AuthorNotFound = 5001
-
-	// The given access control reference was not found
-	AccessControlRefNotFound = 5002
-
-	// The given entry's author does not have write permission to the associated channel
-	AuthorLacksWritePermissio = 5003
-
-	// The the entry's encrypted data failed to decode using the author's verification key.
-	AuthorAuthFailed = 5004
-
-	// The given timestamp is either excessively in the future or past
-	BadTimestampErr = 5005
-)
-
-
 
 
 */
+
+
+
 
 // Every Channel keeps the following files:
 //    a) channel data tome (unstructured binary file)
@@ -689,201 +845,263 @@ const (
 //        - when a user is "added" to the channel, the owner must grant master key acces for each rev of the control list into the past (or as far as the owner wants to go)
 
 
-var addr = "127.0.0.1:6380"
 
-func main() {
 
-	var myCR CommunityRepo
-	{
-        myCR.communityName = "PLAN Foundation"
-        addr, _ := hex.DecodeString( "00112233445566778899aabbccddeeff44332211" )
-        copy( myCR.communityAddr[:], addr )
 
-        myCR.BootstrapCDS()
+
+type PNode struct {
+    CRbyID                      map[plan.CommunityID]*CommunityRepo
+
+    config                      PNodeConfig
+
+    activeSessions              []ClientSession
+
+    BasePath                    string
+
+}
+
+
+
+type PNodeConfig struct {
+    Name                        string                          `json:"nodeName"`
+    PNodeID                     hexutil.Bytes                   `json:"nodeID"`
+
+    RepoList                    []CommunutyRepoInfo             `json:"repoList"`
+
+    DefaultFileMode             os.FileMode                     `json:"defaultFileMode"`
+}
+
+
+
+
+
+
+
+func init() {
+
+
+
+}
+
+
+
+func (pn *PNode) AllocCommunityRepo( inInfo *CommunutyRepoInfo ) *CommunityRepo {
+
+    CR := new( CommunityRepo )
+    CR.Info = inInfo
+    CR.DirEncoding = base64.RawURLEncoding
+
+    // Runtime support
+    CR.entriesToProcess = make( chan *plan.PDIEntryCrypt,    32 )
+    CR.DefaultFileMode = pn.config.DefaultFileMode
+
+    return CR
+}
+
+
+/*
+// PNodeID identifies a particular pnode running as part of a PLAN community
+type PNodeID                [32]byte
+
+func (pnID PNodeID) MarshalJSON() ( []byte, error ) {
+    bytesNeeded := base64.RawURLEncoding.EncodedLen( len(pnID) ) + 2
+    outText := make( []byte, bytesNeeded, bytesNeeded )
+    outText[0] = '"'
+    base64.RawURLEncoding.Encode( outText[1:bytesNeeded-1], pnID[:] )
+    outText[bytesNeeded-1] = '"'
+
+    return outText, nil
+}
+
+func (pnID PNodeID) UnmarshalJSON( inText []byte ) error {
+    _, err := base64.RawURLEncoding.Decode( pnID[:], inText )
+
+    return err
+}
+*/
+
+func (pn *PNode) InitOnDisk() {
+
+    pn.config.PNodeID = make( []byte, plan.IdentityAddrSz )
+    rand.Read( pn.config.PNodeID )
+
+    pn.WriteConfigOut()
+}
+
+
+func (pn *PNode) LoadConfigIn() error {
+
+
+    buf, err := ioutil.ReadFile( pn.BasePath + PnodeConfigFilename )
+    if err == nil {
+        err = json.Unmarshal( buf, &pn.config )
     }
 
-	{
+    for i := range pn.config.RepoList {
+        CRInfo := &pn.config.RepoList[i]
+        
+        CR := pn.AllocCommunityRepo( CRInfo )
 
-		os.Remove("./foo.db")
+        pn.RegisterCommunityRepo( CR )
+    }
 
-		db, err := sql.Open("sqlite3", "./foo.db")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer db.Close()
+    return err
+}
 
-		sqlStmt := `
-        CREATE TABLE IF NOT EXISTS ChannelEntries (
-            timestamp       BIGINT,
-            hashname        TINYTEXT,
-            tome_file_pos   INT,
-            tome_entry_len  INT          
-        );
-        CREATE INDEX IF NOT EXISTS EntryLookup ON ChannelEntries(timestamp);
-        `
+func (pn *PNode) RegisterCommunityRepo( CR *CommunityRepo ) {
 
-		_, err = db.Exec(sqlStmt)
-		if err != nil {
-			log.Printf("%q: %s\n", err, sqlStmt)
-			return
-		}
+    var communityID plan.CommunityID
+    copy( communityID[:], CR.Info.CommunityID )
 
-		tx, err := db.Begin()
-		if err != nil {
-			log.Fatal(err)
-		}
-		stmt, err := tx.Prepare("insert into foo(id, name) values(?, ?)")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		for i := 0; i < 100; i++ {
-			_, err = stmt.Exec(i, fmt.Sprintf("こんにちわ世界%03d", i))
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-		tx.Commit()
+    pn.CRbyID[communityID] = CR
 
-		rows, err := db.Query("select id, name from foo")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id int
-			var name string
-			err = rows.Scan(&id, &name)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println(id, name)
-		}
-		err = rows.Err()
-		if err != nil {
-			log.Fatal(err)
-		}
+}
 
-		stmt, err = db.Prepare("select name from foo where id = ?")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		var name string
-		err = stmt.QueryRow("3").Scan(&name)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(name)
+func (pn *PNode) WriteConfigOut() error {
 
-		_, err = db.Exec("delete from foo")
-		if err != nil {
-			log.Fatal(err)
-		}
+    os.MkdirAll( pn.BasePath, pn.config.DefaultFileMode )
 
-		_, err = db.Exec("insert into foo(id, name) values(1, 'foo'), (2, 'bar'), (3, 'baz')")
-		if err != nil {
-			log.Fatal(err)
-		}
+    buf, err := json.MarshalIndent( &pn.config, "", "\t" )
+    if err != nil {
+        return err
+    }
 
-		rows, err = db.Query("select id, name from foo")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id int
-			var name string
-			err = rows.Scan(&id, &name)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println(id, name)
-		}
-		err = rows.Err()
-		if err != nil {
-			log.Fatal(err)
-		}
+    err = ioutil.WriteFile( pn.BasePath + PnodeConfigFilename, buf, pn.config.DefaultFileMode )
 
-	}
+    return err
 
-	var mu sync.RWMutex
-	var items = make(map[string][]byte)
-	go log.Printf("started server at %s", addr)
-	err := redcon.ListenAndServe(addr,
-		func(conn redcon.Conn, cmd redcon.Command) {
-			switch strings.ToLower(string(cmd.Args[0])) {
-			default:
-				conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
-			case "echo":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				conn.WriteBulk(cmd.Args[1])
-			case "detach":
-				hconn := conn.Detach()
-				log.Printf("connection has been detached")
-				go func() {
-					defer hconn.Close()
-					hconn.WriteString("OK")
-					hconn.Flush()
-				}()
-				return
-			case "ping":
-				conn.WriteString("PONG")
-			case "quit":
-				conn.WriteString("OK")
-				conn.Close()
-			case "set":
-				if len(cmd.Args) != 3 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				mu.Lock()
-				items[string(cmd.Args[1])] = cmd.Args[2]
-				mu.Unlock()
-				conn.WriteString("OK")
-			case "get":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				mu.RLock()
-				val, ok := items[string(cmd.Args[1])]
-				mu.RUnlock()
-				if !ok {
-					conn.WriteNull()
-				} else {
-					conn.WriteBulk(val)
-				}
-			case "del":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				mu.Lock()
-				_, ok := items[string(cmd.Args[1])]
-				delete(items, string(cmd.Args[1]))
-				mu.Unlock()
-				if !ok {
-					conn.WriteInt(0)
-				} else {
-					conn.WriteInt(1)
-				}
-			}
-		},
-		func(conn redcon.Conn) bool {
-			// use this function to accept or deny the connection.
-			// log.Printf("accept: %s", conn.RemoteAddr())
-			return true
-		},
-		func(conn redcon.Conn, err error) {
-			// this is called when the connection has been closed
-			// log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
-		},
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
+}
+
+
+
+
+
+func (pn *PNode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
+
+    pn.config.RepoList = append( pn.config.RepoList, CommunutyRepoInfo{} )
+
+    info := &pn.config.RepoList[len(pn.config.RepoList)-1]
+    
+    {
+        info.CommunityName = inCommunityName
+        info.CommunityID = make( []byte, plan.IdentityAddrSz )
+        rand.Read( info.CommunityID )
+
+        {
+            var b strings.Builder
+            remapCharset := map[rune]rune{
+                ' ':  '-',
+                '.':  '-',
+                '?':  '-',
+                '\\': '+',
+                '/':  '+',
+                '&':  '+',
+            }
+    
+            for _, r := range strings.ToLower( info.CommunityName ) {
+                if replace, ok := remapCharset[r]; ok {
+                    if replace != 0 {
+                        b.WriteRune(replace)
+                    }
+                } else {
+                    b.WriteRune(r)
+                }
+            }
+    
+    
+            info.RepoPath = b.String() + "-" + hex.EncodeToString( info.CommunityID[:4] ) + "/"
+            info.ChannelPath = info.RepoPath + "ch/"
+        }
+
+    }
+
+    CR := pn.AllocCommunityRepo( info )
+
+    pn.RegisterCommunityRepo( CR )
+
+    pn.WriteConfigOut()
+
+    return CR
+
+}
+
+
+// ONLY Uused for below call -- delete once network connects are setup
+var gPNode *PNode
+
+func PNode_StartFakeSession( inCommunityName string, inSession ClientSession ) {
+
+    for _, CR := range gPNode.CRbyID {
+
+        if ( CR.Info.CommunityName == inCommunityName ) {
+            CR.activeSession = inSession
+        
+            gPNode.activeSessions = append( gPNode.activeSessions, inSession )
+            inSession.OnLogin( CR )
+
+            return
+        }
+
+
+    }
+
+}
+
+
+func PNode_main() {
+    var pn PNode
+
+    dataDir     := flag.String( "datadir",      "",         "Directory for config files, keystore, and communuity repos" )
+    init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh pnode" )
+
+    flag.Parse()
+
+    // Set config defaults
+    pn.BasePath = *dataDir //"/Users/aomeara/_pnode/"
+    pn.config.DefaultFileMode  = os.FileMode(0775)
+    pn.CRbyID = make( map[plan.CommunityID]*CommunityRepo )
+   
+    if ( *init ) {
+        pn.InitOnDisk()
+    }
+
+
+    err := pn.LoadConfigIn()
+    if err != nil {
+        panic( err )
+    }
+
+    // TEST Make new community repo
+    if ( false ) {
+        pn.CreateNewCommunity( "PLAN Foundation" )
+    }
+
+    // TODO: for each community repo a pnode is hosting, open up a port that serves clients.
+    // Until then, each communty repo is started manually
+    for _, CR := range pn.CRbyID {
+        go CR.EntryProcessor()
+    }
+
+    /*
+    {
+        socket, err := net.Listen( "tcp", ":8080" )
+        if err != nil {
+            // handle error
+        }
+        for {
+            conn, err := socket.Accept()
+            if err != nil {
+                // handle error
+            }
+            go handleConnection( conn )
+        }
+    }*/
+
+    // TODO: delete this once network connections are up
+    gPNode = &pn
+
+    // Wait forever
+    c := make(chan struct{})
+    <-c
+
 }
