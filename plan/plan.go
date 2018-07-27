@@ -6,7 +6,7 @@ import (
     "fmt"
     //"encoding/base64"
 
-	"github.com/ethereum/go-ethereum/crypto/sha3"
+    "github.com/ethereum/go-ethereum/crypto/sha3"
 
 )
 
@@ -39,7 +39,7 @@ func Errorf( inCode int32, inFormat string, inArgs ...interface{} ) error {
 }
 
 func (e *PError) Error() string {
-	return fmt.Sprintf( "%s {code=%d}", e.msg,e.code )
+    return fmt.Sprintf( "%s {code=%d}", e.msg,e.code )
 }
 
 
@@ -60,7 +60,6 @@ type IdentityPublicKey      [32]byte
 // IdentityAddr the rightmost bytes of IdentityPublicKey
 type IdentityAddr           [IdentityAddrSz]byte
 
-
 // PDIEntrySig holds a final signature of a PDI entry, veryifying the author's private key was used to sign the entry
 type PDIEntrySig            [20]byte
 
@@ -68,7 +67,7 @@ type PDIEntrySig            [20]byte
 type PDIEntryHash           [20]byte
 
 // ChannelID identifies a speicifc PLAN channel where PDI entries are posted to.
-type ChannelID              [16]byte
+type ChannelID              [20]byte
 
 // CommunityKey is an symmetric key that allows community data to be encrypted/decrypted.
 type CommunityKey           [32]byte
@@ -80,30 +79,45 @@ type EncryptedChannelKey    []byte
 
 var (
 
-    // CommunityAdminAccessChannel is the channel ID of the community's root access channel.  When a new community is set up, 
-    //    each community admin is set to be owner of this channel.  Otherwise, there would be no way to create new channels
-    //    since creating a new channel requires an access channel to be specified.
+    // RootAccessChannel is the community's root access-level channel, meaning this channel effectively
+    //    specifies which community members are "community admins".  All other channels and access channels 
+    //    are ultimately controlled by the community members listed in this root channel.  This means
+    //    the hierarchy of access channels is rooted in this channel.    
+    // Note that the parent access channel is set to itself by default.
     RootAccessChannel           = ChannelID { 
+                                    0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 1, 
                                 }
 
-    // MemberRegistryChannel is the community's member registry.  Each entry contains:
-    //     1) The member by public ID (i.e. public key).
-    //     2) The ChannelID of the member's /plan/member channel.
-    // This is how nodes reliabily obtain other members' public key to verify signatures, etc.
+
+    // MemberRegistryChannel is the community's master (community-public) member registry.  Each entry specifies a
+    //    each community member or group's community ID, latest public key, and resource quotas.  This allows each of the
+    //    community's pnodes to verify member signatures and enable the passing of secrets to other members or groups
+    //    via asymmetric encryption. Naturally, this channel is controlled by an access channel that is controlled only
+    //    by community admins and is set to RootAccessChannel by default.  Since each entry in this channel represents
+    //    an official community record (that only a community admin can edit), entries can also contain additional
+    //    information desired that community admins wish (or require) to be publicly available (and unforgeable). 
+    // Note how a member's ID can always be remapped to any number of deterministically generated channel IDs.  For 
+    //    example, by convention, a member's /plan/member "home channel" is implicitly specified by virtue of knowing
+    //    a member's community member ID (since a community member ID never changes)
     MemberRegistryChannel       = ChannelID { 
+                                    0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 2, 
                                 }
 
-    // CoommunityAnnouceChannel is where community members publish the existence of newly available channels.
-    // By default, only community admins can announce channels. 
-     CoommunityAnnouceChannel   = ChannelID { 
+
+    // ChannelCatalogChannel is where the existence of community-public channels is communicated to other community members.
+    // By default, only community admins can post to this channel, ensuring community admins decide what channels are readily
+    //     visible to other community though access can be granted to other select users.  This channel allows users to find
+    //     any community-public channel, regardless if the channel has been linked in a public workspace.
+    ChannelCatalogChannel       = ChannelID { 
+                                    0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 0,
                                     0, 0, 0, 0,
@@ -226,7 +240,7 @@ community-public permissions.  This is fine since only PLAN clients with a
 And awaaaaay we go!  
 */
 type PDIEntryCrypt struct {
-	Sig                     PDIEntrySig         // Signature of PDIEntry.Hash (signed by PDIEntry.Header.Author)
+    Sig                     PDIEntrySig         // Signature of PDIEntry.Hash (signed by PDIEntry.Header.Author)
     Hash                    *PDIEntryHash       // IF set, set to self.ComputeHash()
 
     Info                    PDIEntryInfo        // Entry type info, Allows PDIEntry accessors to apply the correct hash and crypto functions
@@ -246,7 +260,7 @@ type PDIEntry struct {
     Header                  *PDIEntryHeader
 
     BodyBuf                 []byte              // Serialized representation of PDIEntry.Body (decrypted from PDIEntryCrypt.Body)
-	Body                    *PDIEntryBody
+    Body                    *PDIEntryBody
 
 }
 
@@ -257,8 +271,8 @@ type PDIEntryHeader struct {
     Time                    Time
     Verb                    PDIEntryVerb        // PDI command/verb
     ChannelID               ChannelID           // The channel id this entry is posted to.
-	Author                  IdentityAddr        // Creator of this entry (and signer of .Sig)
-	AccessChannelID         ChannelID           // Identifies the permissions channel (an access control implemenation) this entry was encrypted with 
+    Author                  IdentityAddr        // Creator of this entry (and signer of .Sig)
+    AccessChannelID         ChannelID           // Identifies the permissions channel (an access control implemenation) this entry was encrypted with 
     AccessChannelRev        uint32              // Specifies what identifying major rev of the access channel was in effect when this entry was authored
     Params                  map[string]string   // Additional param list (PDI-level key-value params) -- PDI_param_*: <value>
 }
@@ -267,15 +281,15 @@ type PDIEntryHeader struct {
 // PDIEntryBody is the decrypted and deserialized form of PDIEntryCrypt.Body and an abstract data container.
 type PDIEntryBody struct {
     Nonce                   uint32              // Prevents replay attacks -- should be incremented by the client each entry sealed.
-	BodyParts               []PDIBodyPart       // Zero or more data sections -- e.g. .parts[0] is a serialized json param list and .parts[1] is a blob of rich text (rtf).
+    BodyParts               []PDIBodyPart       // Zero or more data sections -- e.g. .parts[0] is a serialized json param list and .parts[1] is a blob of rich text (rtf).
 }
 
 
 // PDIBodyPart is one of one or more sequential parts of a PDIEntryBody.PDIBodyPart.
 // Each part has its own multistream-codec style description header ("/protocol/sub-protocol")
 type PDIBodyPart struct {
-	Header                  string              // <multistream-codec-header> -- Human-readable, UTF8 string that describes .body (e.g. "/json/rpc")
-	Body                    []byte              // Arbitrary client binary data conforming to .header
+    Header                  string              // <multistream-codec-header> -- Human-readable, UTF8 string that describes .body (e.g. "/json/rpc")
+    Body                    []byte              // Arbitrary client binary data conforming to .header
 }
 
 

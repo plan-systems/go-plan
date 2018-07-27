@@ -2,7 +2,7 @@
 package main
 
 import (
-	"time"
+    "time"
     //"strings"
     //"encoding/base64"
     "encoding/hex"
@@ -131,7 +131,7 @@ func main() {
     PNode_StartFakeSession( "PLAN Foundation", &session )
 
 
-    chID := session.MakeChannel( "yoyo" )
+    //chID := session.MakeChannel( "yoyo" )
 
     //for session := range gSessionsReady {
 
@@ -163,17 +163,17 @@ func (CR *CommunityRepo) ( inEntry *plan.PDIEntryCrypt ) {
 
 }
 
-	{
+    {
 
-		os.Remove("./foo.db")
+        os.Remove("./foo.db")
 
-		db, err := sql.Open("sqlite3", "./foo.db")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer db.Close()
+        db, err := sql.Open("sqlite3", "./foo.db")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer db.Close()
 
-		sqlStmt := `
+        sqlStmt := `
         CREATE TABLE IF NOT EXISTS ChannelEntries (
             timestamp       BIGINT,
             hashname        TINYTEXT,
@@ -183,169 +183,169 @@ func (CR *CommunityRepo) ( inEntry *plan.PDIEntryCrypt ) {
         CREATE INDEX IF NOT EXISTS EntryLookup ON ChannelEntries(timestamp);
         `
 
-		_, err = db.Exec(sqlStmt)
-		if err != nil {
-			log.Printf("%q: %s\n", err, sqlStmt)
-			return
-		}
+        _, err = db.Exec(sqlStmt)
+        if err != nil {
+            log.Printf("%q: %s\n", err, sqlStmt)
+            return
+        }
 
-		tx, err := db.Begin()
-		if err != nil {
-			log.Fatal(err)
-		}
-		stmt, err := tx.Prepare("insert into foo(id, name) values(?, ?)")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		for i := 0; i < 100; i++ {
-			_, err = stmt.Exec(i, fmt.Sprintf("こんにちわ世界%03d", i))
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-		tx.Commit()
+        tx, err := db.Begin()
+        if err != nil {
+            log.Fatal(err)
+        }
+        stmt, err := tx.Prepare("insert into foo(id, name) values(?, ?)")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer stmt.Close()
+        for i := 0; i < 100; i++ {
+            _, err = stmt.Exec(i, fmt.Sprintf("こんにちわ世界%03d", i))
+            if err != nil {
+                log.Fatal(err)
+            }
+        }
+        tx.Commit()
 
-		rows, err := db.Query("select id, name from foo")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id int
-			var name string
-			err = rows.Scan(&id, &name)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println(id, name)
-		}
-		err = rows.Err()
-		if err != nil {
-			log.Fatal(err)
-		}
+        rows, err := db.Query("select id, name from foo")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer rows.Close()
+        for rows.Next() {
+            var id int
+            var name string
+            err = rows.Scan(&id, &name)
+            if err != nil {
+                log.Fatal(err)
+            }
+            fmt.Println(id, name)
+        }
+        err = rows.Err()
+        if err != nil {
+            log.Fatal(err)
+        }
 
-		stmt, err = db.Prepare("select name from foo where id = ?")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		var name string
-		err = stmt.QueryRow("3").Scan(&name)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(name)
+        stmt, err = db.Prepare("select name from foo where id = ?")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer stmt.Close()
+        var name string
+        err = stmt.QueryRow("3").Scan(&name)
+        if err != nil {
+            log.Fatal(err)
+        }
+        fmt.Println(name)
 
-		_, err = db.Exec("delete from foo")
-		if err != nil {
-			log.Fatal(err)
-		}
+        _, err = db.Exec("delete from foo")
+        if err != nil {
+            log.Fatal(err)
+        }
 
-		_, err = db.Exec("insert into foo(id, name) values(1, 'foo'), (2, 'bar'), (3, 'baz')")
-		if err != nil {
-			log.Fatal(err)
-		}
+        _, err = db.Exec("insert into foo(id, name) values(1, 'foo'), (2, 'bar'), (3, 'baz')")
+        if err != nil {
+            log.Fatal(err)
+        }
 
-		rows, err = db.Query("select id, name from foo")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id int
-			var name string
-			err = rows.Scan(&id, &name)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println(id, name)
-		}
-		err = rows.Err()
-		if err != nil {
-			log.Fatal(err)
-		}
+        rows, err = db.Query("select id, name from foo")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer rows.Close()
+        for rows.Next() {
+            var id int
+            var name string
+            err = rows.Scan(&id, &name)
+            if err != nil {
+                log.Fatal(err)
+            }
+            fmt.Println(id, name)
+        }
+        err = rows.Err()
+        if err != nil {
+            log.Fatal(err)
+        }
 
-	}
+    }
 
-	var mu sync.RWMutex
-	var items = make(map[string][]byte)
-	go log.Printf("started server at %s", addr)
-	err := redcon.ListenAndServe(addr,
-		func(conn redcon.Conn, cmd redcon.Command) {
-			switch strings.ToLower(string(cmd.Args[0])) {
-			default:
-				conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
-			case "echo":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				conn.WriteBulk(cmd.Args[1])
-			case "detach":
-				hconn := conn.Detach()
-				log.Printf("connection has been detached")
-				go func() {
-					defer hconn.Close()
-					hconn.WriteString("OK")
-					hconn.Flush()
-				}()
-				return
-			case "ping":
-				conn.WriteString("PONG")
-			case "quit":
-				conn.WriteString("OK")
-				conn.Close()
-			case "set":
-				if len(cmd.Args) != 3 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				mu.Lock()
-				items[string(cmd.Args[1])] = cmd.Args[2]
-				mu.Unlock()
-				conn.WriteString("OK")
-			case "get":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				mu.RLock()
-				val, ok := items[string(cmd.Args[1])]
-				mu.RUnlock()
-				if !ok {
-					conn.WriteNull()
-				} else {
-					conn.WriteBulk(val)
-				}
-			case "del":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				mu.Lock()
-				_, ok := items[string(cmd.Args[1])]
-				delete(items, string(cmd.Args[1]))
-				mu.Unlock()
-				if !ok {
-					conn.WriteInt(0)
-				} else {
-					conn.WriteInt(1)
-				}
-			}
-		},
-		func(conn redcon.Conn) bool {
-			// use this function to accept or deny the connection.
-			// log.Printf("accept: %s", conn.RemoteAddr())
-			return true
-		},
-		func(conn redcon.Conn, err error) {
-			// this is called when the connection has been closed
-			// log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
-		},
-	)
-	if err != nil {
-		log.Fatal(err)
-	}*/
+    var mu sync.RWMutex
+    var items = make(map[string][]byte)
+    go log.Printf("started server at %s", addr)
+    err := redcon.ListenAndServe(addr,
+        func(conn redcon.Conn, cmd redcon.Command) {
+            switch strings.ToLower(string(cmd.Args[0])) {
+            default:
+                conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
+            case "echo":
+                if len(cmd.Args) != 2 {
+                    conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+                    return
+                }
+                conn.WriteBulk(cmd.Args[1])
+            case "detach":
+                hconn := conn.Detach()
+                log.Printf("connection has been detached")
+                go func() {
+                    defer hconn.Close()
+                    hconn.WriteString("OK")
+                    hconn.Flush()
+                }()
+                return
+            case "ping":
+                conn.WriteString("PONG")
+            case "quit":
+                conn.WriteString("OK")
+                conn.Close()
+            case "set":
+                if len(cmd.Args) != 3 {
+                    conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+                    return
+                }
+                mu.Lock()
+                items[string(cmd.Args[1])] = cmd.Args[2]
+                mu.Unlock()
+                conn.WriteString("OK")
+            case "get":
+                if len(cmd.Args) != 2 {
+                    conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+                    return
+                }
+                mu.RLock()
+                val, ok := items[string(cmd.Args[1])]
+                mu.RUnlock()
+                if !ok {
+                    conn.WriteNull()
+                } else {
+                    conn.WriteBulk(val)
+                }
+            case "del":
+                if len(cmd.Args) != 2 {
+                    conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+                    return
+                }
+                mu.Lock()
+                _, ok := items[string(cmd.Args[1])]
+                delete(items, string(cmd.Args[1]))
+                mu.Unlock()
+                if !ok {
+                    conn.WriteInt(0)
+                } else {
+                    conn.WriteInt(1)
+                }
+            }
+        },
+        func(conn redcon.Conn) bool {
+            // use this function to accept or deny the connection.
+            // log.Printf("accept: %s", conn.RemoteAddr())
+            return true
+        },
+        func(conn redcon.Conn, err error) {
+            // this is called when the connection has been closed
+            // log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
+        },
+    )
+    if err != nil {
+        log.Fatal(err)
+    }*/
 }
 

@@ -3,14 +3,14 @@
 package main
 
 import (
-	"database/sql"
+    "database/sql"
     //"fmt"
     "flag"
-	"log"
+    "log"
     "os"
     "io"
     "io/ioutil"
-	"strings"
+    "strings"
     "sync"
     "time"
     //"sort"
@@ -22,11 +22,11 @@ import (
 
     "github.com/plan-tools/go-plan/plan"
 
-	/*
-	   multihash       "github.com/multiformats/go-multihash"
-	   multibase       "github.com/multiformats/go-multibase"
-	   multistream     "github.com/multiformats/go-multistream"
-	   multicodec      "github.com/multiformats/go-multicodec"
+    /*
+       multihash       "github.com/multiformats/go-multihash"
+       multibase       "github.com/multiformats/go-multibase"
+       multistream     "github.com/multiformats/go-multistream"
+       multicodec      "github.com/multiformats/go-multicodec"
     */
     
     _ "github.com/mattn/go-sqlite3"
@@ -37,7 +37,7 @@ import (
 
     //"github.com/stretchr/testify/assert"
 
-	"github.com/ethereum/go-ethereum/rlp"
+    "github.com/ethereum/go-ethereum/rlp"
     "github.com/ethereum/go-ethereum/common/hexutil"
 
 )
@@ -53,16 +53,16 @@ const (
 
 
 const (
-	noErr = 0
+    noErr = 0
 
-	// The signature on the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
-	InvalidEntrySignature = 5000 + iota
+    // The signature on the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
+    InvalidEntrySignature = 5000 + iota
 
-	// The given author was not found in the given access control list.
-	AuthorNotFound = 5001
+    // The given author was not found in the given access control list.
+    AuthorNotFound = 5001
 
-	// The given access control reference was not found
-	AccessChannelNotFound = 5002
+    // The given access control reference was not found
+    AccessChannelNotFound = 5002
 
     InvalidAccessChannel
 
@@ -74,13 +74,13 @@ const (
 
     ChannelAlreadyExistsErr
 
-	// The given entry's author does not have write permission to the associated channel
-	AuthorLacksWritePermission = 5003
+    // The given entry's author does not have write permission to the associated channel
+    AuthorLacksWritePermission = 5003
 
-	// The the entry's encrypted data failed to decode using the author's verification key.
-	AuthorAuthFailed = 5004
+    // The the entry's encrypted data failed to decode using the author's verification key.
+    AuthorAuthFailed = 5004
 
-	// The given timestamp is either excessively in the future or past
+    // The given timestamp is either excessively in the future or past
     BadTimestampErr = 5005
     
 
@@ -119,14 +119,14 @@ type ClientSession interface {
 type ChannelStoreLookup struct {
     sync.RWMutex
 
-	table                   map[plan.ChannelID]*ChannelStore
+    table                   map[plan.ChannelID]*ChannelStore
 }
 
 
 
 
 type CommunutyRepoInfo struct {
-	CommunityName           string                  `json:"communityName"`
+    CommunityName           string                  `json:"communityName"`
     CommunityID             hexutil.Bytes           `json:"communityID"`
     RepoPath                string                  `json:"repoPath"`
     ChannelPath             string                  `json:"channelPath"`
@@ -545,7 +545,7 @@ type ChannelStore struct {
     // ChannelActionLog is an ordered list of ChannelAction executed on this channel, starting from when the channel was first created,
     //    all the way up to the present moment.  This log allows a pnode to verify that a given post to a channel is citing
     //    a valid, available, and legal access channel (given an author and timestamp)
-	ChannelAdmin             ChannelAdmin
+    ChannelAdmin             ChannelAdmin
 
     db                      *sql.DB
     select_timeMatch        *sql.Stmt
@@ -695,9 +695,9 @@ func (CS *ChannelStore) OpenIndexDB() error {
 
         // TODO: Use file pool that auto-flushes and closes files after X seconds or as file access goes past N txns, etc.
         CS.db, err = sql.Open( "sqlite3", filename )
-		if err != nil {
+        if err != nil {
             log.Printf( "Error opening channel index db '%s'\n", filename )
-			return err
+            return err
         }
     
         // Note that we don't use a hash index since we have EntryLookupByTime.
@@ -716,26 +716,26 @@ func (CS *ChannelStore) OpenIndexDB() error {
         );
         CREATE INDEX IF NOT EXISTS EntryLookup ON ChannelEntries(tsAuthor ASC);
         `
-		_, err = CS.db.Exec( sqlStmt )
-		if err != nil {
+        _, err = CS.db.Exec( sqlStmt )
+        if err != nil {
             log.Printf( "Error bootstrapping channel db '%s'\n", filename )
             log.Fatal( err )
-			return err
+            return err
         }
         
         // TODO: ANALYZE
         CS.select_timeMatch, err = CS.db.Prepare( "SELECT rowid FROM ChannelEntries WHERE tsAuthor = ?" )
-		if err != nil {
-			log.Fatal(err)
+        if err != nil {
+            log.Fatal(err)
         }
         CS.select_hashMatch, err = CS.db.Prepare( "SELECT 55 FROM ChannelEntries WHERE rowid = ? AND entryHash = ?" )
-		if err != nil {
-			log.Fatal(err)
+        if err != nil {
+            log.Fatal(err)
         }
       
         CS.insert_entry, err = CS.db.Prepare( "INSERT INTO ChannelEntries( tsAuthor, tsConsensus, tsRecvDelay, entryHash, tome_entry_pos, tome_entry_len ) VALUES (?,?,?,?,?,?)" )
-		if err != nil {
-			log.Fatal(err)
+        if err != nil {
+            log.Fatal(err)
         }
         
     }
