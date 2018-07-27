@@ -46,7 +46,8 @@ func (e *PError) Error() string {
 
 const (
 
-    // IdentityAddrSz is the numbewr of bytes in most PLAN addresses and public IDs.  It's the right-most bytes of a longer public key 
+    // IdentityAddrSz is the numbewr of bytes in most PLAN addresses and public IDs.  It's the right-most bytes of a longer public key.
+    // Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
     IdentityAddrSz = 20
 )
 
@@ -215,7 +216,7 @@ PDIEntryCrypt is the public "wire" format for PDI entrues.  It is what it sent t
 such as Ethereum and NEM.
 
 A PDI entry has two encrypted segements, its header and body segment.  The PDIEntryCrypt.Header is encrypted using a community-public key, 
-specified by PDIEntryCrypt.CommunityKeyId.  This ensures non-community members (i.e. public snoops) can't see any entry params,
+specified by PDIEntryCrypt.CommunityKeyID.  This ensures non-community members (i.e. public snoops) can't see any entry params,
 data, or even to what community channel the entry is being post to.  PDIEntryCrypt.Body is encrypted by the same community key as the header *or* 
 by the key specified via PDIEntryHeader.Author and PDIEntry.AccessChannelID (all via the client's Secure Key Interface).  In sum,
 PDIEntry.AccessChannelID specifies a decryption flow through the user's private, compartmentalized keychain.
@@ -246,7 +247,7 @@ type PDIEntryCrypt struct {
     Info                    PDIEntryInfo        // Entry type info, Allows PDIEntry accessors to apply the correct hash and crypto functions
     CommunityKeyID          CommunityKeyID
 
-    HeaderCrypt             []byte              // Encrypted using a community key, referenced via .CommunityKeyId
+    HeaderCrypt             []byte              // Encrypted using a community key, referenced via .CommunityKeyID
     BodyCrypt               []byte              // Encrypted using a community key or a user private key (based on PDIEntry.Header.AccessChannelID)
 
 }
@@ -272,7 +273,7 @@ type PDIEntryHeader struct {
     Verb                    PDIEntryVerb        // PDI command/verb
     ChannelID               ChannelID           // The channel id this entry is posted to.
     Author                  IdentityAddr        // Creator of this entry (and signer of .Sig)
-    AccessChannelID         ChannelID           // Identifies the permissions channel (an access control implemenation) this entry was encrypted with 
+    AccessChannelID         ChannelID           // Specifies the permissions channel (an access control implemenation) this entry was encrypted with 
     AccessChannelRev        uint32              // Specifies what identifying major rev of the access channel was in effect when this entry was authored
     Params                  map[string]string   // Additional param list (PDI-level key-value params) -- PDI_param_*: <value>
 }
@@ -341,10 +342,7 @@ func ( inEntry *PDIEntryCrypt ) ComputeHash( outHash *PDIEntryHash ) {
 // ChannelProperties specifies req'd params for all channels and are community-public. 
 // Note that some params are immutable once they are set in the channel genesis block (e.g. IsAccessChannel and EntriesAreFinal)
 type ChannelProperties struct {
-
-    // Specifies when this channel was created
-    TimeCreated             Time                            `json:"inEffect"`                    
-
+                  
     // Who issued this set of channel properties
     Author                  IdentityAddr                    `json:"author"`           
 
@@ -360,10 +358,6 @@ type ChannelProperties struct {
     // This channel's ID
     ChannelID               ChannelID                       `json:"chID"`  
 
-    // <<multistream>-inspired description of this channel's contents.  This allows the PLAN client to accurately process, interpret, and handle entry
-    //    entry data blobs (PDIEntry.Body -- i.e. PDIEntryBody).  example:  "/plan/talk/v2"
-    Protocol                string                          `json:"protocol"`  
-
     // Specifies an owning access channel that asserts domain over this channel
     OwningAccessChannelID   AccessChannelID                 `json:"acID"`  
 
@@ -376,9 +370,14 @@ type ChannelProperties struct {
 }
 
 /*
-// ChannelProperties specifies req'd params for all channels and are community-public. 
-// Note that some params are immutable once they are set in the channel genesis block (e.g. IsAccessChannel and EntriesAreFinal)
 type ChannelInfo struct {
+
+    // Specifies when this channel was created
+    TimeCreated             Time                            `json:"inEffect"`  
+
+    // <<multistream>-inspired description of this channel's contents.  This allows the PLAN client to accurately process, interpret, and handle entry
+    //    entry data blobs (PDIEntry.Body -- i.e. PDIEntryBody).  example:  "/plan/talk/v2"
+    Protocol                string                          `json:"protocol"`  
 
     // What is the title of this channel presented to pariticipants?
     ChannelTitle            string                          `json:"chTitle"`  

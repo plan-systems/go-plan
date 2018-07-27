@@ -485,7 +485,7 @@ func (CR *CommunityRepo) VerifySig( inEntry *plan.PDIEntryCrypt ) error {
     //var err error
 
     
-    // For next step, see:
+    // For next steps, see:
     // https://github.com/ethereum/go-ethereum/blob/master/crypto/crypto_test.go
     // https://github.com/ethereum/go-ethereum/tree/master/crypto
 
