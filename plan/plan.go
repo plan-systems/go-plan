@@ -62,8 +62,12 @@ type ChannelID [20]byte
 // CommunityKey is an symmetric key that allows community data to be encrypted/decrypted.
 type CommunityKey [32]byte
 
-// EncryptedChannelKey is an ecrypted symmetric key used by PLAN clients to encode/decode PDI entries posted to private (encrypted) channels.
+// EncryptedChannelKey is an encrypted symmetric key used by PLAN clients to encode/decode PDI entries posted to private (encrypted) channels.
 type EncryptedChannelKey []byte
+
+// Nonce is a number used once globally as part of both symmetric and
+// public key encryption
+type Nonce [24]byte
 
 var (
 
@@ -237,19 +241,19 @@ type PDIEntry struct {
 
 // PDIEntryHeader is a container for community-public info about this channel entry.PDIEntryHeader
 type PDIEntryHeader struct {
-	Nonce            uint64 // Prevents replay attacks -- should be incremented by the client each entry sealed.
+	Nonce            Nonce // Prevents replay attacks -- should be unique for each entry sealed
 	Time             Time
 	Verb             PDIEntryVerb      // PDI command/verb
 	ChannelID        ChannelID         // The channel id this entry is posted to.
 	Author           IdentityAddr      // Creator of this entry (and signer of .Sig)
-	AccessChannelID  ChannelID         // Specifies the permissions channel (an access control implemenation) this entry was encrypted with
+	AccessChannelID  AccessChannelID   // Specifies the permissions channel (an access control implemenation) this entry was encrypted with
 	AccessChannelRev uint32            // Specifies what identifying major rev of the access channel was in effect when this entry was authored
 	Params           map[string]string // Additional param list (PDI-level key-value params) -- PDI_param_*: <value>
 }
 
 // PDIEntryBody is the decrypted and deserialized form of PDIEntryCrypt.Body and an abstract data container.
 type PDIEntryBody struct {
-	Nonce     uint32        // Prevents replay attacks -- should be incremented by the client each entry sealed.
+	Nonce     Nonce         // Prevents replay attacks -- should be unique for each entry sealed
 	BodyParts []PDIBodyPart // Zero or more data sections -- e.g. .parts[0] is a serialized json param list and .parts[1] is a blob of rich text (rtf).
 }
 
@@ -318,7 +322,7 @@ type ChannelProperties struct {
 
 	// Specifies which major revision number of the owning access channel was in effect when this entry was authored.
 	// In general, a pnode won't insert/approve of a PDI entry until/unless the access channel revisions match.
-	OwningAccessChannelRev int32 `json:"acRev"`
+	OwningAccessChannelRev uint32 `json:"acRev"`
 
 	// Complete set of channel params
 	Params map[string]interface{} `json:"params"`
