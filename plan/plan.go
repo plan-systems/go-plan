@@ -54,7 +54,7 @@ type IdentityAddr [IdentityAddrSz]byte
 type PDIEntrySig [20]byte
 
 // PDIEntryHash is a hash digest of a PDI entry.
-type PDIEntryHash [20]byte
+type PDIEntryHash [32]byte
 
 // ChannelID identifies a speicifc PLAN channel where PDI entries are posted to.
 type ChannelID [20]byte
@@ -294,8 +294,8 @@ func (inEntry *PDIEntryCrypt) ComputeHash(outHash *PDIEntryHash) {
 	hw.Write(inEntry.HeaderCrypt)
 	hw.Write(inEntry.BodyCrypt)
 
-	hw.Sum(outHash[:0])
-
+	out := hw.Sum(outHash[:0])
+	copy(outHash[:32], out[:])
 }
 
 // ChannelProperties specifies req'd params for all channels and are community-public.
