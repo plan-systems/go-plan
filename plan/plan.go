@@ -51,7 +51,7 @@ type IdentityPublicKey [32]byte
 type IdentityAddr [IdentityAddrSz]byte
 
 // PDIEntrySig holds a final signature of a PDI entry, veryifying the author's private key was used to sign the entry
-type PDIEntrySig [20]byte
+type PDIEntrySig [64]byte
 
 // PDIEntryHash is a hash digest of a PDI entry.
 type PDIEntryHash [32]byte
