@@ -47,11 +47,30 @@ type CommunityID [IdentityAddrSz]byte
 // IdentityPublicKey is the public key of a person, group, or sub community inside a PLAN commiunity.
 type IdentityPublicKey [32]byte
 
+func NewIdentityPublicKey(arr *[32]byte) IdentityPublicKey {
+	k := IdentityPublicKey(*arr)
+	return k
+}
+
+// ToArray is a helper function that correctly casts an IdentityPublicKey
+// to an array pointer useful for cryptographic functions.
+func (k *IdentityPublicKey) ToArray() *[32]byte {
+	arr := [32]byte(*k)
+	return &arr
+}
+
 // IdentityAddr the rightmost bytes of IdentityPublicKey
 type IdentityAddr [IdentityAddrSz]byte
 
 // PDIEntrySig holds a final signature of a PDI entry, veryifying the author's private key was used to sign the entry
 type PDIEntrySig [64]byte
+
+// TODO: we'll want to make this a method on plan.PDIEntrySig
+func NewPDIEntrySig(arr []byte) PDIEntrySig {
+	sig := PDIEntrySig{}
+	copy(sig[:], arr[:64])
+	return sig
+}
 
 // PDIEntryHash is a hash digest of a PDI entry.
 type PDIEntryHash [32]byte
@@ -61,6 +80,13 @@ type ChannelID [20]byte
 
 // CommunityKey is an symmetric key that allows community data to be encrypted/decrypted.
 type CommunityKey [32]byte
+
+// ToArray is a helper function that correctly casts a CommunityKey
+// to an array pointer useful for cryptographic functions.
+func (k *CommunityKey) ToArray() *[32]byte {
+	arr := [32]byte(*k)
+	return &arr
+}
 
 // EncryptedChannelKey is an encrypted symmetric key used by PLAN clients to encode/decode PDI entries posted to private (encrypted) channels.
 type EncryptedChannelKey []byte
