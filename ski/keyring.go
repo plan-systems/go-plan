@@ -40,20 +40,23 @@ func (kr *keyring) NewIdentity() (plan.IdentityPublicKey, plan.IdentityPublicKey
 
 	// store it in the keyring and return the public keys
 	kr.mux.Lock()
-	defer kr.mux.Unlock()
 	kr.signingKeys[signingPubKey] = signingPrivateKey
-	kr.encryptKeys[encryptPubKey] = encryptPrivateKey
+    kr.encryptKeys[encryptPubKey] = encryptPrivateKey
+    kr.mux.Unlock()
+
 	return encryptPubKey, signingPubKey
 }
 
-// GetSigningKey fetches the user's private signing key from the keychain for a
+// GetSigningKey fetches the d's private signing key from the keychain for a
 // specific public key, or an error if the key doesn't exist.
 func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
 	*[64]byte, error) {
-	var key *[64]byte
+    var key *[64]byte
+    
 	kr.mux.RLock()
-	defer kr.mux.RUnlock()
-	key, ok := kr.signingKeys[pubKey]
+    key, ok := kr.signingKeys[pubKey]
+    kr.mux.RUnlock()
+    
 	if !ok {
 		return key, plan.Errorf(-1,
 			"GetSigningKey: signing key %v does not exist", pubKey)
@@ -61,14 +64,16 @@ func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
 	return key, nil
 }
 
-// GetEncryptKey fetches the user's private encrypt key from the keychain,
+// GetEncryptKey fetches the d's private encrypt key from the keychain,
 // or an error if the key doesn't exist.
 func (kr *keyring) GetEncryptKey(pubKey plan.IdentityPublicKey) (
 	*[32]byte, error) {
-	var key *[32]byte
+    var key *[32]byte
+    
 	kr.mux.RLock()
-	defer kr.mux.RUnlock()
-	key, ok := kr.encryptKeys[pubKey]
+    key, ok := kr.encryptKeys[pubKey]
+    kr.mux.RUnlock()
+
 	if !ok {
 		return key, plan.Errorf(-1,
 			"GetEncryptKey: encrypt key %v does not exist", pubKey)
@@ -79,10 +84,11 @@ func (kr *keyring) GetEncryptKey(pubKey plan.IdentityPublicKey) (
 // Removes any instance of a key associated with the public key provided
 // from the keyring
 func (kr *keyring) InvalidateIdentity(key plan.IdentityPublicKey) {
+    
 	kr.mux.Lock()
-	defer kr.mux.Unlock()
 	delete(kr.signingKeys, key)
-	delete(kr.encryptKeys, key)
+    delete(kr.encryptKeys, key)
+    kr.mux.Unlock()
 }
 
 func generateEncryptionKey() (plan.IdentityPublicKey, *[32]byte) {
@@ -108,29 +114,35 @@ func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
 // NewCommunityKey generates a new community key, adds it to the keyring,
 // and returns the CommunityKeyID associated with that key.
 func (kr *keyring) NewCommunityKey() plan.CommunityKeyID {
-	kr.mux.Lock()
-	defer kr.mux.Unlock()
-	key, keyID := generateSymmetricKey()
-	kr.communityKeys[keyID] = key
+	
+    key, keyID := generateSymmetricKey()
+    
+    kr.mux.Lock()
+    kr.communityKeys[keyID] = key
+    kr.mux.Unlock()
+
 	return keyID
 }
 
 // InstallCommunityKey adds a new community key to the keychain
 func (kr *keyring) InstallCommunityKey(
 	keyID plan.CommunityKeyID, key plan.CommunityKey) {
+
 	kr.mux.Lock()
-	defer kr.mux.Unlock()
-	kr.communityKeys[keyID] = key
+    kr.communityKeys[keyID] = key
+    kr.mux.Unlock()
 }
 
 // GetCommunityKeyByID fetches the community key from the keychain for a
 // based on its ID, or an error if the key doesn't exist.
 func (kr *keyring) GetCommunityKeyByID(keyID plan.CommunityKeyID) (
 	plan.CommunityKey, error) {
-	var key plan.CommunityKey
+    var key plan.CommunityKey
+    
 	kr.mux.RLock()
-	defer kr.mux.RUnlock()
-	key, ok := kr.communityKeys[keyID]
+    key, ok := kr.communityKeys[keyID]
+    kr.mux.RUnlock()
+
 	if !ok {
 		return key, plan.Errorf(-1,
 			"GetCommunityKeyByID: community key %v does not exist", keyID)
