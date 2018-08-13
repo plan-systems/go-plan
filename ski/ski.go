@@ -45,12 +45,12 @@ func (ski *SKI) Vouch(
 ) ([]byte, error) {
 	communityKey, err := ski.keyring.GetCommunityKeyByID(communityKeyID)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	keyMsgBody := vouchMessage{KeyID: communityKeyID, Key: communityKey}
 	serializedBody, err := json.Marshal(keyMsgBody)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
     }
 
 
@@ -67,7 +67,7 @@ func (ski *SKI) Vouch(
 	// TODO: is there a 2nd codec here we need to somehow specify?
 	bodyData, err := json.Marshal(pdiMsgBody)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	return ski.EncryptFor(senderPubKey, bodyData, recvPubKey)
 }
@@ -114,7 +114,7 @@ func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 	if err != nil {
 		return plan.PDIEntrySig{}, err
 	}
-	signed := sign.Sign([]byte{}, hash[:], privateKey)
+	signed := sign.Sign(nil, hash[:], privateKey)
 	return plan.NewPDIEntrySig(signed[:64]), nil
 }
 
@@ -128,7 +128,7 @@ func (ski *SKI) Encrypt(keyID plan.CommunityKeyID, msg []byte,
 	salt := <-salts
 	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 
     encrypted := secretbox.Seal(salt[:], msg, &salt, communityKey.ToArray())
@@ -151,7 +151,7 @@ func (ski *SKI) EncryptFor(
 	salt := <-salts
 	privateKey, err := ski.keyring.GetEncryptKey(senderPubKey)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	encrypted := box.Seal(salt[:], msg,
 		&salt, recvPubKey.ToArray(), privateKey)
@@ -174,7 +174,7 @@ func (ski *SKI) Verify(
 	var signedMsg []byte
 	signedMsg = append(signedMsg, sig[:]...)
 	signedMsg = append(signedMsg, hash[:]...)
-	verified, ok := sign.Open([]byte{}, signedMsg[:], pubKey.ToArray())
+	verified, ok := sign.Open(nil, signedMsg[:], pubKey.ToArray())
 	return verified, ok
 }
 
@@ -186,7 +186,7 @@ func (ski *SKI) Decrypt(
 ) ([]byte, error) {
 	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	var salt [24]byte
 	copy(salt[:], encrypted[:24])
@@ -208,7 +208,7 @@ func (ski *SKI) DecryptFrom(
 ) ([]byte, error) {
 	privateKey, err := ski.keyring.GetEncryptKey(recvPubKey)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	var salt [24]byte
 	copy(salt[:], encrypted[:24])
