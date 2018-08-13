@@ -395,6 +395,7 @@ func (sig *PDIEntrySig) CopyFrom( inSig []byte ) {
 	copy( sig[:], inSig[:len(sig)] )
 }
 
+// NewPDIEntrySig is a convenience function to create a PDIEntrySig from an existing sig
 func NewPDIEntrySig( inBytes []byte ) PDIEntrySig {
 	sig := PDIEntrySig{}
 	copy(sig[:], inBytes[:64])
@@ -411,6 +412,7 @@ func (ckey *CommunityKey) ToArray() *[32]byte  {
 	return &arr
 }
 
+// NewIdentityPublicKey is a convenience function to create a IdentityPublicKey from an existing key
 func NewIdentityPublicKey(inBytes *[32]byte) IdentityPublicKey {
 	k := IdentityPublicKey(*inBytes)
 	return k
