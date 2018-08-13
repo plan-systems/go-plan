@@ -110,30 +110,30 @@ func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
 func (kr *keyring) NewCommunityKey() plan.CommunityKeyID {
 	kr.mux.Lock()
 	defer kr.mux.Unlock()
-	key, keyId := generateSymmetricKey()
-	kr.communityKeys[keyId] = key
-	return keyId
+	key, keyID := generateSymmetricKey()
+	kr.communityKeys[keyID] = key
+	return keyID
 }
 
 // InstallCommunityKey adds a new community key to the keychain
 func (kr *keyring) InstallCommunityKey(
-	keyId plan.CommunityKeyID, key plan.CommunityKey) {
+	keyID plan.CommunityKeyID, key plan.CommunityKey) {
 	kr.mux.Lock()
 	defer kr.mux.Unlock()
-	kr.communityKeys[keyId] = key
+	kr.communityKeys[keyID] = key
 }
 
 // GetCommunityKeyByID fetches the community key from the keychain for a
 // based on its ID, or an error if the key doesn't exist.
-func (kr *keyring) GetCommunityKeyByID(keyId plan.CommunityKeyID) (
+func (kr *keyring) GetCommunityKeyByID(keyID plan.CommunityKeyID) (
 	plan.CommunityKey, error) {
 	var key plan.CommunityKey
 	kr.mux.RLock()
 	defer kr.mux.RUnlock()
-	key, ok := kr.communityKeys[keyId]
+	key, ok := kr.communityKeys[keyID]
 	if !ok {
 		return key, plan.Errorf(-1,
-			"GetCommunityKeyByID: community key %v does not exist", keyId)
+			"GetCommunityKeyByID: community key %v does not exist", keyID)
 	}
 	return key, nil
 }
@@ -147,13 +147,13 @@ func generateSymmetricKey() ([32]byte, plan.CommunityKeyID) {
 	var key [32]byte
 	copy(key[:32], secret[:])
 
-	keyId := make([]byte, 16) // TODO: is this enough for uniqueness?
-	_, err = crypto_rand.Read(keyId)
+	keyID := make([]byte, 16) // TODO: is this enough for uniqueness?
+	_, err = crypto_rand.Read(keyID)
 	if err != nil {
 		panic(err) // TODO: unclear when we'd ever hit this?
 	}
-	var communityId plan.CommunityKeyID
-	copy(communityId[:16], keyId[:])
+	var communityID plan.CommunityKeyID
+	copy(communityID[:16], keyID[:])
 
-	return key, communityId
+	return key, communityID
 }

@@ -10,14 +10,14 @@ import (
 func TestSymmetricEncrypion(t *testing.T) {
 
 	ski, _, _ := setUpSKI(t)
-	keyId := ski.NewCommunityKey()
+	keyID := ski.NewCommunityKey()
 	clearIn := []byte("hello, world!")
 
-	encryptOut, err := ski.Encrypt(keyId, clearIn)
+	encryptOut, err := ski.Encrypt(keyID, clearIn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clearOut, err := ski.Decrypt(keyId, encryptOut)
+	clearOut, err := ski.Decrypt(keyID, encryptOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,9 +72,9 @@ func TestVouching(t *testing.T) {
 
 	senderSki, senderEncryptPubKey, _ := setUpSKI(t)
 	recvSki, recvEncryptPubKey, _ := setUpSKI(t)
-	keyId := senderSki.NewCommunityKey()
+	keyID := senderSki.NewCommunityKey()
 
-	msg, err := senderSki.Vouch(keyId, senderEncryptPubKey, recvEncryptPubKey)
+	msg, err := senderSki.Vouch(keyID, senderEncryptPubKey, recvEncryptPubKey)
 	if err != nil {
 		t.Fatal(err)
 	}

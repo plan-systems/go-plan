@@ -109,16 +109,16 @@ func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 // serialized PDIEntryBody or PDIEntryHeader. This is authenticated encryption
 // but the caller will follow this call with a call to Verify the PDIEntryHash
 // for validation.
-func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
+func (ski *SKI) Encrypt(keyID plan.CommunityKeyID, msg []byte,
 ) ([]byte, error) {
 	salt := <-salts
-	communityKey, err := ski.keyring.GetCommunityKeyByID(keyId)
+	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
 		return []byte{}, err
 	}
 
-	encrypted := secretbox.Seal(salt[:], msg,
-		&salt, communityKey.ToArray())
+    encrypted := secretbox.Seal(salt[:], msg, &salt, communityKey.ToArray())
+    
 	return encrypted, nil
 }
 
@@ -176,8 +176,7 @@ func (ski *SKI) Decrypt(
 	}
 	var salt [24]byte
 	copy(salt[:], encrypted[:24])
-	decrypted, ok := secretbox.Open(nil, encrypted[24:],
-		&salt, communityKey.ToArray())
+	decrypted, ok := secretbox.Open(nil, encrypted[24:], &salt, communityKey.ToArray())
 	if !ok {
 		return nil, plan.Error(
 			-1, "secretbox.Open failed but doesn't produce an error")
