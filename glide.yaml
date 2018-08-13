@@ -1,0 +1,9 @@
+package: github.com/plan-tools/go-plan
+import:
+- package: github.com/ethereum/go-ethereum/common/hexutil
+- package: github.com/ethereum/go-ethereum/crypto/sha3
+- package: github.com/ethereum/go-ethereum/rlp
+- package: github.com/mattn/go-sqlite3
+- package: golang.org/x/crypto/nacl/box
+- package: golang.org/x/crypto/nacl/secretbox
+- package: golang.org/x/crypto/nacl/sign

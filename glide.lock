@@ -1,0 +1,24 @@
+hash: 1553a4fde7da0d73f7c820cdf8a3322041ab15ed8719d507470ffb7b84341cc5
+updated: 2018-08-13T15:11:37.820640855-04:00
+imports:
+- name: github.com/ethereum/go-ethereum
+  version: e07e507d1af687cd64b263038ebd3cb7be74fb40
+  subpackages:
+  - common/hexutil
+  - crypto/sha3
+  - rlp
+- name: github.com/mattn/go-sqlite3
+  version: b3511bfdd742af558b54eb6160aca9446d762a19
+- name: golang.org/x/crypto
+  version: de0752318171da717af4ce24d0a2e8626afaeb11
+  subpackages:
+  - curve25519
+  - ed25519
+  - ed25519/internal/edwards25519
+  - internal/subtle
+  - nacl/box
+  - nacl/secretbox
+  - nacl/sign
+  - poly1305
+  - salsa20/salsa
+testImports: []
