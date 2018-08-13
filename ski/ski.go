@@ -101,7 +101,7 @@ func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 		return plan.PDIEntrySig{}, err
 	}
 	signed := sign.Sign([]byte{}, hash[:], privateKey)
-	return newSig(signed[:64]), nil
+	return plan.NewPDIEntrySig(signed[:64]), nil
 }
 
 // Encrypt accepts a buffer and encrypts it with the community key and returns
@@ -118,7 +118,7 @@ func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
 	}
 
 	encrypted := secretbox.Seal(salt[:], msg,
-		&salt, communityKeyToArray(communityKey))
+		&salt, communityKey.ToArray())
 	return encrypted, nil
 }
 
@@ -140,7 +140,7 @@ func (ski *SKI) EncryptFor(
 		return []byte{}, err
 	}
 	encrypted := box.Seal(salt[:], msg,
-		&salt, pubKeyToArray(recvPubKey), privateKey)
+		&salt, recvPubKey.ToArray(), privateKey)
 	return encrypted, nil
 }
 
@@ -160,7 +160,7 @@ func (ski *SKI) Verify(
 	var signedMsg []byte
 	signedMsg = append(signedMsg, sig[:]...)
 	signedMsg = append(signedMsg, hash[:]...)
-	verified, ok := sign.Open([]byte{}, signedMsg[:], pubKeyToArray(pubKey))
+	verified, ok := sign.Open([]byte{}, signedMsg[:], pubKey.ToArray())
 	return verified, ok
 }
 
@@ -177,7 +177,7 @@ func (ski *SKI) Decrypt(
 	var salt [24]byte
 	copy(salt[:], encrypted[:24])
 	decrypted, ok := secretbox.Open(nil, encrypted[24:],
-		&salt, communityKeyToArray(communityKey))
+		&salt, communityKey.ToArray())
 	if !ok {
 		return nil, plan.Error(
 			-1, "secretbox.Open failed but doesn't produce an error")
@@ -200,7 +200,7 @@ func (ski *SKI) DecryptFrom(
 	var salt [24]byte
 	copy(salt[:], encrypted[:24])
 	decrypted, ok := box.Open(nil, encrypted[24:],
-		&salt, pubKeyToArray(senderPubKey), privateKey)
+		&salt, senderPubKey.ToArray(), privateKey)
 	if !ok {
 		return nil, plan.Error(
 			-1, "box.Open failed but doesn't produce an error")
@@ -225,37 +225,4 @@ func (ski *SKI) NewIdentity() (
 // and returns the CommunityKeyID associated with that key.
 func (ski *SKI) NewCommunityKey() plan.CommunityKeyID {
 	return ski.keyring.NewCommunityKey()
-}
-
-// ---------------------------------------------------------
-//
-// Helper functions
-// some of these will want to stay in the SKI, whereas others
-// make more sense to land in the plan.go types. Lots of making
-// up for golang's embarassing type system here
-//
-
-// TODO: we'll want to make this a method on plan.PDIEntrySig
-func newSig(arr []byte) plan.PDIEntrySig {
-	sig := plan.PDIEntrySig{}
-	copy(sig[:], arr[:64])
-	return sig
-}
-
-// TODO: we'll want to make this a method on plan.IdentityPublicKey
-func newPubKey(arr *[32]byte) plan.IdentityPublicKey {
-	k := plan.IdentityPublicKey(*arr)
-	return k
-}
-
-// TODO: we'll want to make this a method on plan.IdentityPublicKey
-func pubKeyToArray(k plan.IdentityPublicKey) *[32]byte {
-	arr := [32]byte(k)
-	return &arr
-}
-
-// TODO: we'll want to make this a method on plan.CommunityKey
-func communityKeyToArray(k plan.CommunityKey) *[32]byte {
-	arr := [32]byte(k)
-	return &arr
 }

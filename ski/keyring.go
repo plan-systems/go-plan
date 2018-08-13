@@ -90,7 +90,7 @@ func generateEncryptionKey() (plan.IdentityPublicKey, *[32]byte) {
 	if err != nil {
 		panic(err)
 	}
-	return newPubKey(publicKey), privateKey
+	return plan.NewIdentityPublicKey(publicKey), privateKey
 }
 
 func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
@@ -98,7 +98,7 @@ func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
 	if err != nil {
 		panic(err)
 	}
-	return newPubKey(publicKey), privateKey
+	return plan.NewIdentityPublicKey(publicKey), privateKey
 }
 
 // ---------------------------------------------------------
