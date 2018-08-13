@@ -2,13 +2,20 @@
 package ski // import "github.com/plan-tools/go-plan/ski"
 
 import (
-	"encoding/json"
+    "encoding/json"
+    "net/http"
 
 	plan "github.com/plan-tools/go-plan/plan"
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
 	sign "golang.org/x/crypto/nacl/sign"
 )
+
+
+const (
+    vouchCodecName = "/plan/ski/vouch/1"
+)
+
 
 // SKI represents the external SKI process and holds the keyring.
 type SKI struct {
@@ -44,42 +51,49 @@ func (ski *SKI) Vouch(
 	serializedBody, err := json.Marshal(keyMsgBody)
 	if err != nil {
 		return []byte{}, err
-	}
+    }
+
+
 	pdiMsgBody := &plan.PDIEntryBody{
 		BodyParts: []plan.PDIBodyPart{
-			plan.PDIBodyPart{
-				// TODO: presumably we want some kind of codec here
-				Header: "/plan/key",
-				Body:   serializedBody,
-			},
+			plan.PDIBodyPart {
+                Header:  make( http.Header ),
+                Content: serializedBody,
+            },
 		},
-	}
+    }
+    pdiMsgBody.BodyParts[0].Header.Add(plan.PDIContentCodecHeaderName, vouchCodecName)
+
 	// TODO: is there a 2nd codec here we need to somehow specify?
-	msg, err := json.Marshal(pdiMsgBody)
+	bodyData, err := json.Marshal(pdiMsgBody)
 	if err != nil {
 		return []byte{}, err
 	}
-	return ski.EncryptFor(senderPubKey, msg, recvPubKey)
+	return ski.EncryptFor(senderPubKey, bodyData, recvPubKey)
 }
 
 // AcceptVouch decrypts the encrypted buffer written by Vouch and decrypts
 // it for the recipient.
 func (ski *SKI) AcceptVouch(
-	recvPubKey plan.IdentityPublicKey,
+    recvPubKey plan.IdentityPublicKey,
 	bodyCrypt []byte,
 	senderPubKey plan.IdentityPublicKey,
 ) error {
-	msg, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
+
+	bodyData, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
 	if err != nil {
 		return err
-	}
+    }
 	pdiMsgBody := &plan.PDIEntryBody{}
-	err = json.Unmarshal(msg, pdiMsgBody)
+	err = json.Unmarshal(bodyData, pdiMsgBody)
 	if err != nil {
 		return err
-	}
+    }
+    if pdiMsgBody.BodyParts[0].Header.Get( plan.PDIContentCodecHeaderName ) != vouchCodecName {
+        return plan.Errorf( -1, "did not find valid '%s' header", plan.PDIContentCodecHeaderName )
+    }
 	keyMsgBody := &vouchMessage{}
-	err = json.Unmarshal(pdiMsgBody.BodyParts[0].Body, keyMsgBody)
+	err = json.Unmarshal(pdiMsgBody.BodyParts[0].Content, keyMsgBody)
 	if err != nil {
 		return err
 	}

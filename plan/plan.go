@@ -3,6 +3,7 @@ package plan
 import (
     "fmt"
     "time"
+    "net/http"
 
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 )
@@ -267,7 +268,7 @@ type PDIEntryHeader struct {
 	Author              IdentityAddr        // Creator of this entry (and signer of .Sig)
 	AccessChannelID     ChannelID           // Specifies the permissions channel (an access control implemenation) this entry was encrypted with
 	AccessChannelRev    uint32              // Specifies what identifying major rev of the access channel was in effect when this entry was authored
-	Headers             []string            // UTF8, newline-separated sequence of any auxilliary http-style headers (<field-ident>: <value>\n)+
+	AuxHeader           http.Header         // Any auxilliary header entries that apply to this PDI entry -- always UTF8
 }
 
 // PDIEntryBody is the decrypted and deserialized form of PDIEntryCrypt.Body and an abstract data container.
@@ -275,11 +276,20 @@ type PDIEntryBody struct {
 	BodyParts           []PDIBodyPart       // Zero or more data sections -- e.g. .parts[0] is a serialized json param list and .parts[1] is a blob of rich text (rtf).
 }
 
+
 // PDIBodyPart is one of one or more sequential parts of a PDIEntryBody.PDIBodyPart.
 type PDIBodyPart struct {
-	Headers             string              // UTF8, newline-separated sequence of any auxilliary http-style headers (<field-ident>: <value>\n)+
+	Header              http.Header         // Any auxilliary header entries that apply to this PDI entry -- always UTF8
 	Content             []byte              // Arbitrary client binary data conforming to .Headers
 }
+
+const (
+
+    // PDIContentCodecHeaderName is the standard header field name used in PDIBodyPart.Headers used to describe PDIBodyPart.Content.
+    // For info and background: https://github.com/multiformats/multicodec
+    PDIContentCodecHeaderName = "Multistream"
+)
+
 
 // When a new PDIEntry arrives off the wire, .Sig is set, .Hash == nil, .dataCrypt is set, .Body == nil
 //    1) .dataCrypt is hashed via  PDIEntrySchema.BodyHasher
@@ -312,7 +322,7 @@ type ChannelProperties struct {
 	EntriesAreFinal         bool                    `json:"entriesFinal"`
 
 	// This channel's ID
-	ChannelID               ChannelID                `json:"chID"`
+	ChannelID               ChannelID               `json:"chID"`
 
 	// Specifies an owning access channel that asserts domain over this channel
 	OwningAccessChannelID   AccessChannelID         `json:"acID"`
@@ -322,7 +332,7 @@ type ChannelProperties struct {
 	OwningAccessChannelRev  uint32                  `json:"acRev"`
 
 	// Complete set of channel params
-	Params                  map[string]interface{}   `json:"params"`
+	Params                  map[string]interface{}  `json:"params"`
 }
 
 /*
@@ -385,6 +395,13 @@ func (sig *PDIEntrySig) CopyFrom( inSig []byte ) {
 	copy( sig[:], inSig[:len(sig)] )
 }
 
+func NewPDIEntrySig( inBytes []byte ) PDIEntrySig {
+	sig := PDIEntrySig{}
+	copy(sig[:], inBytes[:64])
+	return sig
+}
+
+
 // ToArray is a convenience function to copy to a byte array.
 func (ckey *CommunityKey) ToArray() *[32]byte  {
     var arr [len(ckey)]byte
@@ -392,6 +409,11 @@ func (ckey *CommunityKey) ToArray() *[32]byte  {
     copy( arr[:], ckey[:len(ckey)])
     
 	return &arr
+}
+
+func NewIdentityPublicKey(inBytes *[32]byte) IdentityPublicKey {
+	k := IdentityPublicKey(*inBytes)
+	return k
 }
 
 // CopyFrom is a convenience function to copy from a byte array.
