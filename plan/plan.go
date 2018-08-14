@@ -15,7 +15,7 @@ type PError struct {
 	msg  string
 }
 
-// Error create a new Perror
+// Error create a new PError
 func Error(inCode int32, inMsg string) error {
 	return &PError{
 		inCode,
@@ -41,7 +41,7 @@ func (e *PError) Error() string {
 
 const (
 
-	// IdentityAddrSz is the numbewr of bytes in most PLAN addresses and public IDs.  It's the right-most bytes of a longer public key.
+	// IdentityAddrSz is the number of bytes in most PLAN addresses and public IDs.  It's the right-most bytes of a longer public key.
 	// Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
     IdentityAddrSz = 20
     
@@ -52,19 +52,19 @@ const (
 // CommunityID identifies a PLAN community
 type CommunityID        [IdentityAddrSz]byte
 
-// IdentityPublicKey is the public key of a person, group, or sub community inside a PLAN commiunity.
+// IdentityPublicKey is the public key of a person, group, or sub community inside a PLAN community.
 type IdentityPublicKey  [32]byte
 
 // IdentityAddr the rightmost bytes of IdentityPublicKey
 type IdentityAddr       [IdentityAddrSz]byte
 
-// PDIEntrySig holds a final signature of a PDI entry, veryifying the author's private key was used to sign the entry
+// PDIEntrySig holds a final signature of a PDI entry, verifying the author's private key was used to sign the entry
 type PDIEntrySig        [64]byte
 
 // PDIEntryHash is a hash digest of a PDI entry.
 type PDIEntryHash       [PDIEntryHashSz]byte
 
-// ChannelID identifies a speicifc PLAN channel where PDI entries are posted to.
+// ChannelID identifies a specific PLAN channel where PDI entries are posted to.
 type ChannelID          [20]byte
 
 // CommunityKey is an symmetric key that allows community data to be encrypted/decrypted.
@@ -126,9 +126,8 @@ If/when an admin of a community issues a new community key,  each member is secu
 the community key channel (where is key is asymmetrically sent to each member still "in" the community.  */
 type CommunityKeyID     [16]byte
 
-/*
-AccessChannelID references an access log of community identities that have been
-granted read, write, or own access to channels bearing that given AccessChannelID. */
+// AccessChannelID references an access log of community identities that have been
+// granted read, write, or own access to channels bearing that given AccessChannelID.
 type AccessChannelID    ChannelID
 
 // PDIEntryVerb is the top-level PDI signal that specifies one of the low-level, built-in purposes of a PDI entry.
@@ -155,13 +154,13 @@ type PDIEntryVers byte
 
 const (
 
-	// PDIEntryVers1 default schemea
+	// PDIEntryVers1 default schema
 	PDIEntryVers1 byte = 1 + iota
 )
 
 // Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflippiug
-//    won't occur until the year 292,471,210,648 CE.  
-// Note: if a nanosecond precision is not available, then the best available precision should be used (or 0). 
+//    won't occur until the year 292,471,210,648 CE.  I wonder if OSes will be still be made by for-profit orgs by that time.    
+// Note: if a nanosecond precision is not available or n/a, then the best available precision should be used (or 0).  
 type Time struct {
     UnixSecs            int64;      // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
     NanoSecs            int32;      // NanoSecs is the number of nanoseconds elapsed into .UnixSecs so the domain is [0,999999999]
@@ -209,10 +208,10 @@ func Now() Time {
 */
 
 /*
-PDIEntryCrypt is the public "wire" format for PDI entrues.  It is what it sent to/from communuity data store implementations,
+PDIEntryCrypt is the public "wire" format for PDI entries.  It is what it sent to/from community data store implementations,
 such as Ethereum and NEM.
 
-A PDI entry has two encrypted segements, its header and body segment.  The PDIEntryCrypt.Header is encrypted using a community-public key,
+A PDI entry has two encrypted segments, its header and body segment.  The PDIEntryCrypt.Header is encrypted using a community-public key,
 specified by PDIEntryCrypt.CommunityKeyID.  This ensures non-community members (i.e. public snoops) can't see any entry params,
 data, or even to what community channel the entry is being post to.  PDIEntryCrypt.Body is encrypted by the same community key as the header *or*
 by the key specified via PDIEntryHeader.Author and PDIEntry.AccessChannelID (all via the client's Secure Key Interface).  In sum,
@@ -220,8 +219,8 @@ PDIEntry.AccessChannelID specifies a decryption flow through the user's private,
 
 When a PLAN client starts a new session with a pnode, the client sends the community keys for the session.  This allows
 pnode to process and decrypt incoming PDIEntryCrypt entries from the storage medium (e.g. Ethereum).  Otherwise, pnode
-has no ability to decrypt PDIEntryCrypt.Header.  A pnode could be configured to keep the communty keychain even when there
-are no open client PLAN sessions so that incomning entries can be processed.  Otherwise, incoming entries won't be processed
+has no ability to decrypt PDIEntryCrypt.Header.  A pnode could be configured to keep the community keychain even when there
+are no open client PLAN sessions so that incoming entries can be processed.  Otherwise, incoming entries won't be processed
 from the lowest level PDI storage layer.  Both configurations are reasonable depending on security preferences.
 
 When a community admin initiates a community-key "rekey event", the newly generated community key is securely and individually
@@ -232,7 +231,7 @@ to decrypt the payload into the new community key.  This key is added to the use
 
 When pnode sends a PLAN client is PDI entries, it sends PDIEntry.Header (via json) and PDIEntryCrypt.Body.  If the
 
-Recall that the pnode client has no abilty to decrypt PDIEntryCrypt.Body if PDIEntryHeader.AccessChannelID isn't set for
+Recall that the pnode client has no ability to decrypt PDIEntryCrypt.Body if PDIEntryHeader.AccessChannelID isn't set for
 community-public permissions.  This is fine since only PLAN clients with a
 
 And awaaaaay we go!
@@ -266,12 +265,12 @@ type PDIEntryHeader struct {
 	Verb                PDIEntryVerb        // PDI command/verb
 	ChannelID           ChannelID           // The channel id this entry is posted to.
 	Author              IdentityAddr        // Creator of this entry (and signer of .Sig)
-	AccessChannelID     ChannelID           // Specifies the permissions channel (an access control implemenation) this entry was encrypted with
+	AccessChannelID     AccessChannelID     // Specifies the permissions channel (an access control implementation) this entry was encrypted with
 	AccessChannelRev    uint32              // Specifies what identifying major rev of the access channel was in effect when this entry was authored
-	AuxHeader           http.Header         // Any auxilliary header entries that apply to this PDI entry -- always UTF8
+	AuxHeader           http.Header         // Any auxillary header entries that apply to this PDI entry -- always UTF8
 }
 
-// PDIEntryBody is the decrypted and deserialized form of PDIEntryCrypt.Body and an abstract data container.
+// PDIEntryBody is the decrypted and de-serialized form of PDIEntryCrypt.Body and an abstract data container.
 type PDIEntryBody struct {
 	BodyParts           []PDIBodyPart       // Zero or more data sections -- e.g. .parts[0] is a serialized json param list and .parts[1] is a blob of rich text (rtf).
 }
@@ -279,7 +278,7 @@ type PDIEntryBody struct {
 
 // PDIBodyPart is one of one or more sequential parts of a PDIEntryBody.PDIBodyPart.
 type PDIBodyPart struct {
-	Header              http.Header         // Any auxilliary header entries that apply to this PDI entry -- always UTF8
+	Header              http.Header         // Any auxillary header entries that apply to this PDI entry -- always UTF8
 	Content             []byte              // Arbitrary client binary data conforming to .Headers
 }
 
@@ -293,8 +292,8 @@ const (
 
 // When a new PDIEntry arrives off the wire, .Sig is set, .Hash == nil, .dataCrypt is set, .Body == nil
 //    1) .dataCrypt is hashed via  PDIEntrySchema.BodyHasher
-//    2) .Sig is verfified based on the hash calculated from (1)
-//    3) Use .AccessChannelID to specifiy a decryption flow through PLAN's Secure Key Interface (SKI).
+//    2) .Sig is verified based on the hash calculated from (1)
+//    3) Use .AccessChannelID to specify a decryption flow through PLAN's Secure Key Interface (SKI).
 //         - If the local user pubkey does not have "read" access, then that means there's a db corresponding to that access list that contains a list of all entries
 //           that have been encountered (and can't be unlocked).  In this case, referencing info for this entry is appended to this db and entry is not
 //           processed further.  If/when the CommunityRepo sees an access control list get unlocked for the current logged in user, it will
@@ -302,7 +301,7 @@ const (
 // , then the entry data can only be stored until the user is granted access.
 //    2) Compute Hash of
 //    2) Decrypt .dataCrypt into .dataRLP (a generic blob)
-//    3) Deserialize this output blob (instantiate .Body).
+//    3) De-serialize this output blob (instantiate .Body).
 
 
 // ChannelProperties specifies req'd params for all channels and are community-public.
@@ -318,7 +317,7 @@ type ChannelProperties struct {
 	//     (b) publish write and own privs to others (only permitted by owners)
 	IsAccessChannel         bool                    `json:"isAccessChannel"`
 
-	// Are entries in this channel allowed be revoked or superceeded?
+	// Are entries in this channel allowed be revoked or superceded?
 	EntriesAreFinal         bool                    `json:"entriesFinal"`
 
 	// This channel's ID
@@ -339,17 +338,17 @@ type ChannelProperties struct {
 type ChannelInfo struct {
 
     // Specifies when this channel was created
-    TimeCreated             Time                            `json:"inEffect"`
+    TimeCreated             Time                    `json:"inEffect"`
 
     // <<multistream>-inspired description of this channel's contents.  This allows the PLAN client to accurately process, interpret, and handle entry
     //    entry data blobs (PDIEntry.Body -- i.e. PDIEntryBody).  example:  "/plan/talk/v2"
-    Protocol                string                          `json:"protocol"`
+    Protocol                string                  `json:"protocol"`
 
-    // What is the title of this channel presented to pariticipants?
-    ChannelTitle            string                          `json:"chTitle"`
+    // What is the title of this channel presented to participants?
+    ChannelTitle            string                  `json:"chTitle"`
 
-    // What is the description of this channel preseted to pariticipants?
-    ChannelDesc             string                          `json:"chDesc"`
+    // What is the description of this channel presented to participants?
+    ChannelDesc             string                  `json:"chDesc"`
 
 }
 */
