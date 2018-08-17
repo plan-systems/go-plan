@@ -11,7 +11,7 @@ import (
 
 // keyring represents the storage of keys
 type keyring struct {
-	communityKeys map[plan.CommunityKeyID]plan.CommunityKey
+	communityKeys map[plan.KeyID][]byte
 	signingKeys   map[plan.IdentityPublicKey]*[64]byte
 	encryptKeys   map[plan.IdentityPublicKey]*[32]byte
 	mux           sync.RWMutex // synchronized changes to the keyring
@@ -19,7 +19,7 @@ type keyring struct {
 
 func newKeyring() *keyring {
 	return &keyring{
-		communityKeys: map[plan.CommunityKeyID]plan.CommunityKey{},
+		communityKeys: map[plan.KeyID][]byte{},
 		signingKeys:   map[plan.IdentityPublicKey]*[64]byte{},
 		encryptKeys:   map[plan.IdentityPublicKey]*[32]byte{},
 	}
@@ -50,7 +50,7 @@ func (kr *keyring) NewIdentity() (plan.IdentityPublicKey, plan.IdentityPublicKey
 // GetSigningKey fetches the d's private signing key from the keychain for a
 // specific public key, or an error if the key doesn't exist.
 func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
-	*[64]byte, error) {
+	*[64]byte, *plan.Perror) {
     var key *[64]byte
     
 	kr.mux.RLock()
@@ -58,8 +58,7 @@ func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
     kr.mux.RUnlock()
     
 	if !ok {
-		return key, plan.Errorf(-1,
-			"GetSigningKey: signing key %v does not exist", pubKey)
+		return nil, plan.Errorf(nil, plan.SigningKeyNotFound, "signing key not found {pubKey:%v}", pubKey)
 	}
 	return key, nil
 }
@@ -67,7 +66,7 @@ func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
 // GetEncryptKey fetches the d's private encrypt key from the keychain,
 // or an error if the key doesn't exist.
 func (kr *keyring) GetEncryptKey(pubKey plan.IdentityPublicKey) (
-	*[32]byte, error) {
+	*[32]byte, *plan.Perror) {
     var key *[32]byte
     
 	kr.mux.RLock()
@@ -75,8 +74,7 @@ func (kr *keyring) GetEncryptKey(pubKey plan.IdentityPublicKey) (
     kr.mux.RUnlock()
 
 	if !ok {
-		return key, plan.Errorf(-1,
-			"GetEncryptKey: encrypt key %v does not exist", pubKey)
+		return nil, plan.Errorf(nil, plan.EncryptKeyNotFound, "encrypt key not found {pubKey:%v}", pubKey)
 	}
 	return key, nil
 }
@@ -113,12 +111,12 @@ func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
 
 // NewCommunityKey generates a new community key, adds it to the keyring,
 // and returns the CommunityKeyID associated with that key.
-func (kr *keyring) NewCommunityKey() plan.CommunityKeyID {
+func (kr *keyring) NewCommunityKey() plan.KeyID {
 	
     key, keyID := generateSymmetricKey()
     
     kr.mux.Lock()
-    kr.communityKeys[keyID] = key
+    kr.communityKeys[keyID] = key[:]
     kr.mux.Unlock()
 
 	return keyID
@@ -126,7 +124,7 @@ func (kr *keyring) NewCommunityKey() plan.CommunityKeyID {
 
 // InstallCommunityKey adds a new community key to the keychain
 func (kr *keyring) InstallCommunityKey(
-	keyID plan.CommunityKeyID, key plan.CommunityKey) {
+	keyID plan.KeyID, key []byte) {
 
 	kr.mux.Lock()
     kr.communityKeys[keyID] = key
@@ -135,22 +133,20 @@ func (kr *keyring) InstallCommunityKey(
 
 // GetCommunityKeyByID fetches the community key from the keychain for a
 // based on its ID, or an error if the key doesn't exist.
-func (kr *keyring) GetCommunityKeyByID(keyID plan.CommunityKeyID) (
-	plan.CommunityKey, error) {
-    var key plan.CommunityKey
+func (kr *keyring) GetCommunityKeyByID(keyID plan.KeyID) (
+	[]byte, *plan.Perror) {
     
 	kr.mux.RLock()
     key, ok := kr.communityKeys[keyID]
     kr.mux.RUnlock()
 
 	if !ok {
-		return key, plan.Errorf(-1,
-			"GetCommunityKeyByID: community key %v does not exist", keyID)
+		return nil, plan.Errorf(nil, plan.CommunityKeyNotFound, "community key not found {keyID:%v}", keyID)
 	}
 	return key, nil
 }
 
-func generateSymmetricKey() ([32]byte, plan.CommunityKeyID) {
+func generateSymmetricKey() ([32]byte, plan.KeyID) {
 	secret := make([]byte, 32)
 	_, err := crypto_rand.Read(secret)
 	if err != nil {
@@ -164,7 +160,7 @@ func generateSymmetricKey() ([32]byte, plan.CommunityKeyID) {
 	if err != nil {
 		panic(err) // TODO: unclear when we'd ever hit this?
 	}
-	var communityID plan.CommunityKeyID
+	var communityID plan.KeyID
 	copy(communityID[:16], keyID[:])
 
 	return key, communityID

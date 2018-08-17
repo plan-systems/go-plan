@@ -54,15 +54,15 @@ func TestSigning(t *testing.T) {
 	entry := &plan.PDIEntryCrypt{
 		HeaderCrypt: []byte("encryptedtestheader"),
 		BodyCrypt:   []byte("encryptedtestbody"),
-	}
-	hash := &plan.PDIEntryHash{}
-	entry.ComputeHash(hash)
+    }
+    
+	hash := entry.ComputeHash()
 
-	sig, err := senderSki.Sign(senderSignPubKey, *hash)
+	sig, err := senderSki.Sign(senderSignPubKey, hash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verified, ok := recvSki.Verify(senderSignPubKey, *hash, sig)
+	verified, ok := recvSki.Verify(senderSignPubKey, hash, sig)
 	if !ok {
 		t.Fatalf("signature verification failed: %x", verified)
 	}
@@ -86,7 +86,7 @@ func TestVouching(t *testing.T) {
 
 // test setup helper
 func setUpSKI(t *testing.T) (
-	*SKI, plan.IdentityPublicKey, plan.IdentityPublicKey,
+	*LocalSKI, plan.IdentityPublicKey, plan.IdentityPublicKey,
 ) {
 	ski := NewSKI()
 	encryptPubKey, signPubKey := ski.NewIdentity()

@@ -17,14 +17,14 @@ const (
 )
 
 
-// SKI represents the external SKI process and holds the keyring.
-type SKI struct {
+// LocalSKI represents a local implementation of the SKI
+type LocalSKI struct {
 	keyring *keyring
 }
 
 // NewSKI initializes the SKI's keying.
-func NewSKI() *SKI {
-	ski := &SKI{keyring: newKeyring()}
+func NewSKI() *LocalSKI {
+	ski := &LocalSKI{keyring: newKeyring()}
 	return ski
 }
 
@@ -36,21 +36,20 @@ func NewSKI() *SKI {
 // required, and reduce the knowledge the SKI has about what's being done
 // with these values.
 
-// Vouch encrypts a CommunityKey for the recipients public encryption key,
-// and returns the encrypted buffer (or error)
-func (ski *SKI) Vouch(
-	communityKeyID plan.CommunityKeyID,
+// Vouch encrypts a CommunityKey for the recipient's public key and returns the encrypted buffer
+func (ski *LocalSKI) Vouch(
+	communityKeyID plan.KeyID,
 	senderPubKey plan.IdentityPublicKey,
 	recvPubKey plan.IdentityPublicKey,
-) ([]byte, error) {
+) ([]byte, *plan.Perror) {
 	communityKey, err := ski.keyring.GetCommunityKeyByID(communityKeyID)
 	if err != nil {
 		return nil, err
 	}
 	keyMsgBody := vouchMessage{KeyID: communityKeyID, Key: communityKey}
-	serializedBody, err := json.Marshal(keyMsgBody)
-	if err != nil {
-		return nil, err
+	serializedBody, jerr := json.Marshal(keyMsgBody)
+	if jerr != nil {
+		return nil, plan.Error(jerr, plan.FailedToMarshalAccessGrant, "failed to marshal access grant body content")
     }
 
 
@@ -64,58 +63,58 @@ func (ski *SKI) Vouch(
     }
     pdiMsgBody.BodyParts[0].Header.Add(plan.PDIContentCodecHeaderName, vouchCodecName)
 
-	// TODO: is there a 2nd codec here we need to somehow specify?
-	bodyData, err := json.Marshal(pdiMsgBody)
+	bodyData, jerr := json.Marshal(pdiMsgBody)
 	if err != nil {
-		return nil, err
+		return nil, plan.Error(jerr, plan.FailedToMarshalAccessGrant, "failed to marshal access grant body header")
 	}
 	return ski.EncryptFor(senderPubKey, bodyData, recvPubKey)
 }
 
-// AcceptVouch decrypts the encrypted buffer written by Vouch and decrypts
-// it for the recipient.
-func (ski *SKI) AcceptVouch(
+    // AcceptVouch decrypts the encrypted buffer written by Vouch() and installs the wrapped community key
+func (ski *LocalSKI) AcceptVouch(
     recvPubKey plan.IdentityPublicKey,
 	bodyCrypt []byte,
 	senderPubKey plan.IdentityPublicKey,
-) error {
+) *plan.Perror {
 
 	bodyData, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
 	if err != nil {
-		return err
+		return plan.Error(err, plan.FailedToDecryptAccessGrant, "failed to decrypt access grant")
     }
+
 	pdiMsgBody := &plan.PDIEntryBody{}
-	err = json.Unmarshal(bodyData, pdiMsgBody)
-	if err != nil {
-		return err
+	jerr := json.Unmarshal(bodyData, pdiMsgBody)
+	if jerr != nil || len(pdiMsgBody.BodyParts) < 1 {
+		return plan.Error(jerr, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")
     }
     if pdiMsgBody.BodyParts[0].Header.Get( plan.PDIContentCodecHeaderName ) != vouchCodecName {
-        return plan.Errorf( -1, "did not find valid '%s' header", plan.PDIContentCodecHeaderName )
+		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' header", plan.PDIContentCodecHeaderName)
     }
 	keyMsgBody := &vouchMessage{}
-	err = json.Unmarshal(pdiMsgBody.BodyParts[0].Content, keyMsgBody)
+	jerr = json.Unmarshal(pdiMsgBody.BodyParts[0].Content, keyMsgBody)
 	if err != nil {
-		return err
-	}
+		return plan.Error(jerr, plan.FailedToProcessAccessGrant, "access grant content failed to unmarshal")
+    }
+    
 	ski.keyring.InstallCommunityKey(keyMsgBody.KeyID, keyMsgBody.Key)
 	return nil
 }
 
 // internal: the message sent by the Vouch process
 type vouchMessage struct {
-	KeyID plan.CommunityKeyID
-	Key   plan.CommunityKey
+	KeyID plan.KeyID
+	Key   []byte
 }
 
 // Sign accepts a message hash and returns a signature.
-func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
-) (plan.PDIEntrySig, error) {
+func (ski *LocalSKI) Sign(signer plan.IdentityPublicKey, hash []byte,
+) ([]byte, *plan.Perror) {
 	privateKey, err := ski.keyring.GetSigningKey(signer)
 	if err != nil {
 		return plan.PDIEntrySig{}, err
-	}
-	signed := sign.Sign(nil, hash[:], privateKey)
-	return plan.NewPDIEntrySig(signed[:64]), nil
+    }
+	sig := sign.Sign(nil, hash, privateKey)
+	return sig[:sign.Overhead], nil
 }
 
 // Encrypt accepts a buffer and encrypts it with the community key and returns
@@ -123,15 +122,17 @@ func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 // serialized PDIEntryBody or PDIEntryHeader. This is authenticated encryption
 // but the caller will follow this call with a call to Verify the PDIEntryHash
 // for validation.
-func (ski *SKI) Encrypt(keyID plan.CommunityKeyID, msg []byte,
-) ([]byte, error) {
+func (ski *LocalSKI) Encrypt(keyID plan.KeyID, msg []byte,
+) ([]byte, *plan.Perror) {
 	salt := <-salts
 	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
 		return nil, err
-	}
-
-    encrypted := secretbox.Seal(salt[:], msg, &salt, communityKey.ToArray())
+    }
+    
+    var ckey [32]byte
+    copy(ckey[:], communityKey[:32])
+    encrypted := secretbox.Seal(salt[:], msg, &salt, &ckey)
     
 	return encrypted, nil
 }
@@ -143,11 +144,11 @@ func (ski *SKI) Encrypt(keyID plan.CommunityKeyID, msg []byte,
 // caller doesn't know what goes in the message body. Outside of Vouch
 // operations, this is the basis of private messages between users. The
 // caller will follow this call with a call to Sign the PDIEntryHash
-func (ski *SKI) EncryptFor(
+func (ski *LocalSKI) EncryptFor(
 	senderPubKey plan.IdentityPublicKey,
 	msg []byte,
 	recvPubKey plan.IdentityPublicKey,
-) ([]byte, error) {
+) ([]byte, *plan.Perror) {
 	salt := <-salts
 	privateKey, err := ski.keyring.GetEncryptKey(senderPubKey)
 	if err != nil {
@@ -158,13 +159,13 @@ func (ski *SKI) EncryptFor(
 	return encrypted, nil
 }
 
-// Verify accepts a signature and verfies it against the public key of the
+// Verify accepts a signature and verifies it against the public key of the
 // sender. Returns the verified buffer (so it can be compared by the caller)
 // and a bool indicating success.
-func (ski *SKI) Verify(
+func (ski *LocalSKI) Verify(
 	pubKey plan.IdentityPublicKey,
-	hash plan.PDIEntryHash,
-	sig plan.PDIEntrySig,
+	hash []byte,
+	sig []byte,
 ) ([]byte, bool) {
 	// TODO: this probably doesn't need to be in the SKI because it doesn't
 	//       require any private key material?
@@ -172,40 +173,44 @@ func (ski *SKI) Verify(
 	// need to re-combine the sig and hash to produce the
 	// signed message that Open expects
 	var signedMsg []byte
-	signedMsg = append(signedMsg, sig[:]...)
-	signedMsg = append(signedMsg, hash[:]...)
-	verified, ok := sign.Open(nil, signedMsg[:], pubKey.ToArray())
+	signedMsg = append(signedMsg, sig...)
+	signedMsg = append(signedMsg, hash...)
+	verified, ok := sign.Open(nil, signedMsg, pubKey.ToArray())
 	return verified, ok
 }
 
 // Decrypt takes an encrypted buffer and decrypts it using the community key
 // and returns the cleartext buffer (or an error).
-func (ski *SKI) Decrypt(
-	keyID plan.CommunityKeyID,
+func (ski *LocalSKI) Decrypt(
+	keyID plan.KeyID,
 	encrypted []byte,
-) ([]byte, error) {
+) ([]byte, *plan.Perror) {
 	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
 		return nil, err
-	}
+    }
+
+    var ckey [32]byte
+    copy(ckey[:], communityKey[:32])
+    
 	var salt [24]byte
 	copy(salt[:], encrypted[:24])
-	decrypted, ok := secretbox.Open(nil, encrypted[24:], &salt, communityKey.ToArray())
+	decrypted, ok := secretbox.Open(nil, encrypted[24:], &salt, &ckey)
 	if !ok {
-		return nil, plan.Error(
-			-1, "secretbox.Open failed but doesn't produce an error")
-	}
+		return nil, plan.Error(nil, plan.FailedToDecryptCommunityData, "secretbox.Open failed to decrypt community data")
+    }
+    
 	return decrypted, nil
 }
 
 // DecryptFrom takes an encrypted buffer and a public key, and decrypts the
 // message using the recipients private key. It returns the decrypted buffer
 // (or an error).
-func (ski *SKI) DecryptFrom(
+func (ski *LocalSKI) DecryptFrom(
 	recvPubKey plan.IdentityPublicKey,
 	encrypted []byte,
 	senderPubKey plan.IdentityPublicKey,
-) ([]byte, error) {
+) ([]byte, *plan.Perror) {
 	privateKey, err := ski.keyring.GetEncryptKey(recvPubKey)
 	if err != nil {
 		return nil, err
@@ -215,8 +220,7 @@ func (ski *SKI) DecryptFrom(
 	decrypted, ok := box.Open(nil, encrypted[24:],
 		&salt, senderPubKey.ToArray(), privateKey)
 	if !ok {
-		return nil, plan.Error(
-			-1, "box.Open failed but doesn't produce an error")
+		return nil, plan.Error(nil, plan.FailedToDecryptCommunityData, "secretbox.Open failed to decrypt")
 	}
 	return decrypted, nil
 }
@@ -228,7 +232,7 @@ func (ski *SKI) DecryptFrom(
 // NewIdentity generates encryption and signing keys, adds them to the
 // keyring, and returns the public keys associated with those private
 // keys as (encryption, signing).
-func (ski *SKI) NewIdentity() (
+func (ski *LocalSKI) NewIdentity() (
 	plan.IdentityPublicKey, plan.IdentityPublicKey) {
 	// TODO: I don't like the return signature here. too easy to screw up
 	return ski.keyring.NewIdentity()
@@ -236,6 +240,6 @@ func (ski *SKI) NewIdentity() (
 
 // NewCommunityKey generates a new community key, adds it to the keyring,
 // and returns the CommunityKeyID associated with that key.
-func (ski *SKI) NewCommunityKey() plan.CommunityKeyID {
+func (ski *LocalSKI) NewCommunityKey() plan.KeyID {
 	return ski.keyring.NewCommunityKey()
 }
