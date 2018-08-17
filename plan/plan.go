@@ -8,32 +8,13 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 )
 
-// PError is PLAN's commonly used error type
-// https://github.com/golang/go/wiki/Errors
-type PError struct {
-	code int32
-	msg  string
-}
 
-// Error create a new PError
-func Error(inCode int32, inMsg string) error {
-	return &PError{
-		inCode,
-		inMsg,
-	}
-}
+// DataHandler is a deferred data handler function
+type DataHandler            func(inErr *Perror, inParam []byte)
 
-// Errorf is a convenience function of Error() that uses a string formatter.
-func Errorf(inCode int32, inFormat string, inArgs ...interface{}) error {
-	return &PError{
-		inCode,
-		fmt.Sprintf(inFormat, inArgs),
-	}
-}
+// Action is a deferred generic handler. 
+type Action                 func(inErr *Perror, inParam interface{})
 
-func (e *PError) Error() string {
-	return fmt.Sprintf("%s {code=%d}", e.msg, e.code)
-}
 
 
 
@@ -45,9 +26,15 @@ const (
 	// Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
     IdentityAddrSz = 20
     
-    // PDIEntryHashSz is byte size of the hash digest that is signed internally.
-    PDIEntryHashSz = 32
+    // KeyIDSz is the number of bytes used to identify public-private key pairs and symmetric keys 
+    KeyIDSz = 20
+
 )
+
+// KeyID identifies a public-private (asymmetric) key pair OR a private (symmetric) key.  
+//    For asymmetric keys, it is defined as the right-most bytes of the public key.
+//    For symmetric keys, it is randomly generated when the key bytes is generated.
+type KeyID              [KeyIDSz]byte
 
 // CommunityID identifies a PLAN community
 type CommunityID        [IdentityAddrSz]byte
@@ -59,16 +46,10 @@ type IdentityPublicKey  [32]byte
 type IdentityAddr       [IdentityAddrSz]byte
 
 // PDIEntrySig holds a final signature of a PDI entry, verifying the author's private key was used to sign the entry
-type PDIEntrySig        [64]byte
-
-// PDIEntryHash is a hash digest of a PDI entry.
-type PDIEntryHash       [PDIEntryHashSz]byte
+type PDIEntrySig        []byte
 
 // ChannelID identifies a specific PLAN channel where PDI entries are posted to.
 type ChannelID          [20]byte
-
-// CommunityKey is an symmetric key that allows community data to be encrypted/decrypted.
-type CommunityKey       [32]byte
 
 
 
@@ -118,17 +99,7 @@ var (
 	}
 )
 
-/*
-A CommunityKeyID identifies a specific shared "community-global" symmetric key.
-When a PLAN client starts a session with a pnode, the client sends the pnode her community-public keys.
-PDIEntryCrypt.CommunityKeyID specifies which community key was used to encrypt PDIEntryCrypt.Header.
-If/when an admin of a community issues a new community key,  each member is securely sent this new key via
-the community key channel (where is key is asymmetrically sent to each member still "in" the community.  */
-type CommunityKeyID     [16]byte
 
-// AccessChannelID references an access log of community identities that have been
-// granted read, write, or own access to channels bearing that given AccessChannelID.
-type AccessChannelID    ChannelID
 
 // PDIEntryVerb is the top-level PDI signal that specifies one of the low-level, built-in purposes of a PDI entry.
 type PDIEntryVerb       int32
@@ -136,14 +107,14 @@ type PDIEntryVerb       int32
 
 const (
 
-	// PDIEntryVerbChannelAdmin creates a new channel (not common)
-	PDIEntryVerbChannelAdmin = 1
+	// PDIEntryVerbPostAdminEntry inserts an channel administrative action (e.g. changing a channel property) -- requires channel ownership access. 
+	PDIEntryVerbPostAdminEntry = 1
 
 	// PDIEntryVerbPostEntry posts this entry body to the specified channel
-	PDIEntryVerbPostEntry = 2
+	PDIEntryVerbPostEntry
 
 	// PDIEntryVerbReplaceEntry replaces the cited entry with this one in its place
-	PDIEntryVerbReplaceEntry = 3
+	PDIEntryVerbReplaceEntry
 )
 
 // PDIEntryInfo contains flags and info about this entry, in effect specifying which hash functions and crypto to apply.
@@ -162,8 +133,8 @@ const (
 //    won't occur until the year 292,471,210,648 CE.  I wonder if OSes will be still be made by for-profit orgs by that time.    
 // Note: if a nanosecond precision is not available or n/a, then the best available precision should be used (or 0).  
 type Time struct {
-    UnixSecs            int64;      // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
-    NanoSecs            int32;      // NanoSecs is the number of nanoseconds elapsed into .UnixSecs so the domain is [0,999999999]
+    UnixSecs            int64   `json:"unix"` // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
+    NanoSecs            int32   `json:"nano"` // NanoSecs is the number of nanoseconds elapsed into .UnixSecs so the domain is [0,999999999]
 }
 
 
@@ -174,7 +145,7 @@ const (
     DistantFuture       int64 = (1 << 63) - 1
 
 	// DistantPast is a const used to express the "distant past" in unix time.
-	DistantPast         int64 = - DistantFuture
+	DistantPast         int64 = -DistantFuture
 )
 
 // Now returns PLAN's standard time struct set to the time index of the present moment.
@@ -187,23 +158,16 @@ func Now() Time {
     }
 }
 
+
+
+
+
 /*
- type PDIEntrySchema struct {
-    Hasher                  hash.Hash
-    Signer                  interface{}
- }
-
-
-
- var PDIEntrySchemas = [2]PDIEntrySchema {
-    PDIEntrySchema{
-    },
-    PDIEntrySchema {
-        Hasher:     hash.SHA256,
-        Signer:     nil,
-    },
-}
-
+A community KeyID identifies a specific shared "community-global" symmetric key.
+When a PLAN client starts a session with a pnode, the client sends the pnode her community-public keys.
+PDIEntryCrypt.CommunityKeyID specifies which community key was used to encrypt PDIEntryCrypt.Header.
+If/when an admin of a community issues a new community key,  each member is securely sent this new key via
+the community key channel (where is key is asymmetrically sent to each member still "in" the community. 
 
 */
 
@@ -237,36 +201,37 @@ community-public permissions.  This is fine since only PLAN clients with a
 And awaaaaay we go!
 */
 type PDIEntryCrypt struct {
-	Sig                 PDIEntrySig         // Signature of PDIEntry.Hash (signed by PDIEntry.Header.Author)
-	Hash                *PDIEntryHash       // IF set, set to self.ComputeHash()
+	Sig                 []byte              // Signature of PDIEntry.Hash (signed by PDIEntryHeader.Author)
 
 	Info                PDIEntryInfo        // Entry type info, Allows PDIEntry accessors to apply the correct hash and crypto functions
-	CommunityKeyID      CommunityKeyID
+	CommunityKeyID      KeyID
 
 	HeaderCrypt         []byte              // Encrypted using a community key, referenced via .CommunityKeyID
-	BodyCrypt           []byte              // Encrypted using a community key or a user private key (based on PDIEntry.Header.AccessChannelID)
+	BodyCrypt           []byte              // Encrypted using a community key or a user private key (based on PDIEntryHeader.AccessChannelID)
 
 }
 
+/*
 // PDIEntry is wha
 type PDIEntry struct {
-	PDIEntryCrypt       *PDIEntryCrypt      // Originating (encrypted) entry data used to instantiate this data
-
 	HeaderBuf           []byte              // Serialized representation of PDIEntry.Header  (decrypted form PDIEntryCrypt.Header)
 	Header              *PDIEntryHeader
 
 	BodyBuf             []byte              // Serialized representation of PDIEntry.Body (decrypted from PDIEntryCrypt.Body)
 	Body                *PDIEntryBody
 }
+*/
 
 // PDIEntryHeader is a container for community-public info about this channel entry.PDIEntryHeader
 type PDIEntryHeader struct {
     Time                Time                // Timestamp when .Author sealed this entry.
 	Verb                PDIEntryVerb        // PDI command/verb
-	ChannelID           ChannelID           // The channel id this entry is posted to.
-	Author              IdentityAddr        // Creator of this entry (and signer of .Sig)
-	AccessChannelID     AccessChannelID     // Specifies the permissions channel (an access control implementation) this entry was encrypted with
-	AccessChannelRev    uint32              // Specifies what identifying major rev of the access channel was in effect when this entry was authored
+    ChannelID           ChannelID           // The channel id this entry is posted to.
+    ChannelRev          int32               // Revision numnber of this channel this entry is targeting
+    AuthorID            IdentityAddr        // Creator of this entry (and signer of .Sig)
+    AuthorIdentityRev   int32               // Specifies which rev of the author's public key was used for ecryption (or 0 if n/a)
+	AccessChannelID     ChannelID            // Specifies the permissions channel (an access control implementation) this entry was encrypted with
+	AccessChannelRev    int32               // Specifies what identifying major rev of the access channel was in effect when this entry was authored
 	AuxHeader           http.Header         // Any auxillary header entries that apply to this PDI entry -- always UTF8
 }
 
@@ -324,7 +289,7 @@ type ChannelProperties struct {
 	ChannelID               ChannelID               `json:"chID"`
 
 	// Specifies an owning access channel that asserts domain over this channel
-	OwningAccessChannelID   AccessChannelID         `json:"acID"`
+	OwningAccessChannelID   ChannelID               `json:"acID"`
 
 	// Specifies which major revision number of the owning access channel was in effect when this entry was authored.
 	// In general, a pnode won't insert/approve of a PDI entry until/unless the access channel revisions match.
@@ -370,7 +335,7 @@ func Assert( inCond bool, inFormat string, inArgs ...interface{} ) {
 }
 
 // ComputeHash hashes all fields of PDIEntryCrypt (except .Sig)
-func (inEntry *PDIEntryCrypt) ComputeHash( outHash *PDIEntryHash ) {
+func (inEntry *PDIEntryCrypt) ComputeHash() []byte {
 
 	hw := sha3.NewKeccak256()
 	hw.Write(inEntry.Info[:])
@@ -378,21 +343,24 @@ func (inEntry *PDIEntryCrypt) ComputeHash( outHash *PDIEntryHash ) {
 	hw.Write(inEntry.HeaderCrypt)
 	hw.Write(inEntry.BodyCrypt)
     
-    hash := hw.Sum( nil )
+    return hw.Sum( nil )
 
+    /*
     overhang := len(hash)-PDIEntryHashSz
 	if overhang > 0 {
 		hash = hash[overhang:]
 	}
-    copy( outHash[PDIEntryHashSz-len(hash):], hash)
+    copy( outHash[PDIEntryHashSz-len(hash):], hash)*/
 
 }
 
-
+/*
 // CopyFrom is a convenience function to copy from a byte slice.
 func (sig *PDIEntrySig) CopyFrom( inSig []byte ) {
 	copy( sig[:], inSig[:len(sig)] )
 }
+*/
+
 
 // NewPDIEntrySig is a convenience function to create a PDIEntrySig from an existing sig
 func NewPDIEntrySig( inBytes []byte ) PDIEntrySig {
@@ -401,7 +369,7 @@ func NewPDIEntrySig( inBytes []byte ) PDIEntrySig {
 	return sig
 }
 
-
+/*
 // ToArray is a convenience function to copy to a byte array.
 func (ckey *CommunityKey) ToArray() *[32]byte  {
     var arr [len(ckey)]byte
@@ -409,7 +377,7 @@ func (ckey *CommunityKey) ToArray() *[32]byte  {
     copy( arr[:], ckey[:len(ckey)])
     
 	return &arr
-}
+}*/
 
 // NewIdentityPublicKey is a convenience function to create a IdentityPublicKey from an existing key
 func NewIdentityPublicKey(inBytes *[32]byte) IdentityPublicKey {
@@ -417,8 +385,19 @@ func NewIdentityPublicKey(inBytes *[32]byte) IdentityPublicKey {
 	return k
 }
 
-// CopyFrom is a convenience function to copy from a byte array.
-func (ipk *IdentityPublicKey) CopyFrom( inArray *[32]byte ) {
+// Assign sets this CommunityID from the given buffer
+func (cid *CommunityID) Assign(in []byte) {
+    copy(cid[:], in[:IdentityAddrSz])
+}
+
+// Assign sets this CommunityID from the given buffer
+func (cid *IdentityAddr) Assign(in []byte) {
+    copy(cid[:], in[:IdentityAddrSz])
+}
+
+
+// Assign sets this IdentityPublicKey from the given buffer
+func (ipk *IdentityPublicKey) Assign( inArray *[32]byte ) {
 	copy(ipk[:], inArray[:32])
 }
 
