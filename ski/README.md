@@ -38,7 +38,7 @@ the recipient.
 
 ```go
 func (ski *SKI) Decrypt(
-	keyID plan.CommunityKeyID,
+	keyID plan.KeyID,
 	encrypted []byte,
 ) ([]byte, error)
 ```
@@ -60,7 +60,7 @@ using the recipients private key. It returns the decrypted buffer (or an error).
 #### func (*SKI) Encrypt
 
 ```go
-func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
+func (ski *SKI) Encrypt(keyId plan.KeyID, msg []byte,
 ) ([]byte, error)
 ```
 Encrypt accepts a buffer and encrypts it with the community key and returns the
@@ -88,7 +88,7 @@ PDIEntryHash
 #### func (*SKI) NewCommunityKey
 
 ```go
-func (ski *SKI) NewCommunityKey() plan.CommunityKeyID
+func (ski *SKI) NewCommunityKey() plan.KeyID
 ```
 NewCommunityKey generates a new community key, adds it to the keyring, and
 returns the CommunityKeyID associated with that key.
@@ -128,7 +128,7 @@ indicating success.
 
 ```go
 func (ski *SKI) Vouch(
-	communityKeyID plan.CommunityKeyID,
+	communityKeyID plan.KeyID,
 	senderPubKey plan.IdentityPublicKey,
 	recvPubKey plan.IdentityPublicKey,
 ) ([]byte, error)
