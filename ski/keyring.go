@@ -3,165 +3,247 @@ package ski // import "github.com/plan-tools/go-plan/ski"
 import (
 	crypto_rand "crypto/rand"
 	"sync"
+    "bytes"
 
 	plan "github.com/plan-tools/go-plan/plan"
 	box "golang.org/x/crypto/nacl/box"
 	sign "golang.org/x/crypto/nacl/sign"
 )
 
-// keyring represents the storage of keys
-type keyring struct {
-	communityKeys map[plan.KeyID][]byte
-	signingKeys   map[plan.IdentityPublicKey]*[64]byte
-	encryptKeys   map[plan.IdentityPublicKey]*[32]byte
-	mux           sync.RWMutex // synchronized changes to the keyring
+
+type KeyType uint32
+const (
+    SymmetricKey        KeyType = 1
+    EncryptionKey       KeyType = 2
+    SigningKey          KeyType = 3
+)
+
+type KeyEntry struct {
+    keyID           plan.KeyID                  `json:"id"`
+    keyType         KeyType                     `json:"type"`
+    creationTime    int64                       `json:"created"`
+    key             []byte                      `json:"k"`
+    publicKey       plan.IdentityPublicKey     // Only set iff .keyType == AsymmetricKey
 }
 
-func newKeyring() *keyring {
-	return &keyring{
-		communityKeys: map[plan.KeyID][]byte{},
-		signingKeys:   map[plan.IdentityPublicKey]*[64]byte{},
-		encryptKeys:   map[plan.IdentityPublicKey]*[32]byte{},
-	}
+
+func (entry *KeyEntry) EqualTo(other KeyEntry) bool {
+    return entry.keyType != other.keyType ||
+        entry.creationTime != other.creationTime ||
+        bytes.Equal(entry.key, other.key) == false ||
+        bytes.Equal(entry.publicKey,other.publicKey) == false ||
+        entry.keyID != other.keyID
+
 }
 
-// ---------------------------------------------------------
-// self identity functions
-//
+
+
+
+
+
+type Keyring struct {
+    sync.RWMutex
+    
+    name            string
+    keysByID        map[plan.KeyID]KeyEntry
+}
+
+func NewKeyring() *Keyring {
+
+    return &Keyring{
+        keysByID: map[plan.KeyID]KeyEntry{},
+    }
+}
+
+
+
 
 // NewIdentity generates encryption and signing keys, adds them to the
-// keyring, and returns the public keys associated with those private
+// Keyring, and returns the public keys associated with those private
 // keys.
-func (kr *keyring) NewIdentity() (plan.IdentityPublicKey, plan.IdentityPublicKey) {
+func (kr *Keyring) NewIdentity() (outSigningKey plan.IdentityPublicKey, outEncKey plan.IdentityPublicKey) {
 
-	// generate new key material
-	encryptPubKey, encryptPrivateKey := generateEncryptionKey()
-	signingPubKey, signingPrivateKey := generateSigningKey()
+    encrKey := GenerateKeyEntry(EncryptionKey)
+    signKey := GenerateKeyEntry(SigningKey)
 
-	// store it in the keyring and return the public keys
-	kr.mux.Lock()
-	kr.signingKeys[signingPubKey] = signingPrivateKey
-    kr.encryptKeys[encryptPubKey] = encryptPrivateKey
-    kr.mux.Unlock()
+	// store it in the Keyring and return the public keys
+	kr.Lock()
+	kr.keysByID[encrKey.keyID] = encrKey
+    kr.keysByID[signKey.keyID] = signKey
+    kr.Unlock()
 
-	return encryptPubKey, signingPubKey
+	return encrKey.publicKey, signKey.publicKey
 }
+
+
+// InstallKey adds a key to the keychain (ignoring collitions if the jey entry is identical)
+func (kr *Keyring) AddKeys(
+    inEntries []KeyEntry,
+    ) *plan.Perror {
+
+    var collisions []plan.KeyID
+
+    kr.Lock()
+    for _, entry := range inEntries {
+        existing, ok := kr.keysByID[entry.keyID]
+        if ok && ! existing.EqualTo(entry) {
+            collisions = append(collisions, entry.keyID)
+        } else {
+            kr.keysByID[entry.keyID] = entry
+        }
+    }
+    kr.Unlock()
+
+    var err *plan.Perror
+
+    if len(collisions) > 0 {
+        err = plan.Errorf(nil, plan.KeyIDCollision, "key ID collision while adding keys {keyID:%v}", collisions)
+    }
+    return err
+
+}
+
+
+
+func (kr *Keyring) GetKeyEntry(
+    inKeyID plan.KeyID,
+    outKeyEntry *KeyEntry,
+    ) *plan.Perror {
+
+    var keyEntry KeyEntry
+
+	kr.RLock()
+    keyEntry, ok := kr.keysByID[inKeyID]
+    kr.RUnlock()
+    
+	if !ok {
+		return plan.Errorf(nil, plan.KeyIDNotFound, "key not found {keyID:%v}", inKeyID)
+    }
+    
+    *outKeyEntry = keyEntry
+
+	return nil
+}
+
+
+
 
 // GetSigningKey fetches the d's private signing key from the keychain for a
 // specific public key, or an error if the key doesn't exist.
-func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
-	*[64]byte, *plan.Perror) {
-    var key *[64]byte
+func (kr *Keyring) GetSigningKey(inKeyID plan.KeyID) (
+	[]byte, *plan.Perror) {
+
+	kr.RLock()
+    entry, ok := kr.keysByID[inKeyID]
+    kr.RUnlock()
     
-	kr.mux.RLock()
-    key, ok := kr.signingKeys[pubKey]
-    kr.mux.RUnlock()
-    
-	if !ok {
-		return nil, plan.Errorf(nil, plan.SigningKeyNotFound, "signing key not found {pubKey:%v}", pubKey)
+	if !ok || entry.keyType != SigningKey {
+		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "signing key not found {keyID:%v}", inKeyID)
 	}
-	return key, nil
+	return entry.key, nil
 }
+
+
 
 // GetEncryptKey fetches the d's private encrypt key from the keychain,
 // or an error if the key doesn't exist.
-func (kr *keyring) GetEncryptKey(pubKey plan.IdentityPublicKey) (
-	*[32]byte, *plan.Perror) {
-    var key *[32]byte
+func (kr *Keyring) GetEncryptKey(inKeyID plan.KeyID) (
+	[]byte, *plan.Perror) {
     
-	kr.mux.RLock()
-    key, ok := kr.encryptKeys[pubKey]
-    kr.mux.RUnlock()
+	kr.RLock()
+    entry, ok := kr.keysByID[inKeyID]
+    kr.RUnlock()
 
-	if !ok {
-		return nil, plan.Errorf(nil, plan.EncryptKeyNotFound, "encrypt key not found {pubKey:%v}", pubKey)
+	if !ok || entry.keyType != EncryptionKey {
+		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "encrypt key not found {keyID:%v}", inKeyID)
 	}
-	return key, nil
+	return entry.key, nil
 }
 
-// Removes any instance of a key associated with the public key provided
-// from the keyring
-func (kr *keyring) InvalidateIdentity(key plan.IdentityPublicKey) {
+
+
+// GetSymmetricKey fetches the community key from the keychain for a
+// based on its ID, or an error if the key doesn't exist.
+func (kr *Keyring) GetSymmetricKey(inKeyID plan.KeyID) (
+	[]byte, *plan.Perror) {
     
-	kr.mux.Lock()
-	delete(kr.signingKeys, key)
-    delete(kr.encryptKeys, key)
-    kr.mux.Unlock()
+	kr.RLock()
+    entry, ok := kr.keysByID[inKeyID]
+    kr.RUnlock()
+
+	if !ok || entry.keyType != SymmetricKey {
+		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "community key not found {keyID:%v}", inKeyID)
+	}
+	return entry.key, nil
 }
 
-func generateEncryptionKey() (plan.IdentityPublicKey, *[32]byte) {
-	publicKey, privateKey, err := box.GenerateKey(crypto_rand.Reader)
-	if err != nil {
-		panic(err)
-	}
-	return plan.NewIdentityPublicKey(publicKey), privateKey
+
+
+
+
+func GenerateKeyEntry(inKeyType KeyType) KeyEntry {
+    entry := KeyEntry{
+        keyType: inKeyType,
+        creationTime: plan.Now().UnixSecs,
+    }
+
+    switch inKeyType {
+
+        case SymmetricKey:{
+            entry.key = make([]byte, 32)
+            _, err := crypto_rand.Read(entry.key)
+            if err != nil {
+                panic(err)
+            }
+
+            _, err = crypto_rand.Read(entry.keyID[:])
+            if err != nil {
+                panic(err)
+            }
+        }
+
+        case EncryptionKey:{
+            publicKey, privateKey, err := box.GenerateKey(crypto_rand.Reader)
+            if err != nil {
+                panic(err)
+            }
+            entry.key = privateKey[:]
+            entry.publicKey = publicKey[:]
+            entry.keyID.AssignFrom(entry.publicKey)
+        }
+
+        case SigningKey:{
+            publicKey, privateKey, err := sign.GenerateKey(crypto_rand.Reader)
+            if err != nil {
+                panic(err)
+            }
+            entry.key = privateKey[:]
+            entry.publicKey = publicKey[:]
+            entry.keyID.AssignFrom(entry.publicKey)
+        }
+    }
+
+    return entry
+
 }
 
-func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
-	publicKey, privateKey, err := sign.GenerateKey(crypto_rand.Reader)
-	if err != nil {
-		panic(err)
-	}
-	return plan.NewIdentityPublicKey(publicKey), privateKey
-}
+
+
 
 // ---------------------------------------------------------
 // community key functions
 //
 
-// NewCommunityKey generates a new community key, adds it to the keyring,
+// NewSymmetricKey generates a new community key, adds it to the Keyring,
 // and returns the CommunityKeyID associated with that key.
-func (kr *keyring) NewCommunityKey() plan.KeyID {
+func (kr *Keyring) NewSymmetricKey() plan.KeyID {
 	
-    key, keyID := generateSymmetricKey()
-    
-    kr.mux.Lock()
-    kr.communityKeys[keyID] = key[:]
-    kr.mux.Unlock()
+    symKey := GenerateKeyEntry(SymmetricKey)
 
-	return keyID
+    kr.Lock()
+    kr.keysByID[symKey.keyID] = symKey
+    kr.Unlock()
+
+	return symKey.keyID
 }
 
-// InstallCommunityKey adds a new community key to the keychain
-func (kr *keyring) InstallCommunityKey(
-	keyID plan.KeyID, key []byte) {
-
-	kr.mux.Lock()
-    kr.communityKeys[keyID] = key
-    kr.mux.Unlock()
-}
-
-// GetCommunityKeyByID fetches the community key from the keychain for a
-// based on its ID, or an error if the key doesn't exist.
-func (kr *keyring) GetCommunityKeyByID(keyID plan.KeyID) (
-	[]byte, *plan.Perror) {
-    
-	kr.mux.RLock()
-    key, ok := kr.communityKeys[keyID]
-    kr.mux.RUnlock()
-
-	if !ok {
-		return nil, plan.Errorf(nil, plan.CommunityKeyNotFound, "community key not found {keyID:%v}", keyID)
-	}
-	return key, nil
-}
-
-func generateSymmetricKey() ([32]byte, plan.KeyID) {
-	secret := make([]byte, 32)
-	_, err := crypto_rand.Read(secret)
-	if err != nil {
-		panic(err) // TODO: unclear when we'd ever hit this?
-	}
-	var key [32]byte
-	copy(key[:32], secret[:])
-
-	keyID := make([]byte, 16) // TODO: is this enough for uniqueness?
-	_, err = crypto_rand.Read(keyID)
-	if err != nil {
-		panic(err) // TODO: unclear when we'd ever hit this?
-	}
-	var communityID plan.KeyID
-	copy(communityID[:16], keyID[:])
-
-	return key, communityID
-}
