@@ -40,7 +40,7 @@ type KeyID              [KeyIDSz]byte
 type CommunityID        [IdentityAddrSz]byte
 
 // IdentityPublicKey is the public key of a person, group, or sub community inside a PLAN community.
-type IdentityPublicKey  [32]byte
+type IdentityPublicKey  []byte
 
 // IdentityAddr the rightmost bytes of IdentityPublicKey
 type IdentityAddr       [IdentityAddrSz]byte
@@ -377,25 +377,31 @@ func (ckey *CommunityKey) ToArray() *[32]byte  {
     copy( arr[:], ckey[:len(ckey)])
     
 	return &arr
-}*/
+}
 
 // NewIdentityPublicKey is a convenience function to create a IdentityPublicKey from an existing key
 func NewIdentityPublicKey(inBytes *[32]byte) IdentityPublicKey {
 	k := IdentityPublicKey(*inBytes)
 	return k
-}
+}*/
 
 // Assign sets this CommunityID from the given buffer
-func (cid *CommunityID) Assign(in []byte) {
+func (cid *CommunityID) AssignFrom(in []byte) {
     copy(cid[:], in[:IdentityAddrSz])
 }
 
 // Assign sets this CommunityID from the given buffer
-func (cid *IdentityAddr) Assign(in []byte) {
-    copy(cid[:], in[:IdentityAddrSz])
+func (cid *IdentityAddr) AssignFrom(in []byte) {
+    copy(cid[:], in[IdentityAddrSz:])
+}
+
+func (kid *KeyID) AssignFrom(in []byte) {
+    copy(kid[:], in[len(in)-IdentityAddrSz:])
 }
 
 
+
+/*
 // Assign sets this IdentityPublicKey from the given buffer
 func (ipk *IdentityPublicKey) Assign( inArray *[32]byte ) {
 	copy(ipk[:], inArray[:32])
@@ -409,5 +415,5 @@ func (ipk *IdentityPublicKey) ToArray() *[32]byte  {
     
 	return &arr
 }
-
+*/
 

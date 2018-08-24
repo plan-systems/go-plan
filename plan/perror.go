@@ -73,9 +73,16 @@ func (e *Perror) Error() string {
 
 const (
 
+    // GenericErrorFamily errors generally relate to pnode
+    GenericErrorFamily = 5000 + iota
+
+    // AssertFailure means an unreachable part of code was...reached.  :\
+    AssertFailure
+
+
 
     // PDIEntryErrorFamily errors generally relate to pnode
-    PDIEntryErrorFamily = 5000 + iota
+    PDIEntryErrorFamily = 5100 + iota
 
     // BadPDIEntryFormat means the PDI entry being processed is corrupted or was created using an unsupported format
     BadPDIEntryFormat
@@ -114,16 +121,34 @@ const (
 
 
     // SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)
-    SecurityErrorFamily = 5100 + iota
+    SecurityErrorFamily = 5200 + iota
 
-    // CommunityKeyNotFound means a key source did not contain the requested CommunityKey for the given CommunityKeyID
-    CommunityKeyNotFound
+    // InvocationNotAvailable means an SKI session was started with an unrecognized invocation string
+    InvocationNotAvailable
 
-    // SigningKeyNotFound means a key source did not contain the requested private key for the given paired public key
-    SigningKeyNotFound
+    // KeyringNotSpecified means no keyring scope name was given for the SKI operation
+    KeyringNotSpecified
 
-    // EncryptKeyNotFound means a key source did not contain the requested private key for the given paired public key
-    EncryptKeyNotFound
+    // KeyringNotFound means the given keyring name was not found
+    KeyringNotFound
+
+    // UnknownSKIOpName means the given SKI op name was not recognized
+    UnknownSKIOpName
+
+    // InsufficientSKIAccess means the requested permissions were not issued to allow the operation to proceed
+    InsufficientSKIAccess
+
+    // InvalidSKISession means the given session is not currently open 
+    InvalidSKISession
+
+    // KeyIDNotFound means a key source did not contain the requested key ID
+    KeyIDNotFound
+
+    // KeyIDCollision occurs when a key is placed in a keyring that already contains the key ID
+    KeyIDCollision
+
+    // BadKeyFormat means key data was a length or format that was invalid or unexpected
+    BadKeyFormat
 
     // FailedToDecryptAccessGrant means a PDI entry body content failed to decrypt
     FailedToDecryptAccessGrant
@@ -137,7 +162,8 @@ const (
     // FailedToDecryptCommunityData means the 
     FailedToDecryptCommunityData
 
-
+    // FailedToDecryptPersonalData means personal decryption failed
+    FailedToDecryptPersonalData
 
 
 
