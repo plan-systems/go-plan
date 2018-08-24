@@ -16,6 +16,7 @@ type OpArgs struct {
     // A list of key IDs that are specific to a given op.
     OpKeyIDs            []plan.KeyID
 
+    // Sender/Recipient publicly available key -- a public address in the comminity key space
     PeerPubKey          []byte
 
     Msg                 []byte
@@ -23,22 +24,18 @@ type OpArgs struct {
 
 }
 
-// OpResult is an element of any possible number of results from an SKI operation
-type OpResult struct {
-    info                string
-    buf                 []byte
-}
 
 // OpCompletionHandler handles the result of a SKI operation
 type OpCompletionHandler func(*plan.Perror, []OpResult)
 
 
-// Used as inInvocation for SKI.Provider.StartSession()
-const (
+// OpResult is an element of array of resulting output from an SKI operation (passed to OpCompletionHandler)
+type OpResult struct {
+    info                string
+    buf                 []byte
+}
 
-    InvokeNaCl = "/plan/ski/provider/nacl/1"
 
-)
 
 
 
@@ -53,18 +50,15 @@ const (
     // OpDecryptCommunityData decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
     OpDecryptFromCommunity  = "c_decrypt_from"
 
-
     // OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
     OpEncryptFor            = "encrypt_for"
 
     // OpDecryptFrom decrypts OpArgs.Msg from the sender's OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
     OpDecryptFrom           = "decrypt_from"
 
-
     // OpSignMsg creates a signature buffer for OpArgs.Msg, using the asymmetric key indexed by OpArgs.CryptoKeyID.
     // Note: len(inOpResults) == 0
     OpSignMsg               = "sign_msg"
-
 
     // OpSendCommunityKeys securely "sends" the community keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,
     //    encrypting the resulting buffer using the asymmetric key indexed by OpArgs.CryptoKeyID.
@@ -160,4 +154,6 @@ const (
 
     // PersonalKeyring is one's personal keyring and is used to encrypt/decrypt private data.
     PersonalKeyring         = "/plan/keyring/personal/1"
+
+    DeviceChainKeyring      = "/plan/keyring/devices/1"
 )

@@ -17,6 +17,10 @@ import (
 
 const (
     vouchCodecName = "/plan/ski/vouch/1"
+
+    // InvokeNaCl should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
+    InvokeNaCl = "/plan/ski/provider/nacl/1"
+
 )
 
 
@@ -194,14 +198,14 @@ var (
 
     // Convenience for having zero data around
     zero64 = [64]byte{
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,
+        -0,-0,-0,-0,-0,-0,-0,-0,
+        -0,+0,+0,-0,-0,-0,-0,-0,
+        -0,+0,+0,-0,-0,-0,-0,-0,
+        -0,-0,-0,-0,-0,-0,-0,-0,
+        +0,+0,+0,+0,+0,+0,+0,+0,
+        +0,+0,+0,+0,+0,-0,-0,+0,
+        +0,+0,+0,+0,+0,-0-+0,+0,
+        +0,+0,+0,+0,+0,+0,+0,+0,
     }
 )
 

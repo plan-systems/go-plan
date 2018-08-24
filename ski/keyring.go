@@ -11,32 +11,21 @@ import (
 )
 
 
-type KeyType uint32
-const (
-    SymmetricKey        KeyType = 1
-    EncryptionKey       KeyType = 2
-    SigningKey          KeyType = 3
-)
 
-type KeyEntry struct {
-    keyID           plan.KeyID                  `json:"id"`
-    keyType         KeyType                     `json:"type"`
-    creationTime    int64                       `json:"created"`
-    key             []byte                      `json:"k"`
-    publicKey       plan.IdentityPublicKey     // Only set iff .keyType == AsymmetricKey
-}
-
-
-func (entry *KeyEntry) EqualTo(other KeyEntry) bool {
-    return entry.keyType != other.keyType ||
-        entry.creationTime != other.creationTime ||
-        bytes.Equal(entry.key, other.key) == false ||
-        bytes.Equal(entry.publicKey,other.publicKey) == false ||
-        entry.keyID != other.keyID
+func (entry *KeyEntry) EqualTo(other *KeyEntry) bool {
+    return entry.KeyType != other.KeyType ||
+        entry.CreationTime != other.CreationTime ||
+        bytes.Equal(entry.PrivKey, other.PrivKey) == false ||
+        bytes.Equal(entry.PubKey, other.PubKey) == false
 
 }
 
 
+func (entry *KeyEntry) GetKeyID() plan.KeyID {
+    var keyID plan.KeyID
+    copy(keyID[:], entry.PubKey[len(entry.PubKey)-plan.KeyIDSz:])
+    return keyID
+}
 
 
 
@@ -44,14 +33,15 @@ func (entry *KeyEntry) EqualTo(other KeyEntry) bool {
 type Keyring struct {
     sync.RWMutex
     
-    name            string
-    keysByID        map[plan.KeyID]KeyEntry
+    Name            string
+    Desc            string
+    keysByID        map[plan.KeyID]*KeyEntry
 }
 
 func NewKeyring() *Keyring {
 
     return &Keyring{
-        keysByID: map[plan.KeyID]KeyEntry{},
+        keysByID: map[plan.KeyID]*KeyEntry{},
     }
 }
 
@@ -63,33 +53,93 @@ func NewKeyring() *Keyring {
 // keys.
 func (kr *Keyring) NewIdentity() (outSigningKey plan.IdentityPublicKey, outEncKey plan.IdentityPublicKey) {
 
-    encrKey := GenerateKeyEntry(EncryptionKey)
-    signKey := GenerateKeyEntry(SigningKey)
+    encrKey := GenerateKeyEntry(KeyType_ENCRYPTION_KEY)
+    signKey := GenerateKeyEntry(KeyType_SIGNING_KEY)
 
 	// store it in the Keyring and return the public keys
-	kr.Lock()
-	kr.keysByID[encrKey.keyID] = encrKey
-    kr.keysByID[signKey.keyID] = signKey
+    kr.Lock()
+	kr.keysByID[encrKey.GetKeyID()] = encrKey
+    kr.keysByID[signKey.GetKeyID()] = signKey
     kr.Unlock()
 
-	return encrKey.publicKey, signKey.publicKey
+	return encrKey.PubKey, signKey.PubKey
 }
 
 
-// InstallKey adds a key to the keychain (ignoring collitions if the jey entry is identical)
-func (kr *Keyring) AddKeys(
-    inEntries []KeyEntry,
-    ) *plan.Perror {
 
-    var collisions []plan.KeyID
+// NewSymmetricKey generates a new symmetric key and adds it to the Keyring,
+// and returns the CommunityKeyID associated with that key.
+func (kr *Keyring) NewSymmetricKey() plan.KeyID {
+	
+    symKey := GenerateKeyEntry(KeyType_SYMMETRIC_KEY)
+
+    keyID := symKey.GetKeyID()
 
     kr.Lock()
-    for _, entry := range inEntries {
-        existing, ok := kr.keysByID[entry.keyID]
-        if ok && ! existing.EqualTo(entry) {
-            collisions = append(collisions, entry.keyID)
+    kr.keysByID[keyID] = symKey
+    kr.Unlock()
+
+	return keyID
+}
+
+
+
+// ExportKeys exports the given list of keys into a buffer to
+func (kr *Keyring) ExportKeys(
+    inKeyIDs []plan.KeyID,
+    ) *plan.Perror {
+
+    keyList := KeyList {
+        Vers: 1,
+        Keys: make([]*KeyEntry, len(inKeyIDs)),
+    }
+
+    var keyID plan.KeyID
+    
+    kr.RLock()
+    for _, keyID := range inKeyIDs {
+        existing := kr.keysByID[keyID]
+        if existing == nil ) 
+        
+        KeyIDNotFound
+        && existing.EqualTo(entry) {
+            collisions = append(collisions, entry)
         } else {
-            kr.keysByID[entry.keyID] = entry
+            kr.keysByID[keyID] = entry
+        }
+    }
+    kr.EUnlock()
+
+    var err *plan.Perror
+
+    if len(collisions) > 0 {
+        err = plan.Errorf(nil, plan.KeyIDCollision, "key ID collision while adding keys {keyID:%v}", collisions)
+    }
+    return err
+
+}
+
+
+
+
+
+
+// MergeKeys adds a key to the keychain (ignoring collitions if the key entry is identical)
+func (kr *Keyring) MergeKeys(
+    inKeyList *KeyList,
+    ) *plan.Perror {
+
+    var collisions []*KeyEntry
+    var keyID plan.KeyID
+    
+    kr.Lock()
+    for _, entry := range inKeyList.Keys {
+        keyID = entry.GetKeyID()
+        existing, ok := kr.keysByID[keyID]
+        if ok && ! existing.EqualTo(entry) {
+            collisions = append(collisions, entry)
+        } else {
+            kr.keysByID[keyID] = entry
         }
     }
     kr.Unlock()
@@ -104,7 +154,7 @@ func (kr *Keyring) AddKeys(
 }
 
 
-
+/*
 func (kr *Keyring) GetKeyEntry(
     inKeyID plan.KeyID,
     outKeyEntry *KeyEntry,
@@ -124,7 +174,7 @@ func (kr *Keyring) GetKeyEntry(
 
 	return nil
 }
-
+*/
 
 
 
@@ -137,10 +187,10 @@ func (kr *Keyring) GetSigningKey(inKeyID plan.KeyID) (
     entry, ok := kr.keysByID[inKeyID]
     kr.RUnlock()
     
-	if !ok || entry.keyType != SigningKey {
+	if !ok || entry.KeyType != KeyType_SIGNING_KEY {
 		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "signing key not found {keyID:%v}", inKeyID)
 	}
-	return entry.key, nil
+	return entry.PrivKey, nil
 }
 
 
@@ -154,10 +204,10 @@ func (kr *Keyring) GetEncryptKey(inKeyID plan.KeyID) (
     entry, ok := kr.keysByID[inKeyID]
     kr.RUnlock()
 
-	if !ok || entry.keyType != EncryptionKey {
+	if !ok || entry.KeyType != KeyType_ENCRYPTION_KEY {
 		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "encrypt key not found {keyID:%v}", inKeyID)
 	}
-	return entry.key, nil
+	return entry.PrivKey, nil
 }
 
 
@@ -171,55 +221,54 @@ func (kr *Keyring) GetSymmetricKey(inKeyID plan.KeyID) (
     entry, ok := kr.keysByID[inKeyID]
     kr.RUnlock()
 
-	if !ok || entry.keyType != SymmetricKey {
+	if !ok || entry.KeyType != KeyType_SYMMETRIC_KEY {
 		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "community key not found {keyID:%v}", inKeyID)
 	}
-	return entry.key, nil
+	return entry.PrivKey, nil
 }
 
 
 
 
 
-func GenerateKeyEntry(inKeyType KeyType) KeyEntry {
-    entry := KeyEntry{
-        keyType: inKeyType,
-        creationTime: plan.Now().UnixSecs,
+func GenerateKeyEntry(inKeyType KeyType) *KeyEntry {
+    entry := &KeyEntry{
+        KeyType: inKeyType,
+        CreationTime: plan.Now().UnixSecs,
     }
-
+    
     switch inKeyType {
 
-        case SymmetricKey:{
-            entry.key = make([]byte, 32)
-            _, err := crypto_rand.Read(entry.key)
+        case KeyType_SYMMETRIC_KEY:{
+            entry.PubKey = make([]byte, plan.KeyIDSz)
+            _, err := crypto_rand.Read(entry.PubKey)
             if err != nil {
                 panic(err)
             }
 
-            _, err = crypto_rand.Read(entry.keyID[:])
+            entry.PrivKey = make([]byte, 32)
+            _, err = crypto_rand.Read(entry.PrivKey)
             if err != nil {
                 panic(err)
             }
         }
 
-        case EncryptionKey:{
+        case KeyType_ENCRYPTION_KEY:{
             publicKey, privateKey, err := box.GenerateKey(crypto_rand.Reader)
             if err != nil {
                 panic(err)
             }
-            entry.key = privateKey[:]
-            entry.publicKey = publicKey[:]
-            entry.keyID.AssignFrom(entry.publicKey)
+            entry.PrivKey = privateKey[:]
+            entry.PubKey = publicKey[:]
         }
 
-        case SigningKey:{
+        case KeyType_SIGNING_KEY:{
             publicKey, privateKey, err := sign.GenerateKey(crypto_rand.Reader)
             if err != nil {
                 panic(err)
             }
-            entry.key = privateKey[:]
-            entry.publicKey = publicKey[:]
-            entry.keyID.AssignFrom(entry.publicKey)
+            entry.PrivKey = privateKey[:]
+            entry.PubKey = publicKey[:]
         }
     }
 
@@ -228,22 +277,4 @@ func GenerateKeyEntry(inKeyType KeyType) KeyEntry {
 }
 
 
-
-
-// ---------------------------------------------------------
-// community key functions
-//
-
-// NewSymmetricKey generates a new community key, adds it to the Keyring,
-// and returns the CommunityKeyID associated with that key.
-func (kr *Keyring) NewSymmetricKey() plan.KeyID {
-	
-    symKey := GenerateKeyEntry(SymmetricKey)
-
-    kr.Lock()
-    kr.keysByID[symKey.keyID] = symKey
-    kr.Unlock()
-
-	return symKey.keyID
-}
 

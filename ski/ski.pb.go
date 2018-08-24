@@ -9,7 +9,7 @@
 
 	It has these top-level messages:
 		KeyEntry
-		Keyring
+		KeyList
 */
 package ski
 
@@ -55,24 +55,16 @@ func (x KeyType) String() string {
 func (KeyType) EnumDescriptor() ([]byte, []int) { return fileDescriptorSki, []int{0} }
 
 type KeyEntry struct {
-	KeyId        []byte  `protobuf:"bytes,1,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
-	KeyType      KeyType `protobuf:"varint,2,opt,name=key_type,json=keyType,proto3,enum=ski.KeyType" json:"key_type,omitempty"`
-	CreationTime int64   `protobuf:"varint,3,opt,name=creation_time,json=creationTime,proto3" json:"creation_time,omitempty"`
-	PrivKey      []byte  `protobuf:"bytes,4,opt,name=privKey,proto3" json:"privKey,omitempty"`
-	PubKey       []byte  `protobuf:"bytes,5,opt,name=pubKey,proto3" json:"pubKey,omitempty"`
+	KeyType      KeyType `protobuf:"varint,1,opt,name=key_type,json=keyType,proto3,enum=ski.KeyType" json:"key_type,omitempty"`
+	CreationTime int64   `protobuf:"varint,2,opt,name=creation_time,json=creationTime,proto3" json:"creation_time,omitempty"`
+	PrivKey      []byte  `protobuf:"bytes,3,opt,name=privKey,proto3" json:"privKey,omitempty"`
+	PubKey       []byte  `protobuf:"bytes,4,opt,name=pubKey,proto3" json:"pubKey,omitempty"`
 }
 
 func (m *KeyEntry) Reset()                    { *m = KeyEntry{} }
 func (m *KeyEntry) String() string            { return proto.CompactTextString(m) }
 func (*KeyEntry) ProtoMessage()               {}
 func (*KeyEntry) Descriptor() ([]byte, []int) { return fileDescriptorSki, []int{0} }
-
-func (m *KeyEntry) GetKeyId() []byte {
-	if m != nil {
-		return m.KeyId
-	}
-	return nil
-}
 
 func (m *KeyEntry) GetKeyType() KeyType {
 	if m != nil {
@@ -102,33 +94,33 @@ func (m *KeyEntry) GetPubKey() []byte {
 	return nil
 }
 
-type Keyring struct {
-	Vers       int32       `protobuf:"varint,1,opt,name=vers,proto3" json:"vers,omitempty"`
-	KeyEntries []*KeyEntry `protobuf:"bytes,2,rep,name=key_entries,json=keyEntries" json:"key_entries,omitempty"`
+type KeyList struct {
+	Vers int32       `protobuf:"varint,1,opt,name=vers,proto3" json:"vers,omitempty"`
+	Keys []*KeyEntry `protobuf:"bytes,2,rep,name=keys" json:"keys,omitempty"`
 }
 
-func (m *Keyring) Reset()                    { *m = Keyring{} }
-func (m *Keyring) String() string            { return proto.CompactTextString(m) }
-func (*Keyring) ProtoMessage()               {}
-func (*Keyring) Descriptor() ([]byte, []int) { return fileDescriptorSki, []int{1} }
+func (m *KeyList) Reset()                    { *m = KeyList{} }
+func (m *KeyList) String() string            { return proto.CompactTextString(m) }
+func (*KeyList) ProtoMessage()               {}
+func (*KeyList) Descriptor() ([]byte, []int) { return fileDescriptorSki, []int{1} }
 
-func (m *Keyring) GetVers() int32 {
+func (m *KeyList) GetVers() int32 {
 	if m != nil {
 		return m.Vers
 	}
 	return 0
 }
 
-func (m *Keyring) GetKeyEntries() []*KeyEntry {
+func (m *KeyList) GetKeys() []*KeyEntry {
 	if m != nil {
-		return m.KeyEntries
+		return m.Keys
 	}
 	return nil
 }
 
 func init() {
 	proto.RegisterType((*KeyEntry)(nil), "ski.KeyEntry")
-	proto.RegisterType((*Keyring)(nil), "ski.Keyring")
+	proto.RegisterType((*KeyList)(nil), "ski.KeyList")
 	proto.RegisterEnum("ski.KeyType", KeyType_name, KeyType_value)
 }
 func (m *KeyEntry) Marshal() (dAtA []byte, err error) {
@@ -146,30 +138,24 @@ func (m *KeyEntry) MarshalTo(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.KeyId) > 0 {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintSki(dAtA, i, uint64(len(m.KeyId)))
-		i += copy(dAtA[i:], m.KeyId)
-	}
 	if m.KeyType != 0 {
-		dAtA[i] = 0x10
+		dAtA[i] = 0x8
 		i++
 		i = encodeVarintSki(dAtA, i, uint64(m.KeyType))
 	}
 	if m.CreationTime != 0 {
-		dAtA[i] = 0x18
+		dAtA[i] = 0x10
 		i++
 		i = encodeVarintSki(dAtA, i, uint64(m.CreationTime))
 	}
 	if len(m.PrivKey) > 0 {
-		dAtA[i] = 0x22
+		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintSki(dAtA, i, uint64(len(m.PrivKey)))
 		i += copy(dAtA[i:], m.PrivKey)
 	}
 	if len(m.PubKey) > 0 {
-		dAtA[i] = 0x2a
+		dAtA[i] = 0x22
 		i++
 		i = encodeVarintSki(dAtA, i, uint64(len(m.PubKey)))
 		i += copy(dAtA[i:], m.PubKey)
@@ -177,7 +163,7 @@ func (m *KeyEntry) MarshalTo(dAtA []byte) (int, error) {
 	return i, nil
 }
 
-func (m *Keyring) Marshal() (dAtA []byte, err error) {
+func (m *KeyList) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalTo(dAtA)
@@ -187,7 +173,7 @@ func (m *Keyring) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *Keyring) MarshalTo(dAtA []byte) (int, error) {
+func (m *KeyList) MarshalTo(dAtA []byte) (int, error) {
 	var i int
 	_ = i
 	var l int
@@ -197,8 +183,8 @@ func (m *Keyring) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintSki(dAtA, i, uint64(m.Vers))
 	}
-	if len(m.KeyEntries) > 0 {
-		for _, msg := range m.KeyEntries {
+	if len(m.Keys) > 0 {
+		for _, msg := range m.Keys {
 			dAtA[i] = 0x12
 			i++
 			i = encodeVarintSki(dAtA, i, uint64(msg.Size()))
@@ -224,10 +210,6 @@ func encodeVarintSki(dAtA []byte, offset int, v uint64) int {
 func (m *KeyEntry) Size() (n int) {
 	var l int
 	_ = l
-	l = len(m.KeyId)
-	if l > 0 {
-		n += 1 + l + sovSki(uint64(l))
-	}
 	if m.KeyType != 0 {
 		n += 1 + sovSki(uint64(m.KeyType))
 	}
@@ -245,14 +227,14 @@ func (m *KeyEntry) Size() (n int) {
 	return n
 }
 
-func (m *Keyring) Size() (n int) {
+func (m *KeyList) Size() (n int) {
 	var l int
 	_ = l
 	if m.Vers != 0 {
 		n += 1 + sovSki(uint64(m.Vers))
 	}
-	if len(m.KeyEntries) > 0 {
-		for _, e := range m.KeyEntries {
+	if len(m.Keys) > 0 {
+		for _, e := range m.Keys {
 			l = e.Size()
 			n += 1 + l + sovSki(uint64(l))
 		}
@@ -303,37 +285,6 @@ func (m *KeyEntry) Unmarshal(dAtA []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field KeyId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowSki
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthSki
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.KeyId = append(m.KeyId[:0], dAtA[iNdEx:postIndex]...)
-			if m.KeyId == nil {
-				m.KeyId = []byte{}
-			}
-			iNdEx = postIndex
-		case 2:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field KeyType", wireType)
 			}
@@ -352,7 +303,7 @@ func (m *KeyEntry) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-		case 3:
+		case 2:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field CreationTime", wireType)
 			}
@@ -371,7 +322,7 @@ func (m *KeyEntry) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-		case 4:
+		case 3:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field PrivKey", wireType)
 			}
@@ -402,7 +353,7 @@ func (m *KeyEntry) Unmarshal(dAtA []byte) error {
 				m.PrivKey = []byte{}
 			}
 			iNdEx = postIndex
-		case 5:
+		case 4:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field PubKey", wireType)
 			}
@@ -454,7 +405,7 @@ func (m *KeyEntry) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *Keyring) Unmarshal(dAtA []byte) error {
+func (m *KeyList) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -477,10 +428,10 @@ func (m *Keyring) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: Keyring: wiretype end group for non-group")
+			return fmt.Errorf("proto: KeyList: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: Keyring: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: KeyList: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
@@ -504,7 +455,7 @@ func (m *Keyring) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field KeyEntries", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Keys", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -528,8 +479,8 @@ func (m *Keyring) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.KeyEntries = append(m.KeyEntries, &KeyEntry{})
-			if err := m.KeyEntries[len(m.KeyEntries)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+			m.Keys = append(m.Keys, &KeyEntry{})
+			if err := m.Keys[len(m.Keys)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -662,24 +613,23 @@ var (
 func init() { proto.RegisterFile("ski.proto", fileDescriptorSki) }
 
 var fileDescriptorSki = []byte{
-	// 299 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x34, 0x90, 0xcd, 0x4a, 0xf3, 0x40,
-	0x14, 0x86, 0x3b, 0x4d, 0xff, 0xbe, 0xd3, 0x9f, 0xaf, 0x1e, 0x50, 0x66, 0x15, 0x42, 0x5d, 0x18,
-	0x5c, 0x74, 0x51, 0xaf, 0x40, 0x4b, 0x28, 0x21, 0x34, 0xca, 0x34, 0x9b, 0xae, 0x8a, 0xb5, 0x07,
-	0x19, 0x86, 0xa6, 0x61, 0x32, 0x16, 0xe6, 0x4e, 0xdc, 0x7a, 0x37, 0x2e, 0xbd, 0x04, 0xa9, 0x37,
-	0x22, 0x99, 0x9a, 0xdd, 0x7b, 0x9e, 0x03, 0xef, 0x3c, 0x73, 0xe0, 0x5f, 0xa9, 0xe4, 0xb4, 0xd0,
-	0x07, 0x73, 0x40, 0xaf, 0x54, 0x72, 0xf2, 0xc1, 0xa0, 0x97, 0x90, 0x8d, 0x72, 0xa3, 0x2d, 0x5e,
-	0x42, 0x47, 0x91, 0xdd, 0xc8, 0x1d, 0x67, 0x01, 0x0b, 0x07, 0xa2, 0xad, 0xc8, 0xc6, 0x3b, 0xbc,
-	0x81, 0x5e, 0x85, 0x8d, 0x2d, 0x88, 0x37, 0x03, 0x16, 0x8e, 0x66, 0x83, 0x69, 0x55, 0x93, 0x90,
-	0xcd, 0x6c, 0x41, 0xa2, 0xab, 0xce, 0x01, 0xaf, 0x61, 0xf8, 0xa2, 0xe9, 0xd9, 0xc8, 0x43, 0xbe,
-	0x31, 0x72, 0x4f, 0xdc, 0x0b, 0x58, 0xe8, 0x89, 0x41, 0x0d, 0x33, 0xb9, 0x27, 0xe4, 0xd0, 0x2d,
-	0xb4, 0x3c, 0x26, 0x64, 0x79, 0xcb, 0xbd, 0x52, 0x8f, 0x78, 0x05, 0x9d, 0xe2, 0x6d, 0x5b, 0x2d,
-	0xda, 0x6e, 0xf1, 0x37, 0x4d, 0x96, 0xd0, 0x4d, 0xc8, 0x6a, 0x99, 0xbf, 0x22, 0x42, 0xeb, 0x48,
-	0xba, 0x74, 0x7e, 0x6d, 0xe1, 0x32, 0x4e, 0xa1, 0x5f, 0xe9, 0x51, 0x6e, 0xb4, 0xa4, 0x92, 0x37,
-	0x03, 0x2f, 0xec, 0xcf, 0x86, 0xb5, 0xa1, 0xfb, 0x99, 0x00, 0x75, 0x4e, 0x92, 0xca, 0xdb, 0x7b,
-	0x57, 0xe7, 0x84, 0x2f, 0x60, 0xb8, 0x5a, 0x2f, 0x97, 0x51, 0x26, 0xe2, 0xf9, 0x26, 0x89, 0xd6,
-	0xe3, 0x06, 0x22, 0x8c, 0xa2, 0x74, 0x2e, 0xd6, 0x4f, 0x59, 0xfc, 0x98, 0x3a, 0xc6, 0xf0, 0x3f,
-	0xf4, 0x57, 0xf1, 0x22, 0x8d, 0xd3, 0x85, 0x03, 0xcd, 0x87, 0xf1, 0xe7, 0xc9, 0x67, 0x5f, 0x27,
-	0x9f, 0x7d, 0x9f, 0x7c, 0xf6, 0xfe, 0xe3, 0x37, 0xb6, 0x1d, 0x77, 0xd3, 0xbb, 0xdf, 0x00, 0x00,
-	0x00, 0xff, 0xff, 0xd9, 0x68, 0xe4, 0x62, 0x60, 0x01, 0x00, 0x00,
+	// 276 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x34, 0x90, 0x41, 0x4e, 0x83, 0x40,
+	0x14, 0x86, 0x3b, 0x80, 0xa5, 0xbe, 0x42, 0xad, 0x6f, 0x61, 0x58, 0x11, 0xac, 0x0b, 0x89, 0x8b,
+	0x2e, 0xea, 0x05, 0xd4, 0x86, 0x34, 0x04, 0x8b, 0x66, 0xca, 0x86, 0x15, 0xb1, 0xe6, 0x2d, 0x26,
+	0xa4, 0x85, 0xc0, 0xd8, 0x64, 0xae, 0xe0, 0x09, 0x3c, 0x92, 0x4b, 0x8f, 0x60, 0xf0, 0x22, 0xa6,
+	0xa3, 0xec, 0xfe, 0xff, 0xff, 0x26, 0x93, 0x2f, 0x0f, 0x4e, 0xdb, 0x52, 0xcc, 0xeb, 0xa6, 0x92,
+	0x15, 0x9a, 0x6d, 0x29, 0x66, 0xef, 0x0c, 0x46, 0x09, 0xa9, 0x68, 0x2f, 0x1b, 0x85, 0xd7, 0x30,
+	0x2a, 0x49, 0x15, 0x52, 0xd5, 0xe4, 0xb1, 0x80, 0x85, 0x93, 0x85, 0x33, 0x3f, 0xbe, 0x4f, 0x48,
+	0x65, 0xaa, 0x26, 0x6e, 0x97, 0x7f, 0x01, 0xaf, 0xc0, 0x7d, 0x6d, 0xe8, 0x45, 0x8a, 0x6a, 0x5f,
+	0x48, 0xb1, 0x23, 0xcf, 0x08, 0x58, 0x68, 0x72, 0xa7, 0x1f, 0x33, 0xb1, 0x23, 0xf4, 0xc0, 0xae,
+	0x1b, 0x71, 0x48, 0x48, 0x79, 0x66, 0xc0, 0x42, 0x87, 0xf7, 0x15, 0x2f, 0x60, 0x58, 0xbf, 0x6d,
+	0x8f, 0xc0, 0xd2, 0xe0, 0xbf, 0xcd, 0xee, 0xc0, 0x4e, 0x48, 0x3d, 0x8a, 0x56, 0x22, 0x82, 0x75,
+	0xa0, 0xa6, 0xd5, 0x1a, 0x27, 0x5c, 0x67, 0xbc, 0x04, 0xab, 0x24, 0xd5, 0x7a, 0x46, 0x60, 0x86,
+	0xe3, 0x85, 0xdb, 0xab, 0x69, 0x77, 0xae, 0xd1, 0xcd, 0xbd, 0xfe, 0x41, 0x3b, 0x9e, 0x83, 0xbb,
+	0xc9, 0xd7, 0xeb, 0x28, 0xe3, 0xf1, 0xb2, 0x48, 0xa2, 0x7c, 0x3a, 0x40, 0x84, 0x49, 0x94, 0x2e,
+	0x79, 0xfe, 0x9c, 0xc5, 0x4f, 0xa9, 0xde, 0x18, 0x9e, 0xc1, 0x78, 0x13, 0xaf, 0xd2, 0x38, 0x5d,
+	0xe9, 0xc1, 0x78, 0x98, 0x7e, 0x76, 0x3e, 0xfb, 0xea, 0x7c, 0xf6, 0xdd, 0xf9, 0xec, 0xe3, 0xc7,
+	0x1f, 0x6c, 0x87, 0xfa, 0x5e, 0xb7, 0xbf, 0x01, 0x00, 0x00, 0xff, 0xff, 0x68, 0xf3, 0x94, 0x79,
+	0x3c, 0x01, 0x00, 0x00,
 }
