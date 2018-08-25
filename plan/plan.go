@@ -3,9 +3,7 @@ package plan
 import (
     "fmt"
     "time"
-    "net/http"
 
-	"github.com/ethereum/go-ethereum/crypto/sha3"
 )
 
 
@@ -14,8 +12,6 @@ type DataHandler            func(inErr *Perror, inParam []byte)
 
 // Action is a deferred generic handler. 
 type Action                 func(inErr *Perror, inParam interface{})
-
-
 
 
 
@@ -117,33 +113,7 @@ var (
 
 
 
-// PDIEntryVerb is the top-level PDI signal that specifies one of the low-level, built-in purposes of a PDI entry.
-type PDIEntryVerb       int32
 
-
-const (
-
-	// PDIEntryVerbPostAdminEntry inserts an channel administrative action (e.g. changing a channel property) -- requires channel ownership access. 
-	PDIEntryVerbPostAdminEntry = 1
-
-	// PDIEntryVerbPostEntry posts this entry body to the specified channel
-	PDIEntryVerbPostEntry
-
-	// PDIEntryVerbReplaceEntry replaces the cited entry with this one in its place
-	PDIEntryVerbReplaceEntry
-)
-
-// PDIEntryInfo contains flags and info about this entry, in effect specifying which hash functions and crypto to apply.
-type PDIEntryInfo [4]byte
-
-// PDIEntryVers dictates the serialization format of this entry post
-type PDIEntryVers byte
-
-const (
-
-	// PDIEntryVers1 default schema
-	PDIEntryVers1 byte = 1 + iota
-)
 
 // Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflippiug
 //     won't occur until the year 292,471,210,648 CE.  I wonder for-profit orgs will still dominate the OS space.
@@ -154,15 +124,6 @@ type Time struct {
 }
 
 
-
-const (
-
-	// DistantFuture is a const used to express the "distant future" in unix time.
-    DistantFuture       int64 = (1 << 63) - 1
-
-	// DistantPast is a const used to express the "distant past" in unix time.
-	DistantPast         int64 = -DistantFuture
-)
 
 // Now returns PLAN's standard time struct set to the time index of the present moment.
 func Now() Time {
@@ -175,159 +136,16 @@ func Now() Time {
 }
 
 
+const (
+
+	// DistantFuture is a const used to express the "distant future" in unix time.
+    DistantFuture       int64 = (1 << 63) - 1
+
+	// DistantPast is a const used to express the "distant past" in unix time.
+	DistantPast         int64 = -DistantFuture
+)
 
 
-
-/*
-A community KeyID identifies a specific shared "community-global" symmetric key.
-When a PLAN client starts a session with a pnode, the client sends the pnode her community-public keys.
-PDIEntryCrypt.CommunityKeyID specifies which community key was used to encrypt PDIEntryCrypt.Header.
-If/when an admin of a community issues a new community key,  each member is securely sent this new key via
-the community key channel (where is key is asymmetrically sent to each member still "in" the community. 
-
-*/
-
-/*
-PDIEntryCrypt is the public "wire" format for PDI entries.  It is what it sent to/from community data store implementations,
-such as Ethereum and NEM.
-
-A PDI entry has two encrypted segments, its header and body segment.  The PDIEntryCrypt.Header is encrypted using a community-public key,
-specified by PDIEntryCrypt.CommunityKeyID.  This ensures non-community members (i.e. public snoops) can't see any entry params,
-data, or even to what community channel the entry is being post to.  PDIEntryCrypt.Body is encrypted by the same community key as the header *or*
-by the key specified via PDIEntryHeader.Author and PDIEntry.AccessChannelID (all via the client's Secure Key Interface).  In sum,
-PDIEntry.AccessChannelID specifies a decryption flow through the user's private, compartmentalized keychain.
-
-When a PLAN client starts a new session with a pnode, the client sends the community keys for the session.  This allows
-pnode to process and decrypt incoming PDIEntryCrypt entries from the storage medium (e.g. Ethereum).  Otherwise, pnode
-has no ability to decrypt PDIEntryCrypt.Header.  A pnode could be configured to keep the community keychain even when there
-are no open client PLAN sessions so that incoming entries can be processed.  Otherwise, incoming entries won't be processed
-from the lowest level PDI storage layer.  Both configurations are reasonable depending on security preferences.
-
-When a community admin initiates a community-key "rekey event", the newly generated community key is securely and individually
-"sent" to each community member via the community's public key transfer channel. The new community key is encrypted using each member's public key.
-When a pnode is processing an entry that it does not have a community key for, it will check the community's public key channel
-for an entry for the current client's public key, it will send the client the encrypted community key.  The client uses its SKI
-to decrypt the payload into the new community key.  This key is added to the user's SKI keychain and is sent back to pnode.
-
-When pnode sends a PLAN client is PDI entries, it sends PDIEntry.Header (via json) and PDIEntryCrypt.Body.  If the
-
-Recall that the pnode client has no ability to decrypt PDIEntryCrypt.Body if PDIEntryHeader.AccessChannelID isn't set for
-community-public permissions.  This is fine since only PLAN clients with a
-
-And awaaaaay we go!
-*/
-type PDIEntryCrypt struct {
-	Sig                 []byte              // Signature of PDIEntry.Hash (signed by PDIEntryHeader.Author)
-
-	Info                PDIEntryInfo        // Entry type info, Allows PDIEntry accessors to apply the correct hash and crypto functions
-	CommunityKeyID      KeyID
-
-	HeaderCrypt         []byte              // Encrypted using a community key, referenced via .CommunityKeyID
-	BodyCrypt           []byte              // Encrypted using a community key or a user private key (based on PDIEntryHeader.AccessChannelID)
-
-}
-
-/*
-// PDIEntry is wha
-type PDIEntry struct {
-	HeaderBuf           []byte              // Serialized representation of PDIEntry.Header  (decrypted form PDIEntryCrypt.Header)
-	Header              *PDIEntryHeader
-
-	BodyBuf             []byte              // Serialized representation of PDIEntry.Body (decrypted from PDIEntryCrypt.Body)
-	Body                *PDIEntryBody
-}
-*/
-
-// PDIEntryHeader is a container for community-public info about this channel entry.PDIEntryHeader
-type PDIEntryHeader struct {
-    Time                Time                // Timestamp when .Author sealed this entry.
-	Verb                PDIEntryVerb        // PDI command/verb
-    ChannelID           ChannelID           // The channel id this entry is posted to.
-    ChannelRev          int32               // Revision numnber of this channel this entry is targeting
-    AuthorID            IdentityAddr        // Creator of this entry (and signer of .Sig)
-    AuthorIdentityRev   int32               // Specifies which rev of the author's public key was used for ecryption (or 0 if n/a)
-	AccessChannelID     ChannelID            // Specifies the permissions channel (an access control implementation) this entry was encrypted with
-	AccessChannelRev    int32               // Specifies what identifying major rev of the access channel was in effect when this entry was authored
-	AuxHeader           http.Header         // Any auxillary header entries that apply to this PDI entry -- always UTF8
-}
-
-// PDIEntryBody is the decrypted and de-serialized form of PDIEntryCrypt.Body and an abstract data container.
-type PDIEntryBody struct {
-	BodyParts           []PDIBodyPart       // Zero or more data sections -- e.g. .parts[0] is a serialized json param list and .parts[1] is a blob of rich text (rtf).
-}
-
-
-// PDIBodyPart is one of one or more sequential parts of a PDIEntryBody.PDIBodyPart.
-type PDIBodyPart struct {
-	Header              http.Header         // Any auxillary header entries that apply to this PDI entry -- always UTF8
-	Content             []byte              // Arbitrary client binary data conforming to .Headers
-}
-
-
-
-
-// When a new PDIEntry arrives off the wire, .Sig is set, .Hash == nil, .dataCrypt is set, .Body == nil
-//    1) .dataCrypt is hashed via  PDIEntrySchema.BodyHasher
-//    2) .Sig is verified based on the hash calculated from (1)
-//    3) Use .AccessChannelID to specify a decryption flow through PLAN's Secure Key Interface (SKI).
-//         - If the local user pubkey does not have "read" access, then that means there's a db corresponding to that access list that contains a list of all entries
-//           that have been encountered (and can't be unlocked).  In this case, referencing info for this entry is appended to this db and entry is not
-//           processed further.  If/when the CommunityRepo sees an access control list get unlocked for the current logged in user, it will
-//         -
-// , then the entry data can only be stored until the user is granted access.
-//    2) Compute Hash of
-//    2) Decrypt .dataCrypt into .dataRLP (a generic blob)
-//    3) De-serialize this output blob (instantiate .Body).
-
-
-// ChannelProperties specifies req'd params for all channels and are community-public.
-// Note that some params are immutable once they are set in the channel genesis block (e.g. IsAccessChannel and EntriesAreFinal)
-type ChannelProperties struct {
-
-	// Who issued this set of channel properties
-	Author                  IdentityAddr            `json:"author"`
-
-	// Does this channel conform to the requirements needed so that this channel can be used to control access for another channel.
-	// An access channel's purpose is to:
-	//     (a) distribute private channel keys to members (by encrypting a private channel key using a member's public key)
-	//     (b) publish write and own privs to others (only permitted by owners)
-	IsAccessChannel         bool                    `json:"isAccessChannel"`
-
-	// Are entries in this channel allowed be revoked or superceded?
-	EntriesAreFinal         bool                    `json:"entriesFinal"`
-
-	// This channel's ID
-	ChannelID               ChannelID               `json:"chID"`
-
-	// Specifies an owning access channel that asserts domain over this channel
-	OwningAccessChannelID   ChannelID               `json:"acID"`
-
-	// Specifies which major revision number of the owning access channel was in effect when this entry was authored.
-	// In general, a pnode won't insert/approve of a PDI entry until/unless the access channel revisions match.
-	OwningAccessChannelRev  uint32                  `json:"acRev"`
-
-	// Complete set of channel params
-	Params                  map[string]interface{}  `json:"params"`
-}
-
-/*
-type ChannelInfo struct {
-
-    // Specifies when this channel was created
-    TimeCreated             Time                    `json:"inEffect"`
-
-    // <<multistream>-inspired description of this channel's contents.  This allows the PLAN client to accurately process, interpret, and handle entry
-    //    entry data blobs (PDIEntry.Body -- i.e. PDIEntryBody).  example:  "/plan/talk/v2"
-    Protocol                string                  `json:"protocol"`
-
-    // What is the title of this channel presented to participants?
-    ChannelTitle            string                  `json:"chTitle"`
-
-    // What is the description of this channel presented to participants?
-    ChannelDesc             string                  `json:"chDesc"`
-
-}
-*/
 
 
 
@@ -344,33 +162,6 @@ func Assert( inCond bool, inFormat string, inArgs ...interface{} ) {
 		panic(fmt.Sprintf(inFormat, inArgs))
 	}
 }
-
-// ComputeHash hashes all fields of PDIEntryCrypt (except .Sig)
-func (inEntry *PDIEntryCrypt) ComputeHash() []byte {
-
-	hw := sha3.NewKeccak256()
-	hw.Write(inEntry.Info[:])
-	hw.Write(inEntry.CommunityKeyID[:])
-	hw.Write(inEntry.HeaderCrypt)
-	hw.Write(inEntry.BodyCrypt)
-    
-    return hw.Sum( nil )
-
-    /*
-    overhang := len(hash)-PDIEntryHashSz
-	if overhang > 0 {
-		hash = hash[overhang:]
-	}
-    copy( outHash[PDIEntryHashSz-len(hash):], hash)*/
-
-}
-
-/*
-// CopyFrom is a convenience function to copy from a byte slice.
-func (sig *PDIEntrySig) CopyFrom( inSig []byte ) {
-	copy( sig[:], inSig[:len(sig)] )
-}
-*/
 
 
 
@@ -389,4 +180,8 @@ func (kid *KeyID) AssignFrom(in []byte) {
     copy(kid[:], in[len(in) - KeyIDSz:])
 }
 
+// AssignFrom sets this ChannelID from the given buffer
+func (cid *ChannelID) AssignFrom(in []byte) {
+    copy(cid[:], in[len(in) - ChannelIDSz:])
+}
 

@@ -7,7 +7,8 @@ import (
 
     "testing"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	"github.com/plan-tools/go-plan/pdi"
+	"github.com/plan-tools/go-plan/plan"
 )
 
 
@@ -28,7 +29,7 @@ func TestCommunityEncryption(t *testing.T) {
 		t.Fatal(err)
     }
     var communityKeyID plan.KeyID
-    communityKeyID.AssignFrom(opResults[0].buf)
+    communityKeyID.AssignFrom(opResults.Parts[0].Content)
 
     fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
     fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
@@ -47,7 +48,7 @@ func TestCommunityEncryption(t *testing.T) {
     // 3) insert the new community key into B
     err, opResults = B.doOp(OpArgs{
         OpName: OpAcceptCommunityKeys,
-        Msg: opResults[0].buf,
+        Msg: opResults.Parts[0].Content,
         PeerPubKey: A.encryptPubKey,
         CryptoKeyID: B.encryptPubKeyID,
     })
@@ -67,7 +68,7 @@ func TestCommunityEncryption(t *testing.T) {
 		t.Fatal(err)
 	}
 
-    encryptedMsg := opResults[0].buf
+    encryptedMsg := opResults.Parts[0].Content
 
     // Send the encypted community message to B
 	err, opResults = B.doOp(OpArgs{
@@ -79,8 +80,8 @@ func TestCommunityEncryption(t *testing.T) {
 		t.Fatal(err)
     }
 
-	if ! bytes.Equal(clearMsg, opResults[0].buf) {
-		t.Fatalf("expected %v, got %v after decryption", clearMsg, opResults[0].buf )
+	if ! bytes.Equal(clearMsg, opResults.Parts[0].Content) {
+		t.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Parts[0].Content)
     }
     
 
@@ -131,12 +132,12 @@ type testSession struct {
 
 
 
-func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Perror, []OpResult) {
+func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Perror, *pdi.Body) {
 
     var outErr *plan.Perror
-    var outResults []OpResult
+    var outResults *pdi.Body
 
-    ts.session.DispatchOp(&inOpArgs, func(inErr *plan.Perror, opResults []OpResult){
+    ts.session.DispatchOp(&inOpArgs, func(inErr *plan.Perror, opResults *pdi.Body) {
         outErr = inErr
         outResults = opResults
 
@@ -180,15 +181,15 @@ func newSession(t *testing.T, inName string) *testSession {
     if err != nil {
         t.Fatal(err)
     }
-    if len(identityResults) < 2 {
+    if len(identityResults.Parts) < 2 {
         t.Fatal("identityResults < 2")
     }
 
 
-    ts.signingKeyID.AssignFrom(identityResults[0].buf)
+    ts.signingKeyID.AssignFrom(identityResults.Parts[0].Content)
 
-    ts.encryptPubKey = identityResults[1].buf
-    ts.encryptPubKeyID.AssignFrom(identityResults[1].buf)
+    ts.encryptPubKey = identityResults.Parts[1].Content
+    ts.encryptPubKeyID.AssignFrom(identityResults.Parts[1].Content)
 
     return ts
 }

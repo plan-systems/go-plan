@@ -8,17 +8,24 @@ package pdi;
 
 
 
-
-enum EntryOp {
-    POST_ENTRY          = 0;
-}   
-
-
 enum EntryVerb {
-    ADD_ENTRY           = 0;
-    REMOVE_ENTRIES      = 1;
-    SUPERCEDE_ENTRY     = 2;
+
+    // Appends this entry to the channel
+    NEW_ENTRY                  = 0;
+
+    // This entry modifies the channel's non-security-related info
+    ADMINISTER_CHANNEL_INFO     = 1;
+
+    // This entry modifies the channel's security-related info
+    ADMINISTER_CHANNEL_ACCESS   = 2;
+
+    // EntryHeader.extras contains info on entrys to effectively mark as removed
+    REMOVE_ENTRIES              = 3;
+
+    // This entry should effectively replace a previous entry (with EntryHeader.extras containing add'l info) 
+    SUPERCEDE_ENTRY             = 4;
 }
+
 
 
 message Entry {
@@ -42,6 +49,60 @@ message BodyPart {
 }
 
 
+message AccessChannelSnapshot {
+
+                bytes           parent_access_channel_id = 1;
+}
+
+
+message ChannelAdmin {
+
+    // Hashname of this ChannelSnapshot.  Non-security related changes to the channel do no affect this value.
+                fixed64         channel_rev             = 1;
+
+
+    /*  
+    Does this channel conform to the requirements needed so that it can be used control access for another channel?
+    An access channel entries conform to specific standards and serve to:
+        (a) transport private channel keys to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
+        (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
+                bytes           access_channel_id       = 5;
+
+
+}
+
+
+
+message ChannelProperties {
+
+    // This channel ID (immutable)
+                bytes           channel_id              = 1;
+
+    // When this channel was created (immutable)
+                int64           time_created            = 2;
+
+    // False if entries in this channel allowed be revoked or superceded.   (immutable)
+                bool            entries_are_final       = 3;
+
+    /*  Top-level string describing how entries on this channel are expected to conform.
+        This allows a PLAN client to invoke the approprate UI and data handlers. 
+        e.g. 
+            /plan/channel-protocol/talk/2
+            /plan/channel-protocol/inventory/1   
+            /plan/channel-protocol/cryptokitty/browser    */
+                string          protocol                = 4;
+
+
+   // Container for all content-level properties (e.g. channel title, description, etc) 
+                uint32          info_rev                = 7;
+                Body            info                    = 8;
+
+
+}
+
+
+
+
 
 
 
@@ -53,16 +114,19 @@ message BodyPart {
     meaning that it is encrypted using one of the community's shared symmetric keys.  The entry's body is either also community-private
     (encrypted with the same community key as EntryHeader), or it is encrypted using the key referenced by body_key_id.
 
+    When a entry is authored, it is intended to be posted to the channel specified by EntryHeader.channel_id.  The current rev of that
+    channel is also listed so that pdi nodes know which channel access rev to use when checking permissions.  
+
     And awaaaaay we go!
 */
 
 message EntryCrypt {
-                uint32          crypt_info              = 1;        // Allows accessors to apply correct hash and crypto functions to this EntryCrypt 
-                uint64          time_created            = 2;        // Unix timestamp (UTC in seconds elapsed since Jan 1, 1970.)
+                uint64          crypt_info              = 1;        // Allows accessors to apply correct hash and crypto functions to this EntryCrypt 
+                int64           time_created            = 2;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
                 bytes           community_key_id        = 3;        // Needed to access header_crypt
                 bytes           header_crypt            = 5;        // := Encrypt(<EntryHeader>.Marshal(), <EntryCrypt>.community_key_id)
                 bytes           body_crypt              = 6;        // := Encrypt(<Body>.Marshal(), <EntryHeader>.body_key_id)
-                bytes           entry_sig               = 7;        // := CalcSig(<EntryCrypt>, GetKey(author_member_id,author_member_rev))
+                bytes           sig                     = 7;        // := ComputeSig(<EntryCrypt>, GetKey(author_member_id,author_member_rev))
 }
 
 
@@ -70,11 +134,9 @@ message EntryHeader {
                 fixed32         nano_secs               = 2;        // [0,999999999] -- serves 
                 EntryVerb       entry_verb              = 3;
                 bytes           channel_id              = 4;        // Channel id this entry is posted to.
-                uint32          channel_rev             = 5;        // Revision number of this channel this entry is targeting
+                fixed64         channel_rev             = 5;        // Revision hashame of this channel in effect when this entry was sealed
                 bytes           author_member_id        = 6;        // Creator of this entry (and signer of .Sig)
                 uint32          author_member_rev       = 7;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
-                bytes           access_channel_id       = 8;        // Which permissions channel (an access control implementation) this entry was encrypted with
-                uint32          access_channel_rev      = 9;        // Which rev of the cited access channel was in effect when this entry was authored
                 bytes           body_key_id             = 10;       // Specifies which key was used to encrypt 
                 Body            extras                  = 11;       // Available for unrestricted client use.
 }

@@ -10,6 +10,7 @@ import (
     "log"
     "os"
     "io"
+    "bytes"
     //"io/ioutil"
     //"strings"
     "sync"
@@ -22,6 +23,7 @@ import (
     //"github.com/tidwall/redcon"
 
     "github.com/plan-tools/go-plan/plan"
+    "github.com/plan-tools/go-plan/pdi"
 
     // This inits in with sql, so no named import is needed
     //_ "github.com/mattn/go-sqlite3"
@@ -98,20 +100,22 @@ const (
 type ChannelStore struct {
     sync.RWMutex
 
+    ChannelID               plan.ChannelID
+
     // PrevAccessTime specifies when this channel store was last accessed, used to know how long a channel store has been idle.
     PrevActivityTime        plan.Time
     
     // AccessRank specifies what index this channel store is in its parent ChannelStoreGroup
     //AccessRank              int32 
 
-    Properties              plan.ChannelProperties
+    Properties              pdi.ChannelProperties
 
     channelDir              string
 
     // ChannelActionLog is an ordered list of ChannelAction executed on this channel, starting from when the channel was first created,
     //    all the way up to the present moment.  This log allows a pnode to verify that a given post to a channel is citing
     //    a valid, available, and legal access channel (given an author and timestamp)
-    ChannelAdmin             ChannelAdmin
+    ChannelAdmin             pdi.ChannelAdmin
 
     db                      *sql.DB
     select_timeMatch        *sql.Stmt
@@ -163,12 +167,6 @@ type ACStore struct {
 
 
 
-const (
-
-    // PDIEntryVerbCreateChannel creates a new channel (not common)
-   ChannelAdminSetAccessChannel       = "set"
-
-)
 
 // ChannelAdminAction is a record of a change of one or more channel properties *or* an action associated with the channel (e.g. channel rekey event) 
 // During a channel's lifetime, it be set so that a different access channel governs permissions for this channel.
@@ -195,6 +193,7 @@ type AccessChannelAssignment struct {
    AccessChannelRev        int                         `json:"acRev"`
 }
 
+/*
 // ChannelAdmin is a time-sequential list of channel meta chanages
 type ChannelAdmin struct {
 
@@ -204,7 +203,7 @@ type ChannelAdmin struct {
 
 }
 
-
+*/
 
 
 func (CS *ChannelStore) IsAccessControlChannel() *ACStore {
@@ -319,13 +318,11 @@ func (CS *ChannelStore) OpenIndexDB() error {
 
 
 
-
-
-// Inserts the given entries to the this channel
+// WriteEntryToStorage inserts the given entries to the this channel
 // Pre: CS.channelName == inEntries[:].data.channelName
-func (CS *ChannelStore) WriteEntryToStorage( inEntry *plan.PDIEntryCrypt, inHdr *plan.PDIEntryHeader ) error {
+func (CS *ChannelStore) WriteEntryToStorage( inEntry *pdi.EntryCrypt, inHdr *pdi.EntryHeader ) error {
 
-    plan.Assert( inHdr.ChannelID == CS.Properties.ChannelID, "Bad channel given to InsertEntriesToChannel" )
+    plan.Assert( bytes.Equal(inHdr.ChannelId, CS.ChannelID[:]), "Bad channel given to InsertEntriesToChannel" )
 
 
     err := CS.OpenIndexDB()
@@ -338,7 +335,7 @@ func (CS *ChannelStore) WriteEntryToStorage( inEntry *plan.PDIEntryCrypt, inHdr 
         var matchRow int 
 
         {
-            err = CS.select_timeMatch.QueryRow( inHdr.Time.UnixSecs ).Scan( &matchRow )
+            err = CS.select_timeMatch.QueryRow( inEntry.TimeCreated ).Scan( &matchRow )
             if err == sql.ErrNoRows {
 
             } else {

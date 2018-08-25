@@ -11,6 +11,10 @@ import "github.com/plan-tools/go-plan/ski/ski.proto";
 
 
 
+enum EntryOp {
+    PUBLISH_ENTRY          = 0;
+}   
+
 
 
 enum PserviceScope {
@@ -207,7 +211,7 @@ message EntryResponse {
 message EntryOpArgs {
                 int32           id                      = 1;
 
-                pdi.EntryOp     entry_op                = 2;
+                EntryOp         entry_op                = 2;
 
                 map<string, 
                     bytes>      op_args                 = 3;

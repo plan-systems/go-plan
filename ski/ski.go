@@ -1,8 +1,10 @@
 package ski
 
 
-import "github.com/plan-tools/go-plan/plan"
-
+import (
+    "github.com/plan-tools/go-plan/plan"
+    "github.com/plan-tools/go-plan/pdi"
+)
 
 
 
@@ -26,22 +28,15 @@ type OpArgs struct {
 
 
 // OpCompletionHandler handles the result of a SKI operation
-type OpCompletionHandler func(*plan.Perror, []OpResult)
-
-
-// OpResult is an element of array of resulting output from an SKI operation (passed to OpCompletionHandler)
-type OpResult struct {
-    info                string
-    buf                 []byte
-}
+type OpCompletionHandler func(inErr *plan.Perror, inResults *pdi.Body)
 
 
 
 
 
 // OpArgs.OpName -- this lists all available operations for SKI.Session.DispatchOp()
-// Unless otherwise stated, output from an op is returned in OpResults[0].  Ops that do NOT return anything (other than a possible error),
-//    will returns no results.  Ops like OpNewIdentityRev return explicitly documented results.
+// Unless otherwise stated, output from an op is returned in inResults.Parts[0].  Ops that do NOT return anything (other than a possible error),
+//    will have no result parts.  Ops like OpNewIdentityRev return explicitly documented results.
 const (
 
     // OpEncryptCommunityData encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
@@ -57,7 +52,7 @@ const (
     OpDecryptFrom           = "decrypt_from"
 
     // OpSignMsg creates a signature buffer for OpArgs.Msg, using the asymmetric key indexed by OpArgs.CryptoKeyID.
-    // Note: len(inOpResults) == 0
+    // Returns: len(inResults.Parts) == 0
     OpSignMsg               = "sign_msg"
 
     // OpSendCommunityKeys securely "sends" the community keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,
@@ -73,8 +68,8 @@ const (
     // OpNewIdentityRev issues a new personal identity revision and returns public information for that new rev.
     // Recall that the plan.KeyID for each pub key is the right-most <plan.KeyIDSz> bytes.
     // Returns:
-    //     OpResults[0]: newly issued signing public key
-    //     OpResults[1]: newly issued encryption public key
+    //     inResults.Parts[0]: newly issued signing public key
+    //     inResults.Parts[1]: newly issued encryption public key
     OpNewIdentityRev        = "new_identity_rev"
 
 
@@ -95,7 +90,7 @@ type Provider interface {
     ) *plan.Perror
 
     // VerifySignature verifies that inSig is in fact the signature of inMsg signed by an owner of inSignerPubKey
-    VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) bool
+    VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) *plan.Perror
 
 }
 

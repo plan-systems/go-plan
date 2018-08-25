@@ -13,11 +13,12 @@ import (
     //"time"
     //"sort"
     //"encoding/hex"
-    "encoding/json"
+    //"encoding/json"
     //"encoding/base64"
 
     //"github.com/tidwall/redcon"
 
+    "github.com/plan-tools/go-plan/pdi"
     "github.com/plan-tools/go-plan/ski"
     "github.com/plan-tools/go-plan/plan"
 
@@ -47,17 +48,17 @@ type entryWorkspace struct {
     timeStart       plan.Time
 
     skiVersion      []byte                  
-    entry           *plan.PDIEntryCrypt
+    entry           *pdi.EntryCrypt
 
     entryHash       []byte
-    //HeaderBuf       []byte              // Serialized representation of PDIEntry.Header  (decrypted form PDIEntryCrypt.Header)
-    entryHeader     plan.PDIEntryHeader
-	//BodyBuf         []byte              // Serialized representation of PDIEntry.Body (decrypted from PDIEntryCrypt.Body)
-    entryBody       plan.PDIEntryBody
+    entryHeader     pdi.EntryHeader
+    entryBody       pdi.Body
     
     authorInfo      IdentityInfo
-    ski             ski.SKI
 
+
+    skiSession      ski.Session
+    skiProvider     ski.Provider
 
     accessChannel   *ChannelStore
     targetChannel   *ChannelStore
@@ -68,6 +69,7 @@ type entryWorkspace struct {
 
 
 
+//            ski.ArgKeyVersion:        ws.skiVersion,
 
 
 // internal: unpackHeader
@@ -78,31 +80,30 @@ func (ws *entryWorkspace) unpackHeader(
 
     ws.timeStart = plan.Now()
 
-    switch ws.entry.Info[0] {
-        case plan.PDIEntryVers1: 
-            ws.skiVersion = ski.CryptSKIVersion
+    switch ws.entry.GetEntryVersion() {
+        case pdi.EntryVersion1: 
+            //ws.skiVersion = ski.CryptSKIVersion
         default:
             inOnCompletion(plan.Error(nil, plan.BadPDIEntryFormat, "bad or unsupported PDI entry format"))
             return
     }
 
     // The entry header is encrypted using one of the community keys.
-    ws.ski.DispatchOp( 
+    ws.skiSession.DispatchOp( 
 
-        ski.OpDecryptSymmetric,
-        ski.CryptArgs{
-            ski.ArgKeyVersion:        ws.skiVersion,
-            ski.ArgKeySymmetricKeyID: ws.entry.CommunityKeyID[:],
-            ski.ArgKeyMsg:            ws.entry.HeaderCrypt,
+        &ski.OpArgs {
+            OpName: ski.OpDecryptFromCommunity,
+            CryptoKeyID: ws.entry.GetCommunityKeyID(),
+            Msg: ws.entry.HeaderCrypt,
         }, 
 
-        func(inErr *plan.Perror, inHeaderBuf []byte) {
+        func(inErr *plan.Perror, inResults *pdi.Body) {
             if inErr != nil {
                 inOnCompletion(plan.Error(inErr, plan.FailedToProcessPDIHeader, "failed to decrypt PDI header"))
                 return
             }
 
-            err := json.Unmarshal(inHeaderBuf, &ws.entryHeader)
+            err := ws.entryHeader.Unmarshal(inResults.Parts[0].Content)
             if err != nil {
                 inOnCompletion(plan.Error(err, plan.FailedToProcessPDIHeader, "failed to unmarshal PDI header"))
                 return
@@ -123,50 +124,38 @@ func (ws *entryWorkspace) unpackHeader(
 //   note that because permissions are immutable at a point in time, it doesn't matter
 //   when we check permissions if they're changed later -- they'll
 //   always be the same for an entry at a specific point in time.
-func (ws *entryWorkspace) validateEntry(
-    inOnCompletion func(*plan.Perror),
-    ) {
+func (ws *entryWorkspace) validateEntry() *plan.Perror {
 
-    if ws.entryHeader.Time.UnixSecs < ws.CR.Info.CreationTime.UnixSecs {
-        inOnCompletion(plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp earlier than community creation timestamp"))
-        return
+    if ws.entry.TimeCreated < ws.CR.Info.TimeCreated.UnixSecs {
+        return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp earlier than community creation timestamp")
     }
-    if ws.timeStart.UnixSecs - ws.entryHeader.Time.UnixSecs + ws.CR.Info.MaxPeerClockDelta < 0 {
-        inOnCompletion(plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future"))
-        return     
+    if ws.timeStart.UnixSecs - ws.entry.TimeCreated + ws.CR.Info.MaxPeerClockDelta < 0 {
+        return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future")
     }
 
-    err := ws.CR.LookupIdentity(ws.entryHeader.AuthorID, ws.entryHeader.AuthorIdentityRev, &ws.authorInfo)
-    if err != nil {
-        inOnCompletion(err)
-        return
+    perr := ws.CR.LookupIdentity(ws.entryHeader.AuthorMemberId, ws.entryHeader.AuthorMemberRev, &ws.authorInfo)
+    if perr != nil {
+        return perr
     }
 
     ws.entryHash = ws.entry.ComputeHash()
 
-    ws.ski.DispatchOp( 
-        
-        ski.OpVerifySig,
-        ski.CryptArgs{
-            ski.ArgKeyVersion:        ws.skiVersion,
-            ski.ArgKeySignerPubKey:   ws.authorInfo.SigningPubKey,
-            ski.ArgKeyMsg:            ws.entryHash,
-            ski.ArgKeySig:            ws.entry.Sig,
-        }, 
-
-        func(inErr *plan.Perror, inParam []byte) {
-            if inErr != nil {
-                inOnCompletion(plan.Error(inErr, plan.FailedToProcessPDIHeader, "PDI entry signature verification failed"))
-                return
-            }
-
-
-            err := ws.prepChannelAccess()
-
-            // At this point, the PDI entry's signature has been verified
-            inOnCompletion(err)
-        },
+    perr = ws.skiProvider.VerifySignature( 
+        ws.entry.Sig,
+        ws.entryHash,
+        ws.authorInfo.SigningPubKey,
     )
+
+    if perr != nil {
+        return plan.Error(perr, plan.FailedToProcessPDIHeader, "PDI entry signature verification failed")
+    }
+
+
+    err := ws.prepChannelAccess()
+
+    // At this point, the PDI entry's signature has been verified
+    return err
+
 }
 
 
@@ -176,17 +165,17 @@ func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
     var err *plan.Perror
 
       // Fetch the data structure container for the cited access channel
-    ws.accessChannel, err = ws.CR.FetchChannelStore(
-        ws.entryHeader.AccessChannelID, 
-        ws.entryHeader.AccessChannelRev,
-        IsAccessChannel | ReadingFromChannel | LoadIfNeeded)
+    ws.targetChannel, err = ws.CR.FetchChannelStore(
+        ws.entryHeader.ChannelId, 
+        ws.entryHeader.ChannelRev,
+        PostingToChannel | LoadIfNeeded)
     
-    if ws.accessChannel == nil {
-        return plan.Errorf(err, plan.AccessChannelNotFound, "access channel 0x%x not found", ws.entryHeader.AccessChannelID )
+    if ws.targetChannel == nil {
+        return plan.Errorf(err, plan.AccessChannelNotFound, "channel 0x%x not found", ws.entryHeader.ChannelId )
     }
 
-    if ws.accessChannel.ACStore == nil {
-        return plan.Errorf(nil, plan.NotAnAccessChannel, "invalid access channel 0x%x", ws.entryHeader.AccessChannelID )
+    if ws.targetChannel.ACStore == nil {
+        return plan.Errorf(nil, plan.NotAnAccessChannel, "invalid channel 0x%x", ws.entryHeader.ChannelId )
     }
 
     // TODO: do all of ACStore checking!
@@ -218,18 +207,17 @@ func (ws *entryWorkspace) processAndStoreEntry(
             inOnCompletion(inErr)
         }
 
-        ws.validateEntry( func(inErr *plan.Perror) {
-            if inErr != nil {
-                inOnCompletion(inErr)
-            }
+        perr := ws.validateEntry()
+        if perr != nil {
+            inOnCompletion(perr)
+        }
 
-            err := ws.prepChannelAccess()
-            if err != nil {
-                inOnCompletion(err)
-            }
+        perr = ws.prepChannelAccess()
+        if perr != nil {
+            inOnCompletion(perr)
+        }
 
-            ws.storeEntry(inOnCompletion)
-        })
+        ws.storeEntry(inOnCompletion)
     })
    
 

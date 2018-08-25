@@ -40,8 +40,7 @@ const (
 var (
 
     // NaclProvider is the primary "entry" point for a NaCl "provider"
-    NaclProvider = &naclProvider{
-    }
+    NaclProvider = newNaclProvider()
 
 
 
@@ -206,9 +205,11 @@ func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompleti
 
 
 
-func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
+func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Body) {
 
-    outResults := make([]OpResult, 0, 2)
+    outResults := pdi.Body {
+        Parts: make([]*pdi.BodyPart, 0, 2),
+    }
 
     var err *plan.Perror
 
@@ -323,10 +324,9 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
 
             case OpNewIdentityRev:{
                 signKey, encrKey := session.personalKeyring.NewIdentity()
-                outResults = append(outResults, 
-                    OpResult{info:"signingPubKey", buf:signKey},
-                    OpResult{info:"encryptPubKey", buf:encrKey},
-                )
+                outResults.AppendPart(&pdi.BodyPart{Name:"signingPubKey", Content:signKey})
+                outResults.AppendPart(&pdi.BodyPart{Name:"encryptPubKey", Content:encrKey})
+
             }
 
             case OpCreateCommunityKey:{
@@ -358,10 +358,10 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
     }
 
     if err == nil && msg != nil {
-        outResults = append(outResults, OpResult{buf:msg})
+        outResults.AppendPart(&pdi.BodyPart{Content:msg})
     } 
 
-    return err, outResults
+    return err, &outResults
 
 }
 

@@ -18,6 +18,7 @@ import (
 
     //"github.com/tidwall/redcon"
 
+    "github.com/plan-tools/go-plan/pdi"
     "github.com/plan-tools/go-plan/plan"
     //"github.com/plan-tools/go-plan/ski"
 
@@ -58,14 +59,14 @@ type ChannelStoreGroup struct {
 
 
 type CommunityRepoInfo struct {
-    CommunityName           string                  `json:"communityName"`
-    CommunityID             hexutil.Bytes           `json:"communityID"`
-    RepoPath                string                  `json:"repoPath"`
-    ChannelPath             string                  `json:"channelPath"`
-    CreationTime            plan.Time               `json:"creationTime"`  
+    CommunityName           string                  `json:"community_name"`
+    CommunityID             hexutil.Bytes           `json:"community_id"`
+    RepoPath                string                  `json:"repo_path"`
+    ChannelPath             string                  `json:"channel_path"`
+    TimeCreated             plan.Time               `json:"time_created"`  
 
     // Max number of seconds that any two community peers could have different clock readings
-    MaxPeerClockDelta       int64                   `json:"maxPeerClockDelta"`
+    MaxPeerClockDelta       int64                   `json:"max_peer_clock_delta"`
 }
 
 
@@ -80,7 +81,7 @@ type CommunityRepo struct {
     DirEncoding             *base64.Encoding
 
     // Incoming encrypted entries "off the wire" that are ready to be processed (and written to local community repo)
-    entriesToProcess        chan *plan.PDIEntryCrypt
+    entriesToProcess        chan *pdi.EntryCrypt
 
     ParentPnode             *Pnode
 
@@ -153,7 +154,7 @@ func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRe
     CR.DirEncoding = base64.RawURLEncoding
 
     // Runtime support
-    CR.entriesToProcess = make( chan *plan.PDIEntryCrypt,    32 )
+    CR.entriesToProcess = make( chan *pdi.EntryCrypt, 32 )
     CR.DefaultFileMode = inParent.config.DefaultFileMode
     CR.ParentPnode = inParent
 
@@ -163,14 +164,18 @@ func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRe
 
 
 
+
 func (CR *CommunityRepo) FetchChannelStore(
-    inChannelID plan.ChannelID,
-    inChannelRev int32,
+    inChannelID []byte,
+    inChannelRev uint64,
     inFlags FetchChannelStoreFlags,
     ) (*ChannelStore, *plan.Perror) {
 
+    var channelID plan.ChannelID
+    channelID.AssignFrom(inChannelID)
+
     CR.loadedChannels.RLock()
-    CS := CR.loadedChannels.table[inChannelID]
+    CS := CR.loadedChannels.table[channelID]
     CR.loadedChannels.RUnlock()
 
     var err *plan.Perror
@@ -186,7 +191,7 @@ func (CR *CommunityRepo) FetchChannelStore(
         } else {
 
             CR.loadedChannels.Lock()
-            CR.loadedChannels.table[CS.Properties.ChannelID] = CS
+            CR.loadedChannels.table[CS.ChannelID] = CS
             CR.loadedChannels.Unlock()
 
             hasWriteLock = true
@@ -215,16 +220,16 @@ func (CR *CommunityRepo) FetchChannelStore(
 
 
 func (CR *CommunityRepo) LoadChannelStore(
-    inChannelID plan.ChannelID, 
+    inChannelID []byte, 
     inCreateNew bool,
     ) (*ChannelStore, *plan.Perror) {
 
     CS := new( ChannelStore )
-    CS.Properties.ChannelID = inChannelID
+    CS.ChannelID.AssignFrom( inChannelID )
 
     CS.Lock()
 
-    CS.channelDir = CR.Info.ChannelPath + CR.DirEncoding.EncodeToString( CS.Properties.ChannelID[:] ) + "/"
+    CS.channelDir = CR.Info.ChannelPath + CR.DirEncoding.EncodeToString( CS.ChannelID[:] ) + "/"
 
     if inCreateNew {
 
@@ -258,7 +263,7 @@ func (CR *CommunityRepo) LoadChannelStore(
     }
 
 
-    if CS.Properties.IsAccessChannel {
+    if CS.ChannelAdmin.AccessChannelId != nil {
 
         CS.ACStore = new(ACStore)
 
@@ -274,8 +279,8 @@ func (CR *CommunityRepo) LoadChannelStore(
 
 
 func (CR *CommunityRepo) LookupIdentity(
-    inID plan.IdentityAddr,
-    inIdentityRev int32,
+    inMemberID []byte,
+    inIdentityRev uint32,
     outInfo *IdentityInfo,
     ) *plan.Perror {
 
@@ -308,7 +313,7 @@ func (CR *CommunityRepo) StartService() {
 
 
 
-func (CR *CommunityRepo) PublishEntry( inEntry *plan.PDIEntryCrypt ) {
+func (CR *CommunityRepo) PublishEntry( inEntry *pdi.EntryCrypt ) {
 
     CR.entriesToProcess <- inEntry
 }
