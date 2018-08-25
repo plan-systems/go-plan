@@ -2,11 +2,12 @@
 package ski // import "github.com/plan-tools/go-plan/ski"
 
 import (
-    "encoding/json"
-    "net/http"
+    //"encoding/json"
+    //"net/http"
     //"log"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	"github.com/plan-tools/go-plan/pdi"
+	"github.com/plan-tools/go-plan/plan"
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
     sign "golang.org/x/crypto/nacl/sign"
@@ -21,36 +22,45 @@ const (
     // InvokeNaCl should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
     InvokeNaCl = "/plan/ski/provider/nacl/1"
 
+
+    // KeyEntry.KeyType
+    
+    // NaClSymmetricKey is a symmetric key for the SKI's NaCl implementation
+    naclSymmetricKey            = 1
+
+    // NaClEncryptionKey is a symmetric key for the SKI's NaCl implementation
+    naclEncryptionKey           = 2
+
+    // NaClSigningKey is a symmetric key for the SKI's NaCl implementation
+    naclSigningKey              = 3
 )
 
 
 
-
-
 var (
-    salts = newSaltChannel()
 
     // NaclProvider is the primary "entry" point for a NaCl "provider"
     NaclProvider = &naclProvider{
     }
 
+
+
+    // An Alan Watts invocation....
+    // Convenience for having zero data around
+    zero64 = [64]byte{
+        +0,+0,+0,+0,-0,-0,-0,-0,
+        +0,-0,-0,+0,-0,-0,-0,-0,
+        +0,-0,-0,+0,-0,-0,-0,-0,
+        +0,+0,+0,+0,-0,-0,-0,-0,
+        +0,+0,+0,+0,-0,-0,-0,-0,
+        +0,+0,+0,+0,-0,+0,+0,-0,
+        +0,+0,+0,+0,-0,+0,+0,-0,
+        +0,+0,+0,+0,-0,-0,-0,-0,
+    }
+
+    
 )
 
-
-func newSaltChannel() <-chan [24]byte {
-	saltChan := make(chan [24]byte) // note: *must* be a blocking chan!
-	go func() {
-		for {
-            var salt [24]byte
-			_, err := crypto_rand.Read(salt[:])
-			if err != nil {
-				panic(err) // TODO: unclear when we'd ever hit this?
-			}
-			saltChan <- salt
-		}
-	}()
-	return saltChan
-}
 
 
 // naclProvider is a local implemention of SKI.Provider
@@ -72,8 +82,8 @@ func newNaclProvider() *naclProvider {
 func (provider *naclProvider) NewSession() *naclSession {
 	session := &naclSession{
         provider,
-        NewKeyring(),
-        NewKeyring(),
+        newKeyring(),
+        newKeyring(),
         map[string]bool{},
         nil,
     }
@@ -168,8 +178,8 @@ type naclSession struct {
 
 
 // EndSession ends this SKI session
-func (ski *naclSession) EndSession(inReason string, inOnCompletion plan.Action) {
-    err := ski.parentProvider.EndSession(ski, inReason)
+func (session *naclSession) EndSession(inReason string, inOnCompletion plan.Action) {
+    err := session.parentProvider.EndSession(session, inReason)
 
     inOnCompletion(err, nil)
     return
@@ -177,15 +187,15 @@ func (ski *naclSession) EndSession(inReason string, inOnCompletion plan.Action) 
 
 
 
-func (ski *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompletionHandler) {
+func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompletionHandler) {
 
-    if ! ski.allowedOps[inArgs.OpName] {
+    if ! session.allowedOps[inArgs.OpName] {
         err := plan.Errorf(nil, plan.InsufficientSKIAccess, "insufficient SKI permissions for op %s", inArgs.OpName)
         inOnCompletion(err, nil)
         return
     }
 
-    err, results := ski.doOp(*inArgs)
+    err, results := session.doOp(*inArgs)
     inOnCompletion(err, results)
 }
 
@@ -194,23 +204,9 @@ func (ski *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompletionHa
 
 
 
-var (
-
-    // Convenience for having zero data around
-    zero64 = [64]byte{
-        -0,-0,-0,-0,-0,-0,-0,-0,
-        -0,+0,+0,-0,-0,-0,-0,-0,
-        -0,+0,+0,-0,-0,-0,-0,-0,
-        -0,-0,-0,-0,-0,-0,-0,-0,
-        +0,+0,+0,+0,+0,+0,+0,+0,
-        +0,+0,+0,+0,+0,-0,-0,+0,
-        +0,+0,+0,+0,+0,-0-+0,+0,
-        +0,+0,+0,+0,+0,+0,+0,+0,
-    }
-)
 
 
-func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
+func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
 
     outResults := make([]OpResult, 0, 2)
 
@@ -222,7 +218,7 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
         switch opArgs.OpName {
 
             case OpSendCommunityKeys: {
-                err, opArgs.Msg = ski.encodeSendKeysMsg(&opArgs)
+                err, opArgs.Msg = session.encodeSendKeysMsg(&opArgs)
             }
         }
 
@@ -248,7 +244,7 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
             case 
             OpEncryptForCommunity,
             OpDecryptFromCommunity:
-            keyBuf, err = ski.communityKeyring.GetSymmetricKey(opArgs.CryptoKeyID)
+            keyBuf, err = session.communityKeyring.GetSymmetricKey(opArgs.CryptoKeyID)
             privKeySz = 32
 
             case
@@ -256,12 +252,12 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
             OpDecryptFrom,
             OpSendCommunityKeys,
             OpAcceptCommunityKeys:
-            keyBuf, err = ski.personalKeyring.GetEncryptKey(opArgs.CryptoKeyID)
+            keyBuf, err = session.personalKeyring.GetEncryptKey(opArgs.CryptoKeyID)
             privKeySz = 32
 
             case
             OpSignMsg:
-            keyBuf, err = ski.personalKeyring.GetSigningKey(opArgs.CryptoKeyID)
+            keyBuf, err = session.personalKeyring.GetSigningKey(opArgs.CryptoKeyID)
             privKeySz = 64
         }
 
@@ -292,7 +288,8 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
             }
 
             case OpEncryptForCommunity:{
-                salt := <-salts
+                var salt [24]byte
+                crypto_rand.Read(salt[:])
                 msg = secretbox.Seal(salt[:], opArgs.Msg, &salt, &privKey32)
             }
 
@@ -308,7 +305,8 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
             }
 
             case OpEncryptFor, OpSendCommunityKeys:{
-                salt := <-salts
+                var salt [24]byte
+                crypto_rand.Read(salt[:])
                 msg = box.Seal(salt[:], opArgs.Msg, &salt, &peerPubKey, &privKey32)
             }
 
@@ -324,7 +322,7 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
             }
 
             case OpNewIdentityRev:{
-                signKey, encrKey := ski.personalKeyring.NewIdentity()
+                signKey, encrKey := session.personalKeyring.NewIdentity()
                 outResults = append(outResults, 
                     OpResult{info:"signingPubKey", buf:signKey},
                     OpResult{info:"encryptPubKey", buf:encrKey},
@@ -332,7 +330,7 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
             }
 
             case OpCreateCommunityKey:{
-                keyID := ski.communityKeyring.NewSymmetricKey()
+                keyID := session.communityKeyring.NewSymmetricKey()
                 msg = keyID[:]          
             }
 
@@ -352,10 +350,10 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
 
     // ====================================
     // 5) POST OP
-    {
+    if err == nil {
         switch opArgs.OpName {
             case OpAcceptCommunityKeys:
-                err = ski.decodeAcceptKeysMsg(msg)
+                err = session.decodeAcceptKeysMsg(msg)
         }
     }
 
@@ -370,49 +368,44 @@ func (ski *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
 
 
 
-// internal: the message sent by the send/accept community keys process
-type keysCapsule struct {
-    vers        uint32
-    info        string
-	keys        []KeyEntry
-}
+
+func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []byte){
 
 
-func (ski *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []byte){
+    var exportBuf []byte
+    {
+        keyList := KeyList{
+            Vers: 1,
+            Keys: make([]*KeyEntry, 0, len(opArgs.OpKeyIDs)),
+        }
 
-    capsule := keysCapsule{
-        vers: 1,
-        keys: make([]KeyEntry, len(opArgs.OpKeyIDs)),
-    }
+        //var perr *plan.Perror
 
-    var err *plan.Perror
+        keysNotFound := session.communityKeyring.ExportKeys(opArgs.OpKeyIDs, &keyList)
+        if len(keysNotFound) > 0 {
+            return plan.Errorf(nil, plan.FailedToMarshalAccessGrant, "failed to marshal %d keys", len(keysNotFound)), nil 
+        }
 
-    for i, keyID := range opArgs.OpKeyIDs{
-        err = ski.communityKeyring.GetKeyEntry(keyID, &capsule.keys[i])
+        var err error
+        exportBuf, err = keyList.Marshal()
         if err != nil {
-            return err, nil
+            return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal exported key list"), nil 
         }
     }
 
-    serializedCapsule, jerr := json.Marshal(capsule)
-    if jerr != nil {
-        return plan.Error(jerr, plan.FailedToMarshalAccessGrant, "failed to marshal keys capsule"), nil
-    }
-
-    entryBody := plan.PDIEntryBody{
-        BodyParts: []plan.PDIBodyPart{
-            plan.PDIBodyPart {
-                Header:  make(http.Header),
-                Content: serializedCapsule,
+    bodyPart := pdi.BodyPart {
+        Headers: []*pdi.HeaderEntry {
+            {
+                FieldName: pdi.ContentCodecHeaderName,
+                FieldValue: vouchCodecName,
             },
         },
+        Content: exportBuf,
     }
 
-    entryBody.BodyParts[0].Header.Add(plan.PDIContentCodecHeaderName, vouchCodecName)
-
-    msg, jerr := json.Marshal(&entryBody)
-    if jerr != nil {
-        return plan.Error(jerr, plan.FailedToMarshalAccessGrant, "failed to marshal access grant body"), nil
+    msg, err := bodyPart.Marshal()
+    if err != nil {
+        return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant body"), nil
     }
 
     return nil, msg
@@ -420,26 +413,32 @@ func (ski *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []byte)
 }
 
 
-func (ski *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror{
+func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
 
-
-	entryBody := plan.PDIEntryBody{}
-	jerr := json.Unmarshal(inMsg, &entryBody)
-	if jerr != nil {
-		return plan.Error(jerr, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")
+    bodyPart := pdi.BodyPart{}
+    err := bodyPart.Unmarshal(inMsg)
+	if err != nil {
+		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")
     }
 
-    if len(entryBody.BodyParts) < 1 || entryBody.BodyParts[0].Header.Get(plan.PDIContentCodecHeaderName) != vouchCodecName {
-		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' header", plan.PDIContentCodecHeaderName)
+    if bodyPart.GetHeaderValue(pdi.ContentCodecHeaderName) != vouchCodecName {
+		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' header", pdi.ContentCodecHeaderName)
     }
 
-	capsule := &keysCapsule{}
-	jerr = json.Unmarshal(entryBody.BodyParts[0].Content, capsule)
-	if jerr != nil {
-		return plan.Error(jerr, plan.FailedToProcessAccessGrant, "access grant content failed to unmarshal")
-    }
+    keyList := KeyList{}
     
-    return ski.communityKeyring.AddKeys(capsule.keys)
+    err = keyList.Unmarshal(bodyPart.Content)
+	if err != nil {
+		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant content failed to unmarshal")
+    }
+
+    perr := session.communityKeyring.MergeKeys(keyList)
+	if perr != nil {
+		return perr
+    }
+
+
+    return nil
 
 }
 

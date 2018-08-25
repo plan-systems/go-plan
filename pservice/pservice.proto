@@ -1,0 +1,290 @@
+
+// See plan-protobuf/README.md
+
+
+syntax = "proto3";
+
+package pservice;
+
+import "github.com/plan-tools/go-plan/pdi/pdi.proto";
+import "github.com/plan-tools/go-plan/ski/ski.proto";
+
+
+
+
+
+enum PserviceScope {
+    REPLICATION_GET             = 0;        // Can query for already-encrypted community entries
+    REPLICATION_POST            = 1;        // Can post already-encrypted community entries
+
+    COMMUNITY_READ              = 2;        // Can decrypt community data
+    COMMUNITY_WRITE             = 3;        // Can encrypt community data
+
+    PERSONAL_READ               = 4;        // Can decrypt personal data
+    PERSONAL_WRITE              = 5;        // Can encrypt personal data
+}
+
+
+enum QueryOption {
+    DECRYPT_PDI_HEADER          = 0;
+    DECRYPT_PDI_BODY            = 1;
+}
+
+
+
+/* 
+    
+    Pnode Access Service Scopes                                     Associated Privileges
+    ---------------------------                                     ------------------------
+    RrE: Replication-level (encrypted entry) querying               Does this client have RrE access?
+    RwE: Replication-level (encrypted entry) writing                Does this client have RwE access?
+    CrE: Channel-level querying (w/ encrypted entry results)        Can decrypt community data
+    CrD: Channel-level querying (w/ decrypted entry results)        Can decrypt personal data
+    CwD: Channel-level writing                                      Can encrypt personal AND community data
+
+
+    Pnode Operating Mode    Services Offered        Services Consumed   Storage         Liabilities                     Primary Purpose                                             Example Deployment
+    --------------------    ----------------        -----------------   -------         -----------                     ---------------                                             ------------------
+    "replicator"            RrE,RwE                 none                CRDT            db/blockchain dependent         Store & replicate already-encrypted community entries       A public rackspace (i.e. meh physically secure) 
+    "c-gateway"             RrE,RwE,CrE             RrE,RwE             local db        community keys                  Stages community data for rapid access                      On a rack in an office (i.e. ok secure plus no benefit of breach since ppl already in the community)
+    "p-gateway"             RrE,RwE,CrE,CrD,CwD     RrE,RwE             local db        community & personal keys       Serves a PLAN client (typically on same device)             Personal laptop (plus quitting client logs your personal keyring out)
+    "p-gateway" (proxy)     RrE,RwE,CrE,CrD,CwD     RrE,RwE,CrE         partial/none    loads bandwidth                 Serves a PLAN client on a lightweight device                Serves iOS PLAN locally, connecting to a remote c-gateway or p-gateway.
+
+    Note: "p-gateway" mode can also be in proxy mode where there's a partial (or no) local db -- basically, only crypto services are present.
+    CrD and CwD services are passed on to an underlying c-gateway or p-gateway before/after crypto while the others are just forwarded:
+        RrE              <- (remote) RrE
+        RwE              -> (remote) RwE
+        CrE              <- (remote) CrE
+        CrD <- (decrypt) <- (remote) CrE 
+        CwD -> (encrypt) -> (remote) RwE
+
+*/
+
+
+
+message MemberInfoRequest {
+
+    // Identifes which community member
+                bytes               member_id               = 1;
+
+
+}
+
+
+
+message MemberInfoResponse {
+
+    // Identifes which community member
+                bytes               member_id               = 1;
+
+    // Identifes which community member
+                MemberCryptoInfo    member_crypto           = 2;
+
+    // This is the revision of the member requested.  If 0, the latest rev is returned
+                MemberInfo          member_info             = 3;
+
+
+}
+
+
+// /plan/community/member/crypto
+message MemberCryptoInfo {
+
+    // Specifies what the revision number of this info is
+                uint32              crypto_rev              = 2;
+
+    // Public keys associated with the given revision
+                bytes               pub_signing_key         = 3;
+                bytes               pub_crypto_key          = 4;
+}
+
+
+// /plan/community/member/info
+message MemberInfo {
+
+    // Specifies what the revision number of this info is
+                uint32              info_rev                = 2;
+
+    // The ChannelID of this member's home/landing channel.  
+                bytes               home_channel            = 3;
+
+    // The ChannelID of this member's inbox -- e.g. Another community member leaves an invite here to join a private channel.
+                bytes               inbox_channel           = 4;
+
+    // Specifies any number of publicly available fields 
+    repeated    pdi.HeaderEntry     header                  = 5;
+
+}
+
+
+
+
+service Pnode {
+
+    // StartSession() is the first call a client makes to a pnode daemon once a GRPC channel  
+    //    connection is established.  It returns an auth/session token that the client must inject into
+    //    channel's metadata as "session_token" in order for all the other rpc calls.
+    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
+
+    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
+    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
+
+    rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfo);
+}
+
+
+service Pgateway {
+
+    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
+
+
+    rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
+
+
+    // RrE, CrE, CrD
+    rpc         StartEntryQuery(EntryQuery)                     returns (stream EntryResponse);
+
+    // CrE
+    rpc         ListChannels(ChannelSearchParams)               returns (PDIChannelList);
+
+    // RwE, CwD
+    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
+    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
+    
+}
+
+
+
+
+
+/***   StartSession(SessionRequest) --->  SessionInfo   ***/
+
+message SessionRequest {
+
+    // Which community this session wants to access (a pnode hosts multiple communities)
+                bytes           community_id            = 1;
+
+    // Identifies who is requesting the session.
+                bytes           client_id               = 2;
+
+    // Specifies which scopes are being requested 
+    repeated    PserviceScope   service_scopes          = 5;
+
+    // A set of keys and tokens presumed to allow a new session to begin
+                ski.KeyList     keys                    = 6;
+
+}
+
+message SessionInfo {
+                string          session_token           = 1;
+}
+
+
+
+
+/***   StartEntryQuery(EntryQuery)  --->  EntryResponse   ***/
+
+// Starts a new query that returns an ongoing stream of PDI entries.  
+// The query criteria are highly limited to timestamp and hashname since PDI entries are community private
+message EntryQuery {
+                QueryOption     query_options           = 1;
+                uint64          timestamp_min           = 2;
+                uint64          timestamp_max           = 3;
+    repeated    bytes           entry_hashnames         = 4;
+}
+
+message EntryResponse {
+    repeated    pdi.Entry       entries                 = 1;
+}
+
+
+
+
+
+/***   DoEntryOp(EntryOpArgs)  --->  EntryOpStatus   ***/
+
+// EntryOpArgs is an open-ended invocation for the given encrypted PDI entry.
+message EntryOpArgs {
+                int32           id                      = 1;
+
+                pdi.EntryOp     entry_op                = 2;
+
+                map<string, 
+                    bytes>      op_args                 = 3;
+
+                    pdi.Entry   entry                   = 4;
+}
+
+message EntryOpStatus {
+                int32           id                      = 1;
+
+                int32           status_code             = 2;
+                map<string, 
+                    bytes>      status_data             = 3;
+
+}
+
+
+
+
+
+
+
+
+message Perror {
+                int32           code                    = 1;
+                string          msg                     = 2;
+}
+
+
+
+
+message StatusQuery {
+                string          test_greeting           = 1;
+}
+
+
+message StatusReply {
+                string          test_reply              = 1;
+}
+
+
+
+
+
+
+message PDIChannelInfo {
+                bytes           channel_id              = 1;
+                bytes           access_channel_id       = 2;
+                int64           access_channel_rev      = 3;
+    repeated    pdi.HeaderEntry header                  = 4;
+}
+
+
+message PDIChannelList {
+    repeated    PDIChannelInfo  channels                = 1;
+}
+
+
+message PDIChannelProperties {
+                string          channel_name            = 1;
+                string          channel_desc            = 2;
+    repeated    pdi.HeaderEntry header                  = 4;
+}
+
+
+
+
+
+
+
+message ChannelSearchParams {
+                int32           flags                   = 1;   
+}
+
+message ChannelEntryQuery {
+                int32           flags                   = 1;   
+}
+
+
+

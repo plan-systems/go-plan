@@ -1,0 +1,27 @@
+
+// See plan-protobuf/README.md
+
+
+syntax = "proto3";
+
+package ski;
+
+
+message KeyEntry {
+                uint32          key_info                = 1;
+                int64           time_created            = 2;
+                bytes           privKey                 = 3;
+                bytes           pubKey                  = 4;
+}
+
+
+
+
+message KeyList {
+                int32           vers                    = 1;
+    repeated    KeyEntry        keys                    = 2;
+}
+
+
+
+

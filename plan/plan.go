@@ -22,12 +22,20 @@ type Action                 func(inErr *Perror, inParam interface{})
 
 const (
 
-	// IdentityAddrSz is the number of bytes in most PLAN addresses and public IDs.  It's the right-most bytes of a longer public key.
-	// Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
-    IdentityAddrSz = 20
+	// IdentityAddrSz is the number of bytes PLAN uses for a public addresses.  It's the right-most bytes of any longer public key.
+    // Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
+    // Why shouldn't this be smaller or larger?  Now this is becoming an exestential question!  What's the human perceptual difference between,
+    //     say, 1/2^128, 1/2^160, and 1/2^192?  We're living it and finding out!  2^192 outta be enough for anybody.
+    IdentityAddrSz      = 24
     
-    // KeyIDSz is the number of bytes used to identify public-private key pairs and symmetric keys 
-    KeyIDSz = 20
+    // KeyIDSz is the number of bytes PLAN uses to identify a key entry on a keyring 
+    KeyIDSz             = 24
+
+    // ChannelIDSz specifies the size of ChannelID
+    ChannelIDSz         = 20
+
+    // MemberIDSz specifies the size of MemberID
+    MemberIDSz          = 16
 
 )
 
@@ -49,8 +57,16 @@ type IdentityAddr       [IdentityAddrSz]byte
 type PDIEntrySig        []byte
 
 // ChannelID identifies a specific PLAN channel where PDI entries are posted to.
-type ChannelID          [20]byte
+type ChannelID          [ChannelIDSz]byte
 
+// MemberID identifies a memeber of a given community and is generared when a member is initially added to the community and never changes 
+type MemberID           [MemberIDSz]byte
+
+// MemberCryptoRev is incremented each time a member creates a new set of public keys.  The community's MemberRegistryChannel allows 
+//    any member to lookup public keys for a member for each crypto rev they've ever done, allows community members to:
+//    (1) send private messages to a given member
+//    (2) verify sigs on anything to ensure that they are authentic
+type MemberCryptoRev    uint32
 
 
 var (
@@ -69,7 +85,7 @@ var (
 	}
 
 	// MemberRegistryChannel is the community's master (community-public) member registry.  Each entry specifies a
-	//    each community member or group's community ID, latest public key, and resource quotas.  This allows each of the
+	//    each community member's member ID, latest public keys, and member info (e.g. home ChannelID).  This allows each of the
 	//    community's pnodes to verify member signatures and enable the passing of secrets to other members or groups
 	//    via asymmetric encryption. Naturally, this channel is controlled by an access channel that is controlled only
 	//    by community admins and is set to RootAccessChannel by default.  Since each entry in this channel represents
@@ -130,11 +146,11 @@ const (
 )
 
 // Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflippiug
-//    won't occur until the year 292,471,210,648 CE.  I wonder if OSes will be still be made by for-profit orgs by that time.    
+//     won't occur until the year 292,471,210,648 CE.  I wonder for-profit orgs will still dominate the OS space.
 // Note: if a nanosecond precision is not available or n/a, then the best available precision should be used (or 0).  
 type Time struct {
-    UnixSecs            int64   `json:"unix"` // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
-    NanoSecs            int32   `json:"nano"` // NanoSecs is the number of nanoseconds elapsed into .UnixSecs so the domain is [0,999999999]
+    UnixSecs            int64   `json:"unix"`   // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
+    NanoSecs            int32   `json:"nano"`   // NanoSecs is the number of nanoseconds elapsed into .UnixSecs so the domain is [0,999999999]
 }
 
 
@@ -152,7 +168,7 @@ const (
 func Now() Time {
     t := time.Now()
 
-    return Time{
+    return Time {
         UnixSecs: t.Unix(),
         NanoSecs: int32( t.Nanosecond() ),
     }
@@ -247,12 +263,7 @@ type PDIBodyPart struct {
 	Content             []byte              // Arbitrary client binary data conforming to .Headers
 }
 
-const (
 
-    // PDIContentCodecHeaderName is the standard header field name used in PDIBodyPart.Headers used to describe PDIBodyPart.Content.
-    // For info and background: https://github.com/multiformats/multicodec
-    PDIContentCodecHeaderName = "Multistream"
-)
 
 
 // When a new PDIEntry arrives off the wire, .Sig is set, .Hash == nil, .dataCrypt is set, .Body == nil
@@ -362,58 +373,20 @@ func (sig *PDIEntrySig) CopyFrom( inSig []byte ) {
 */
 
 
-// NewPDIEntrySig is a convenience function to create a PDIEntrySig from an existing sig
-func NewPDIEntrySig( inBytes []byte ) PDIEntrySig {
-	sig := PDIEntrySig{}
-	copy(sig[:], inBytes[:64])
-	return sig
-}
 
-/*
-// ToArray is a convenience function to copy to a byte array.
-func (ckey *CommunityKey) ToArray() *[32]byte  {
-    var arr [len(ckey)]byte
-
-    copy( arr[:], ckey[:len(ckey)])
-    
-	return &arr
-}
-
-// NewIdentityPublicKey is a convenience function to create a IdentityPublicKey from an existing key
-func NewIdentityPublicKey(inBytes *[32]byte) IdentityPublicKey {
-	k := IdentityPublicKey(*inBytes)
-	return k
-}*/
-
-// Assign sets this CommunityID from the given buffer
+// AssignFrom sets this CommunityID from the given buffer
 func (cid *CommunityID) AssignFrom(in []byte) {
-    copy(cid[:], in[:IdentityAddrSz])
+    copy(cid[:], in[len(in) - IdentityAddrSz:])
 }
 
-// Assign sets this CommunityID from the given buffer
+// AssignFrom sets this CommunityID from the given buffer
 func (cid *IdentityAddr) AssignFrom(in []byte) {
-    copy(cid[:], in[IdentityAddrSz:])
+    copy(cid[:], in[len(in) - IdentityAddrSz:])
 }
 
+// AssignFrom sets this CommunityID from the given buffer
 func (kid *KeyID) AssignFrom(in []byte) {
-    copy(kid[:], in[len(in)-IdentityAddrSz:])
+    copy(kid[:], in[len(in) - KeyIDSz:])
 }
 
-
-
-/*
-// Assign sets this IdentityPublicKey from the given buffer
-func (ipk *IdentityPublicKey) Assign( inArray *[32]byte ) {
-	copy(ipk[:], inArray[:32])
-}
-
-// ToArray is a convenience function to copy to a byte array.
-func (ipk *IdentityPublicKey) ToArray() *[32]byte  {
-    var arr [32]byte
-
-    copy( arr[:], ipk[:32] )
-    
-	return &arr
-}
-*/
 

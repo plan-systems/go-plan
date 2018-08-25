@@ -3,6 +3,7 @@ package ski // import "github.com/plan-tools/go-plan/ski"
 import (
 	"bytes"
     "math/rand"
+    "fmt"
 
     "testing"
 
@@ -29,12 +30,15 @@ func TestCommunityEncryption(t *testing.T) {
     var communityKeyID plan.KeyID
     communityKeyID.AssignFrom(opResults[0].buf)
 
+    fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
+    fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
+
     // 2) generate a xfer community key msg from A
     err, opResults = A.doOp(OpArgs{
         OpName: OpSendCommunityKeys,
         OpKeyIDs: []plan.KeyID{communityKeyID},
         PeerPubKey: B.encryptPubKey,
-        CryptoKeyID: A.encryptKeyID,
+        CryptoKeyID: A.encryptPubKeyID,
     })
     if err != nil {
         t.Fatal(err)
@@ -44,7 +48,8 @@ func TestCommunityEncryption(t *testing.T) {
     err, opResults = B.doOp(OpArgs{
         OpName: OpAcceptCommunityKeys,
         Msg: opResults[0].buf,
-        CryptoKeyID: B.encryptKeyID,
+        PeerPubKey: A.encryptPubKey,
+        CryptoKeyID: B.encryptPubKeyID,
     })
     if err != nil {
         t.Fatal(err)
@@ -79,7 +84,7 @@ func TestCommunityEncryption(t *testing.T) {
     }
     
 
-    badMsg := make([]byte, len(clearMsg))
+    badMsg := make([]byte, len(encryptedMsg))
 
     // Vary the data slightly to test 
     for i := 0; i < 1000; i++ {
@@ -102,92 +107,11 @@ func TestCommunityEncryption(t *testing.T) {
 }
 
 
-/*
-func TestPersonalEncryption(t *testing.T) {
-
-	encryptID, signingID := setUpSKI(t)
-	recvSki, recvEncryptKeyID, _ := setUpSKI(t)
-	testInput := []byte("psssst, this is a secret just between us!")
 
 
-	err, opResults = ski.doOp(OpArgs{
-        OpName: OpEncryptCommunityData,
-        CryptoKeyID: keyID,
-        Msg: testInput,
-    })
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err, opResults = ski.doOp(OpArgs{
-        OpName: OpDecryptCommunityData,
-        CryptoKeyID: keyID,
-        Msg: opResults[0].buf,
-    })
-	if err != nil {
-		t.Fatal(err)
-    }
-    
-	if !bytes.Equal(testInput, opResults[0].buf) {
-		t.Fatalf("got %v after decryption, expected %v", opResults[0].buf, testInput)
-    }
-    
 
 
-	encryptOut, err := senderSki.EncryptFor(senderEncryptKeyID, clearIn, recvEncryptKeyID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	clearOut, err := recvSki.DecryptFrom(
-		recvEncryptKeyID, encryptOut, senderEncryptKeyID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(clearIn, clearOut) {
-		t.Fatalf("got %v after decryption, expected %v", clearOut, clearIn)
-	}
-}
 
-/*
-
-func TestSigning(t *testing.T) {
-
-	senderSki, _, senderSignKeyID := setUpSKI(t)
-	recvSki, _, _ := setUpSKI(t)
-
-	entry := &plan.PDIEntryCrypt{
-		HeaderCrypt: []byte("encryptedtestheader"),
-		BodyCrypt:   []byte("encryptedtestbody"),
-    }
-    
-	hash := entry.ComputeHash()
-
-	sig, err := senderSki.Sign(senderSignKeyID, hash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verified, ok := recvSki.Verify(senderSignKeyID, hash, sig)
-	if !ok {
-		t.Fatalf("signature verification failed: %x", verified)
-	}
-}
-
-func TestVouching(t *testing.T) {
-
-	senderSki, senderEncryptKeyID, _ := setUpSKI(t)
-	recvSki, recvEncryptKeyID, _ := setUpSKI(t)
-	keyID := senderSki.NewCommunityKey()
-
-	msg, err := senderSki.Vouch(keyID, senderEncryptKeyID, recvEncryptKeyID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = recvSki.AcceptVouch(recvEncryptKeyID, msg, senderEncryptKeyID)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-*/
 
 
 
@@ -200,8 +124,8 @@ type testSession struct {
     blocker     chan int   
     signingKeyID plan.KeyID
 
-    encryptKeyID plan.KeyID 
-    encryptPubKey []byte
+    encryptPubKeyID plan.KeyID 
+    encryptPubKey   []byte
 }
 
 
@@ -264,7 +188,7 @@ func newSession(t *testing.T, inName string) *testSession {
     ts.signingKeyID.AssignFrom(identityResults[0].buf)
 
     ts.encryptPubKey = identityResults[1].buf
-    ts.encryptKeyID.AssignFrom(identityResults[1].buf)
+    ts.encryptPubKeyID.AssignFrom(identityResults[1].buf)
 
     return ts
 }

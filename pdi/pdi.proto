@@ -1,0 +1,66 @@
+
+// See plan-protobuf/README.md
+
+
+syntax = "proto3";
+
+package pdi;
+
+
+
+
+enum EntryOp {
+    POST_ENTRY          = 0;
+}   
+
+
+enum EntryVerb {
+    ADD_ENTRY           = 0;
+    REMOVE_ENTRIES      = 1;
+    SUPERCEDE_ENTRY     = 2;
+}
+
+
+message Entry {
+                EncryptedEntry  encrypted_entry         = 1;
+                EntryHeader     entry_header            = 2;
+    repeated    BodyPart        entry_body_parts        = 3;
+}
+
+
+message EncryptedEntry {
+                int64           entry_info              = 1;
+                int64           unix_secs               = 2;
+                bytes           community_key_id        = 3;         
+                bytes           pdi_header              = 5;        // Encrypted using the referenced community key
+                bytes           pdi_body                = 6;
+                bytes           entry_sig               = 7;
+}
+
+
+message EntryHeader {
+                fixed32         nano_secs               = 2;
+                EntryVerb       entry_verb              = 3;
+                bytes           channel_id              = 4;        // Channel id this entry is posted to.
+                uint32          channel_rev             = 5;        // Revision number of this channel this entry is targeting
+                bytes           author_member_id        = 6;        // Creator of this entry (and signer of .Sig)
+                uint32          author_member_rev       = 7;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
+                bytes           access_channel_id       = 8;        // Which permissions channel (an access control implementation) this entry was encrypted with
+                uint32          access_channel_rev      = 9;        // Which rev of the cited access channel was in effect when this entry was authored
+    repeated    HeaderEntry     aux_headers             = 10;       // http-style headers available for unrestricted use.
+}
+
+
+message BodyPart {
+    repeated    HeaderEntry     headers                 = 1;
+                bytes           content                 = 2;
+}
+
+
+// HeaderEntry is a http-style header entry
+message HeaderEntry {
+                string          field_name              = 1;
+                string          field_value             = 2;
+}
+
+
