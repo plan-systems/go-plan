@@ -22,24 +22,52 @@ enum EntryVerb {
 
 
 message Entry {
-                EncryptedEntry  encrypted_entry         = 1;
-                EntryHeader     entry_header            = 2;
-    repeated    BodyPart        entry_body_parts        = 3;
+                EntryCrypt      crypt                   = 1;
+                EntryHeader     header                  = 2;
+                Body            body                    = 3;
 }
 
 
-message EncryptedEntry {
-                int64           entry_info              = 1;
-                int64           unix_secs               = 2;
-                bytes           community_key_id        = 3;         
-                bytes           pdi_header              = 5;        // Encrypted using the referenced community key
-                bytes           pdi_body                = 6;
-                bytes           entry_sig               = 7;
+// Body is a flexible, abstract data container with named parts.  It is inspired by http and is a superset of functionality.
+message Body {
+    repeated    BodyPart        parts                   = 1;        // Available for unrestricted client use.
+}
+
+
+// Attachment is a http-style header entry
+message BodyPart {
+                string          name                    = 1;
+                string          content_codec           = 2;        // If the empty string, content is assumed to be UTF8.
+                bytes           content                 = 3;
+}
+
+
+
+
+
+/*
+    EntryCrypt is the "wire" format for PLAN's Persistent Data Interface (PDI) entries.  It contains zero revealing information and
+    is what's sent to/from community data store replciators, such as NEM, DFINITY, and Ethereum.
+
+    An encrypted PDI entry has two segments, its header and body segment.  The header, EntryHeader, is "community-private",
+    meaning that it is encrypted using one of the community's shared symmetric keys.  The entry's body is either also community-private
+    (encrypted with the same community key as EntryHeader), or it is encrypted using the key referenced by body_key_id.
+
+    And awaaaaay we go!
+*/
+
+message EntryCrypt {
+                uint32          crypt_info              = 1;        // Allows accessors to apply correct hash and crypto functions to this EntryCrypt 
+                uint64          time_created            = 2;        // Unix timestamp (UTC in seconds elapsed since Jan 1, 1970.)
+                bytes           community_key_id        = 3;        // Needed to access header_crypt
+                bytes           header_crypt            = 5;        // := Encrypt(<EntryHeader>.Marshal(), <EntryCrypt>.community_key_id)
+                bytes           body_crypt              = 6;        // := Encrypt(<Body>.Marshal(), <EntryHeader>.body_key_id)
+                bytes           entry_sig               = 7;        // := CalcSig(<EntryCrypt>, GetKey(author_member_id,author_member_rev))
 }
 
 
 message EntryHeader {
-                fixed32         nano_secs               = 2;
+                fixed32         nano_secs               = 2;        // [0,999999999] -- serves 
                 EntryVerb       entry_verb              = 3;
                 bytes           channel_id              = 4;        // Channel id this entry is posted to.
                 uint32          channel_rev             = 5;        // Revision number of this channel this entry is targeting
@@ -47,20 +75,6 @@ message EntryHeader {
                 uint32          author_member_rev       = 7;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
                 bytes           access_channel_id       = 8;        // Which permissions channel (an access control implementation) this entry was encrypted with
                 uint32          access_channel_rev      = 9;        // Which rev of the cited access channel was in effect when this entry was authored
-    repeated    HeaderEntry     aux_headers             = 10;       // http-style headers available for unrestricted use.
+                bytes           body_key_id             = 10;       // Specifies which key was used to encrypt 
+                Body            extras                  = 11;       // Available for unrestricted client use.
 }
-
-
-message BodyPart {
-    repeated    HeaderEntry     headers                 = 1;
-                bytes           content                 = 2;
-}
-
-
-// HeaderEntry is a http-style header entry
-message HeaderEntry {
-                string          field_name              = 1;
-                string          field_value             = 2;
-}
-
-

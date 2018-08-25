@@ -17,7 +17,7 @@ import (
 
 
 const (
-    vouchCodecName = "/plan/ski/vouch/1"
+    keyListCodecName = "/plan/ski/keylist/1"
 
     // InvokeNaCl should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
     InvokeNaCl = "/plan/ski/provider/nacl/1"
@@ -372,7 +372,7 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, []OpResult) {
 func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []byte){
 
 
-    var exportBuf []byte
+    var keyListBuf []byte
     {
         keyList := KeyList{
             Vers: 1,
@@ -387,23 +387,22 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []b
         }
 
         var err error
-        exportBuf, err = keyList.Marshal()
+        keyListBuf, err = keyList.Marshal()
         if err != nil {
             return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal exported key list"), nil 
         }
     }
 
-    bodyPart := pdi.BodyPart {
-        Headers: []*pdi.HeaderEntry {
+    body := pdi.Body {
+        Parts: []*pdi.BodyPart {
             {
-                FieldName: pdi.ContentCodecHeaderName,
-                FieldValue: vouchCodecName,
+                ContentCodec: keyListCodecName,
+                Content: keyListBuf,
             },
         },
-        Content: exportBuf,
     }
 
-    msg, err := bodyPart.Marshal()
+    msg, err := body.Marshal()
     if err != nil {
         return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant body"), nil
     }
@@ -415,19 +414,21 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []b
 
 func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
 
-    bodyPart := pdi.BodyPart{}
-    err := bodyPart.Unmarshal(inMsg)
+    body := pdi.Body{}
+    err := body.Unmarshal(inMsg)
 	if err != nil {
 		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")
     }
 
-    if bodyPart.GetHeaderValue(pdi.ContentCodecHeaderName) != vouchCodecName {
-		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' header", pdi.ContentCodecHeaderName)
+
+    keyListBuf := body.GetPartContent(keyListCodecName)
+    if keyListBuf == nil {
+		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", keyListCodecName)
     }
 
     keyList := KeyList{}
     
-    err = keyList.Unmarshal(bodyPart.Content)
+    err = keyList.Unmarshal(keyListBuf)
 	if err != nil {
 		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant content failed to unmarshal")
     }

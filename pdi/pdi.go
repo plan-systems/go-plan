@@ -4,20 +4,35 @@ package pdi
 
 
 
-
-const (
-
-    // ContentCodecHeaderName is the standard header field name used in PDIBodyPart.Headers used to describe PDIBodyPart.Content.
-    // For info and background: https://github.com/multiformats/multicodec
-    ContentCodecHeaderName = "Multicodec"
-)
-
-// GetHeaderValue searches for a header with a matching field name and returns its value
-func (part *BodyPart) GetHeaderValue(inFieldName string) string {
-    for _, entry := range part.Headers {
-        if entry.FieldName == inFieldName {
-            return entry.FieldValue 
+// GetPartWithName returns the first-appearing BodyPart with the matching part and codec name
+func (body *Body) GetPartWithName(inCodec string, inPartName string) *BodyPart {
+    for _, part := range body.Parts {
+        if part.Name == inPartName && part.ContentCodec == inCodec {
+            return part
         }
     }
-    return ""
+    return nil
 }
+
+// GetPartContentWithName returns the content of the first-appearing BodyPart with the matching part and codec name
+func (body *Body) GetPartContentWithName(inCodec string, inPartName string) []byte {
+    for _, part := range body.Parts {
+        if part.Name == inPartName && part.ContentCodec == inCodec {
+            return part.Content
+        }
+    }
+    return nil
+}
+
+// GetPartContent returns the content of the first-appearing BodyPart with the matching codec name
+func (body *Body) GetPartContent(inCodec string) []byte {
+    for _, part := range body.Parts {
+        if part.ContentCodec == inCodec {
+            return part.Content
+        }
+    }
+    return nil
+}
+
+
+

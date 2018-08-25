@@ -111,8 +111,8 @@ message MemberInfo {
     // The ChannelID of this member's inbox -- e.g. Another community member leaves an invite here to join a private channel.
                 bytes               inbox_channel           = 4;
 
-    // Specifies any number of publicly available fields 
-    repeated    pdi.HeaderEntry     header                  = 5;
+    // Specifies any number of publicly available values 
+                pdi.Body            body                    = 5;
 
 }
 
@@ -257,7 +257,7 @@ message PDIChannelInfo {
                 bytes           channel_id              = 1;
                 bytes           access_channel_id       = 2;
                 int64           access_channel_rev      = 3;
-    repeated    pdi.HeaderEntry header                  = 4;
+                pdi.Body        body                    = 4;
 }
 
 
@@ -269,7 +269,7 @@ message PDIChannelList {
 message PDIChannelProperties {
                 string          channel_name            = 1;
                 string          channel_desc            = 2;
-    repeated    pdi.HeaderEntry header                  = 4;
+                pdi.Body        body                    = 4;
 }
 
 
