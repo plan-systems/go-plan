@@ -44,6 +44,34 @@ import (
 const (
     DEBUG     = true
 )
+
+
+A community KeyID identifies a specific shared "community-global" symmetric key.
+When a PLAN client starts a session with a pnode, the client sends the pnode her community-public keys.
+PDIEntryCrypt.CommunityKeyID specifies which community key was used to encrypt PDIEntryCrypt.Header.
+If/when an admin of a community issues a new community key,  each member is securely sent this new key via
+the community key channel (where is key is asymmetrically sent to each member still "in" the community. 
+
+When a PLAN client starts a new session with a pnode, the client sends the community keys for the session.  This allows
+pnode to process and decrypt incoming PDIEntryCrypt entries from the storage medium (e.g. Ethereum).  Otherwise, pnode
+has no ability to decrypt PDIEntryCrypt.Header.  A pnode could be configured to keep the community keychain even when there
+are no open client PLAN sessions so that incoming entries can be processed.  Otherwise, incoming entries won't be processed
+from the lowest level PDI storage layer.  Both configurations are reasonable depending on security preferences.
+
+When a community admin initiates a community-key "rekey event", the newly generated community key is securely and individually
+"sent" to each community member via the community's public key transfer channel. The new community key is encrypted using each member's public key.
+When a pnode is processing an entry that it does not have a community key for, it will check the community's public key channel
+for an entry for the current client's public key, it will send the client the encrypted community key.  The client uses its SKI
+to decrypt the payload into the new community key.  This key is added to the user's SKI keychain and is sent back to pnode.
+
+
+Recall that the pnode client has no ability to decrypt PDIEntryCrypt.Body if PDIEntryHeader.AccessChannelID isn't set for
+community-public permissions.  This is fine since only PLAN clients with a
+
+
+
+
+
 */
 
 
@@ -303,7 +331,7 @@ func (pn *Pnode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
     
             info.RepoPath = b.String() + "-" + hex.EncodeToString( info.CommunityID[:4] ) + "/"
             info.ChannelPath = info.RepoPath + "ch/"
-            info.CreationTime = plan.Now()
+            info.TimeCreated = plan.Now()
             info.MaxPeerClockDelta = 60 * 25
         }
 
@@ -329,7 +357,7 @@ func NewClientSession(in *pservice.ClientInfo) *ClientSession {
         WorkstationID: in.WorkstationId,
     }
 
-    session.MemberID.Assign(in.MemberId)
+    session.MemberID.AssignFrom(in.MemberId)
 
     return session
 }
@@ -343,7 +371,7 @@ func (pn *Pnode) BeginSession(
     ) (*pservice.SessionInfo, error) {
 
     var communityID plan.CommunityID
-    communityID.Assign(in.CommunityId)
+    communityID.AssignFrom(in.CommunityId)
 
     CR := pn.CRbyID[communityID]
     if CR == nil {
