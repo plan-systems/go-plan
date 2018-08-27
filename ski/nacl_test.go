@@ -29,7 +29,7 @@ func TestCommunityEncryption(t *testing.T) {
 		t.Fatal(err)
     }
     var communityKeyID plan.KeyID
-    communityKeyID.AssignFrom(opResults.Parts[0].Content)
+    communityKeyID.AssignFrom(opResults.Content)
 
     fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
     fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
@@ -48,7 +48,7 @@ func TestCommunityEncryption(t *testing.T) {
     // 3) insert the new community key into B
     err, opResults = B.doOp(OpArgs{
         OpName: OpAcceptCommunityKeys,
-        Msg: opResults.Parts[0].Content,
+        Msg: opResults.Content,
         PeerPubKey: A.encryptPubKey,
         CryptoKeyID: B.encryptPubKeyID,
     })
@@ -68,7 +68,7 @@ func TestCommunityEncryption(t *testing.T) {
 		t.Fatal(err)
 	}
 
-    encryptedMsg := opResults.Parts[0].Content
+    encryptedMsg := opResults.Content
 
     // Send the encypted community message to B
 	err, opResults = B.doOp(OpArgs{
@@ -80,8 +80,8 @@ func TestCommunityEncryption(t *testing.T) {
 		t.Fatal(err)
     }
 
-	if ! bytes.Equal(clearMsg, opResults.Parts[0].Content) {
-		t.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Parts[0].Content)
+	if ! bytes.Equal(clearMsg, opResults.Content) {
+		t.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Content)
     }
     
 
@@ -132,12 +132,12 @@ type testSession struct {
 
 
 
-func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Perror, *pdi.Body) {
+func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Perror, *pdi.Block) {
 
     var outErr *plan.Perror
-    var outResults *pdi.Body
+    var outResults *pdi.Block
 
-    ts.session.DispatchOp(&inOpArgs, func(inErr *plan.Perror, opResults *pdi.Body) {
+    ts.session.DispatchOp(&inOpArgs, func(inErr *plan.Perror, opResults *pdi.Block) {
         outErr = inErr
         outResults = opResults
 
@@ -181,15 +181,12 @@ func newSession(t *testing.T, inName string) *testSession {
     if err != nil {
         t.Fatal(err)
     }
-    if len(identityResults.Parts) < 2 {
-        t.Fatal("identityResults < 2")
-    }
 
 
-    ts.signingKeyID.AssignFrom(identityResults.Parts[0].Content)
+    ts.signingKeyID.AssignFrom( identityResults.GetContentWithLabel(PubSigningKeyName) )
 
-    ts.encryptPubKey = identityResults.Parts[1].Content
-    ts.encryptPubKeyID.AssignFrom(identityResults.Parts[1].Content)
+    ts.encryptPubKey = identityResults.GetContentWithLabel(PubCryptoKeyName)
+    ts.encryptPubKeyID.AssignFrom(ts.encryptPubKey)
 
     return ts
 }

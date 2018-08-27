@@ -95,7 +95,7 @@ type Pnode struct {
 }
 
 
-// RuntimeLimits specifies settings that are solely associated with system load, performance, and resource allocation.
+// RuntimeSettings specifies settings that are solely associated with system load, performance, and resource allocation.
 type RuntimeSettings struct {
 
     // Approx hard limit of the number of ChannelStores that are open/active moment to moment
@@ -138,10 +138,10 @@ type PnodeConfig struct {
 
 const (
 
-    // DefaultGrpcNetwork is the default net.Listen() network layer name
+    // DefaultGrpcNetworkName is the default net.Listen() network layer name
     DefaultGrpcNetworkName      = "tcp"
 
-    // DefaultGrpcAddr is the default net.Listen() local network address
+    // DefaultGrpcNetworkAddr is the default net.Listen() local network address
     DefaultGrpcNetworkAddr      = ":50051"
 
     // CurrentPnodeVersion specifies the pnode version 
@@ -349,15 +349,14 @@ func (pn *Pnode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
 
 
 
-func NewClientSession(in *pservice.ClientInfo) *ClientSession {
+func NewClientSession(in *pservice.SessionRequest) *ClientSession {
 
     session := &ClientSession{
         AuthToken: GenRandomSessionToken(32),
         PrevActivityTime: plan.Now(),
-        WorkstationID: in.WorkstationId,
+        SessionRequest: in,
     }
 
-    session.MemberID.AssignFrom(in.MemberId)
 
     return session
 }
@@ -367,7 +366,7 @@ func NewClientSession(in *pservice.ClientInfo) *ClientSession {
 // BeginSession implements pservice.PserviceServer
 func (pn *Pnode) BeginSession(
     ctx context.Context,
-    in *pservice.ClientInfo,
+    in *pservice.SessionRequest,
     ) (*pservice.SessionInfo, error) {
 
     var communityID plan.CommunityID
@@ -402,6 +401,7 @@ func (pn *Pnode) ReportStatus( ctx context.Context, in *pservice.StatusQuery ) (
 	return &pservice.StatusReply{ TestReply: msg }, nil
 }
 
+/*
 // QueryChannels implements pservice.PserviceServer
 func (pn *Pnode) QueryChannels( ctx context.Context, in *pservice.ChannelSearchParams ) ( *pservice.PDIChannelList, error ) {
 	return &pservice.PDIChannelList{ }, nil
@@ -418,7 +418,7 @@ func (pn *Pnode) PublishChannelEntry( ctx context.Context, in *pservice.PDIEntry
 }
 
 
-
+*/
 
 
 

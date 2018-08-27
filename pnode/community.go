@@ -32,7 +32,7 @@ import (
 
 
 
-// IdentityRevision represents a member's community-public-facing information
+// IdentityInfo represents a member's community-public-facing information
 type IdentityInfo struct {
     IdentityRev         int32
 
@@ -167,7 +167,7 @@ func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRe
 
 func (CR *CommunityRepo) FetchChannelStore(
     inChannelID []byte,
-    inChannelRev uint64,
+    inChannelEpoch uint64,
     inFlags FetchChannelStoreFlags,
     ) (*ChannelStore, *plan.Perror) {
 
@@ -238,7 +238,7 @@ func (CR *CommunityRepo) LoadChannelStore(
             return nil, plan.Error(err, plan.FailedToLoadChannelFromDisk, "failed to create channel directory" )
         }
     
-        buf, err := json.Marshal( &CS.Properties )
+        buf, err := json.Marshal( &CS.ChannelInfo )
         if err == nil {
             err = ioutil.WriteFile(CS.channelDir + ChannelPropertiesFilename, buf, CR.DefaultFileMode)
         }
@@ -250,7 +250,7 @@ func (CR *CommunityRepo) LoadChannelStore(
 
         buf, err := ioutil.ReadFile(CS.channelDir + ChannelPropertiesFilename)
         if err == nil {
-            err = json.Unmarshal(buf, &CS.Properties)
+            err = json.Unmarshal(buf, &CS.ChannelInfo)
         }
         if err != nil {
             if os.IsNotExist(err) {
@@ -278,9 +278,9 @@ func (CR *CommunityRepo) LoadChannelStore(
 }
 
 
-func (CR *CommunityRepo) LookupIdentity(
+func (CR *CommunityRepo) LookupMember(
     inMemberID []byte,
-    inIdentityRev uint32,
+    inMemberEpoch plan.MemberEpoch,
     outInfo *IdentityInfo,
     ) *plan.Perror {
 
@@ -320,5 +320,12 @@ func (CR *CommunityRepo) PublishEntry( inEntry *pdi.EntryCrypt ) {
 
 
 
+
+
+
+func (CR *CommunityRepo) RevokeEntry( inHashnames []byte ) {
+
+    
+}
 
 

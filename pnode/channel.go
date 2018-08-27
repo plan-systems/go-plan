@@ -78,9 +78,9 @@ const (
     ChannelPropertiesFilename   = "ChannelProperties.json"
     PnodeConfigFilename         = "config.json"
 
-    kTomeNumShift               = byte( 64 - 16 )
-    kTomeNumMask                = 0xFFFF << kTomeNumShift
-    kTomeOffsetMask             = ( 1 << kTomeNumShift ) - 1
+    tomeNumShift                = byte( 64 - 16 )
+    tomeNumMask                 = 0xFFFF << tomeNumShift
+    tomeOffsetMask              = ( 1 << tomeNumShift ) - 1
 )
 
 
@@ -108,7 +108,7 @@ type ChannelStore struct {
     // AccessRank specifies what index this channel store is in its parent ChannelStoreGroup
     //AccessRank              int32 
 
-    Properties              pdi.ChannelProperties
+    ChannelInfo             pdi.ChannelInfo
 
     channelDir              string
 
@@ -237,7 +237,7 @@ func (CS *ChannelStore) AppendToTome( inTomeNum int64, inBlob []byte ) ( TomePos
     }
 
 
-    return TomePosEncoding( ( inTomeNum << byte(kTomeNumShift) ) | pos ), nil
+    return TomePosEncoding( ( inTomeNum << byte(tomeNumShift) ) | pos ), nil
 }
 
 

@@ -18,6 +18,7 @@ import (
     //"github.com/tidwall/redcon"
 
     "github.com/plan-tools/go-plan/plan"
+    "github.com/plan-tools/go-plan/pservice"
 
     // This inits in with sql, so no named import is needed
     _ "github.com/mattn/go-sqlite3"
@@ -40,7 +41,7 @@ import (
 
 
 
-// Open represents a client session over GRPC
+// ClientSession represents a client session over GRPC
 type ClientSession struct {         
 
     // AuthToken is handed back to remote pnode clients during authentication and used to retrieve a ClientSession
@@ -50,9 +51,9 @@ type ClientSession struct {
     // PrevActivityTime says when this session was last accessed, used to know how long a session has been idle.
     PrevActivityTime        plan.Time
 
-    WorkstationID           []byte       
-    
-    MemberID                plan.IdentityAddr      
+    // Client session request that initiated this session
+    SessionRequest          *pservice.SessionRequest
+
 
     //SKI                     SecureKeyInterface      // SKI allows pnode to encrypt/decrypt for the given user
 }

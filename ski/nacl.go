@@ -205,11 +205,10 @@ func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompleti
 
 
 
-func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Body) {
+func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Block) {
 
-    outResults := pdi.Body {
-        Parts: make([]*pdi.BodyPart, 0, 2),
-    }
+    outResults := pdi.Block{}
+
 
     var err *plan.Perror
 
@@ -324,9 +323,8 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Body) {
 
             case OpNewIdentityRev:{
                 signKey, encrKey := session.personalKeyring.NewIdentity()
-                outResults.AppendPart(&pdi.BodyPart{Name:"signingPubKey", Content:signKey})
-                outResults.AppendPart(&pdi.BodyPart{Name:"encryptPubKey", Content:encrKey})
-
+                outResults.AddContentWithLabel(signKey, PubSigningKeyName)
+                outResults.AddContentWithLabel(encrKey, PubCryptoKeyName)
             }
 
             case OpCreateCommunityKey:{
@@ -348,6 +346,7 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Body) {
 
 
 
+
     // ====================================
     // 5) POST OP
     if err == nil {
@@ -358,7 +357,7 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Body) {
     }
 
     if err == nil && msg != nil {
-        outResults.AppendPart(&pdi.BodyPart{Content:msg})
+        outResults.Content = msg
     } 
 
     return err, &outResults
@@ -393,18 +392,14 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []b
         }
     }
 
-    body := pdi.Body {
-        Parts: []*pdi.BodyPart {
-            {
-                ContentCodec: keyListCodecName,
-                Content: keyListBuf,
-            },
-        },
+    block := pdi.Block {
+        ContentCodec: keyListCodecName,
+        Content: keyListBuf,
     }
 
-    msg, err := body.Marshal()
+    msg, err := block.Marshal()
     if err != nil {
-        return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant body"), nil
+        return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant block"), nil
     }
 
     return nil, msg
@@ -414,14 +409,14 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []b
 
 func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
 
-    body := pdi.Body{}
-    err := body.Unmarshal(inMsg)
+    block := pdi.Block{}
+    err := block.Unmarshal(inMsg)
 	if err != nil {
 		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")
     }
 
 
-    keyListBuf := body.GetPartContent(keyListCodecName)
+    keyListBuf := block.GetContentWithCodec(keyListCodecName)
     if keyListBuf == nil {
 		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", keyListCodecName)
     }

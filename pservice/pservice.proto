@@ -71,7 +71,6 @@ message MemberInfoRequest {
     // Identifes which community member
                 bytes               member_id               = 1;
 
-
 }
 
 
@@ -82,44 +81,10 @@ message MemberInfoResponse {
                 bytes               member_id               = 1;
 
     // Identifes which community member
-                MemberCryptoInfo    member_crypto           = 2;
-
-    // This is the revision of the member requested.  If 0, the latest rev is returned
-                MemberInfo          member_info             = 3;
+                pdi.MemberEpoch     member_epoch            = 2;
 
 
 }
-
-
-// /plan/community/member/crypto
-message MemberCryptoInfo {
-
-    // Specifies what the revision number of this info is
-                uint32              crypto_rev              = 2;
-
-    // Public keys associated with the given revision
-                bytes               pub_signing_key         = 3;
-                bytes               pub_crypto_key          = 4;
-}
-
-
-// /plan/community/member/info
-message MemberInfo {
-
-    // Specifies what the revision number of this info is
-                uint32              info_rev                = 2;
-
-    // The ChannelID of this member's home/landing channel.  
-                bytes               home_channel            = 3;
-
-    // The ChannelID of this member's inbox -- e.g. Another community member leaves an invite here to join a private channel.
-                bytes               inbox_channel           = 4;
-
-    // Specifies any number of publicly available values 
-                pdi.Body            body                    = 5;
-
-}
-
 
 
 
@@ -133,7 +98,7 @@ service Pnode {
     rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
     rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
 
-    rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfo);
+    rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfoResponse);
 }
 
 
@@ -149,7 +114,7 @@ service Pgateway {
     rpc         StartEntryQuery(EntryQuery)                     returns (stream EntryResponse);
 
     // CrE
-    rpc         ListChannels(ChannelSearchParams)               returns (PDIChannelList);
+    rpc         ListChannels(ChannelSearchParams)               returns (pdi.ChannelList);
 
     // RwE, CwD
     rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
@@ -165,17 +130,20 @@ service Pgateway {
 
 message SessionRequest {
 
+    // Normally the empty string, this is used when an existing session_token needs to be included
+                bytes           session_token           = 1;
+
     // Which community this session wants to access (a pnode hosts multiple communities)
-                bytes           community_id            = 1;
+                bytes           community_id            = 2;
 
     // Identifies who is requesting the session.
-                bytes           client_id               = 2;
+                bytes           client_id               = 3;
 
     // Specifies which scopes are being requested 
-    repeated    PserviceScope   service_scopes          = 5;
+    repeated    PserviceScope   service_scopes          = 4;
 
     // A set of keys and tokens presumed to allow a new session to begin
-                ski.KeyList     keys                    = 6;
+                ski.KeyList     keys                    = 5;
 
 }
 
@@ -251,31 +219,6 @@ message StatusQuery {
 message StatusReply {
                 string          test_reply              = 1;
 }
-
-
-
-
-
-
-message PDIChannelInfo {
-                bytes           channel_id              = 1;
-                bytes           access_channel_id       = 2;
-                int64           access_channel_rev      = 3;
-                pdi.Body        body                    = 4;
-}
-
-
-message PDIChannelList {
-    repeated    PDIChannelInfo  channels                = 1;
-}
-
-
-message PDIChannelProperties {
-                string          channel_name            = 1;
-                string          channel_desc            = 2;
-                pdi.Body        body                    = 4;
-}
-
 
 
 

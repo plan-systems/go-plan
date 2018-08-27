@@ -10,6 +10,8 @@ import (
 
 // OpArgs maps parameter keys to values
 type OpArgs struct {
+
+    // OpName says what SKI operatio to perform and determines what inputs to use, etc. See below list of op names.
     OpName              string
 
     // Specifies the key to be used for encrypting/decrypting/signing
@@ -27,27 +29,39 @@ type OpArgs struct {
 }
 
 
-// OpCompletionHandler handles the result of a SKI operation
-type OpCompletionHandler func(inErr *plan.Perror, inResults *pdi.Body)
+
+  // OpCompletionHandler handles the result of a SKI operation
+  type OpCompletionHandler func(inErr *plan.Perror, inResults *pdi.Block)
 
 
+  
 
-
-
-// OpArgs.OpName -- this lists all available operations for SKI.Session.DispatchOp()
-// Unless otherwise stated, output from an op is returned in inResults.Parts[0].  Ops that do NOT return anything (other than a possible error),
-//    will have no result parts.  Ops like OpNewIdentityRev return explicitly documented results.
+// Relevant pdi.Block labels
 const (
+    
+    // Used as names for returning 
+    PubSigningKeyName       = "pub_signing_key"
+    PubCryptoKeyName        = "pub_crypto_key"
+)
+
+
+
+// OpArgs.OpName -- these are the available operations for SKI.Session.DispatchOp()
+// Unless otherwise stated, output from an op is returned in inResults.Content
+const (
+
+    // OpCombineShares is inspired from Shamir's Secret Sharing Algorithm
+    OpSplitIntoShares       = "split_into_shares"
+    // OpCombineShares combines shares created from OpSplitIntoShares
+    OpCombineShares         = "combine shares"
 
     // OpEncryptCommunityData encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
     OpEncryptForCommunity   = "c_encrypt_fo"
-
     // OpDecryptCommunityData decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
     OpDecryptFromCommunity  = "c_decrypt_from"
 
     // OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
     OpEncryptFor            = "encrypt_for"
-
     // OpDecryptFrom decrypts OpArgs.Msg from the sender's OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
     OpDecryptFrom           = "decrypt_from"
 
@@ -58,21 +72,20 @@ const (
     // OpSendCommunityKeys securely "sends" the community keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,
     //    encrypting the resulting buffer using the asymmetric key indexed by OpArgs.CryptoKeyID.
     OpSendCommunityKeys     = "send_keys"
-
     // OpAcceptCommunityKeys adds the keys contained in OpArgs.Msg to its community keyring, decrypting using the key indexed by OpArgs.CryptoKeyID.
     OpAcceptCommunityKeys   = "accept_keys"
 
     // OpCreateCommunityKey creates a new community key and returns the associated plan.KeyID
     OpCreateCommunityKey    = "create_community_key"
 
+
     // OpNewIdentityRev issues a new personal identity revision and returns public information for that new rev.
     // Recall that the plan.KeyID for each pub key is the right-most <plan.KeyIDSz> bytes.
     // Returns:
-    //     inResults.Parts[0]: newly issued signing public key
-    //     inResults.Parts[1]: newly issued encryption public key
+    //     inResults.GetContentWithLabel(PubSigningKeyName): newly issued signing public key
+    //     inResults.GetContentWithLabel(PubCryptoKeyName): newly issued encryption public key
     OpNewIdentityRev        = "new_identity_rev"
-
-
+    
 )
 
 
@@ -95,7 +108,6 @@ type Provider interface {
 }
 
 
-  
 
 // Session provides lambda-lifted crypto services from an opaque service provider. 
 // All calls in this interface are threadsafe.
@@ -114,7 +126,7 @@ type Session interface {
 var (
 
     // PnodeAccess is for a pnode, where it only needs to decrypt the community's PDI entry headers.
-    PnodeAccess = []string{
+    PnodeAccess = []string {
         OpDecryptFromCommunity,
     }
 

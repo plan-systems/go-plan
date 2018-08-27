@@ -58,11 +58,11 @@ type ChannelID          [ChannelIDSz]byte
 // MemberID identifies a memeber of a given community and is generared when a member is initially added to the community and never changes 
 type MemberID           [MemberIDSz]byte
 
-// MemberCryptoRev is incremented each time a member creates a new set of public keys.  The community's MemberRegistryChannel allows 
+// MemberEpoch changes each time a member creates a new set of public keys.  The community's MemberRegistryChannel allows 
 //    any member to lookup public keys for a member for each crypto rev they've ever done, allows community members to:
 //    (1) send private messages to a given member
 //    (2) verify sigs on anything to ensure that they are authentic
-type MemberCryptoRev    uint32
+type MemberEpoch        uint64
 
 
 var (

@@ -11,7 +11,7 @@ package pdi;
 enum EntryVerb {
 
     // Appends this entry to the channel
-    NEW_ENTRY                  = 0;
+    NEW_ENTRY                   = 0;
 
     // This entry modifies the channel's non-security-related info
     ADMINISTER_CHANNEL_INFO     = 1;
@@ -24,29 +24,73 @@ enum EntryVerb {
 
     // This entry should effectively replace a previous entry (with EntryHeader.extras containing add'l info) 
     SUPERCEDE_ENTRY             = 4;
+
+    // Network-level 
+    SECURITY_NOITIFICATION      = 5;
 }
+
+
+
+
+
+
+// Block is a generic attachment-like object, indended to be self-nestable, etc
+message Block {
+
+    // Any user-assignable label, typically employed as a name for this Block instance (e.g. a field-name).
+                string          label                   = 1;
+
+    // One key purpose of a block is to hold content.  The content_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
+                string          content_codec           = 2; 
+                bytes           content                 = 3;
+
+    repeated    Block           subs                    = 4;
+}
+
+
+
+
+
+// /plan/community/member/epoch
+message MemberEpoch {
+
+    // Names this member epoch -- (a hashname of this epoch)
+                fixed64             epoch_id                = 1;
+
+    // Names the previous epoch
+                fixed64             prev_epoch_id           = 2;
+
+    // Unix timestamp when this epoch entered into effect
+                int64               time_created            = 3;
+
+    // Public keys associated with the given revision
+                bytes               pub_signing_key         = 4;
+                bytes               pub_crypto_key          = 5;
+
+    // The ChannelID of this member's "about" channel
+                bytes               about_channel_id        = 7;
+
+    // The ChannelID of this member's home channel -- whwre visitors should first go
+                bytes               home_channel_id         = 8;
+
+    // Future-proofing
+                Block               extensions              = 9;
+}
+
 
 
 
 message Entry {
-                EntryCrypt      crypt                   = 1;
-                EntryHeader     header                  = 2;
-                Body            body                    = 3;
+                EntryCrypt          crypt                   = 1;
+                EntryHeader         header                  = 2;
+                Block               body                    = 3;
 }
 
 
-// Body is a flexible, abstract data container with named parts.  It is inspired by http and is a superset of functionality.
-message Body {
-    repeated    BodyPart        parts                   = 1;        // Available for unrestricted client use.
-}
 
 
-// Attachment is a http-style header entry
-message BodyPart {
-                string          name                    = 1;
-                string          content_codec           = 2;        // If the empty string, content is assumed to be UTF8.
-                bytes           content                 = 3;
-}
+
+
 
 
 message AccessChannelSnapshot {
@@ -73,7 +117,7 @@ message ChannelAdmin {
 
 
 
-message ChannelProperties {
+message ChannelInfo {
 
     // This channel ID (immutable)
                 bytes           channel_id              = 1;
@@ -95,11 +139,19 @@ message ChannelProperties {
 
    // Container for all content-level properties (e.g. channel title, description, etc) 
                 uint32          info_rev                = 7;
-                Body            info                    = 8;
+                Block           info                    = 8;
 
 
 }
 
+
+
+
+
+
+message ChannelList {
+    repeated    ChannelInfo     channels                = 1;
+}
 
 
 
@@ -134,9 +186,9 @@ message EntryHeader {
                 fixed32         nano_secs               = 2;        // [0,999999999] -- serves 
                 EntryVerb       entry_verb              = 3;
                 bytes           channel_id              = 4;        // Channel id this entry is posted to.
-                fixed64         channel_rev             = 5;        // Revision hashame of this channel in effect when this entry was sealed
+                fixed64         channel_epoch           = 5;        // Revision hashame of this channel in effect when this entry was sealed
                 bytes           author_member_id        = 6;        // Creator of this entry (and signer of .Sig)
-                uint32          author_member_rev       = 7;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
+                fixed64         author_member_epoch     = 7;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
                 bytes           body_key_id             = 10;       // Specifies which key was used to encrypt 
-                Body            extras                  = 11;       // Available for unrestricted client use.
+                Block           extras                  = 11;       // Available for unrestricted client use.
 }
