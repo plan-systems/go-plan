@@ -12,7 +12,7 @@ import "github.com/plan-tools/go-plan/ski/ski.proto";
 
 
 enum EntryOp {
-    PUBLISH_ENTRY          = 0;
+    PUBLISH_ENTRY               = 0;
 }   
 
 
@@ -77,10 +77,10 @@ message MemberInfoRequest {
 
 message MemberInfoResponse {
 
-    // Identifes which community member
+    // Identifies which community member
                 bytes               member_id               = 1;
 
-    // Identifes which community member
+    // Identifies which community member
                 pdi.MemberEpoch     member_epoch            = 2;
 
 
@@ -160,9 +160,10 @@ message SessionInfo {
 // The query criteria are highly limited to timestamp and hashname since PDI entries are community private
 message EntryQuery {
                 QueryOption     query_options           = 1;
-                uint64          timestamp_min           = 2;
-                uint64          timestamp_max           = 3;
-    repeated    bytes           entry_hashnames         = 4;
+                bytes           channel_id              = 2;
+                uint64          timestamp_min           = 3;
+                uint64          timestamp_max           = 4;
+    repeated    bytes           entry_hashnames         = 5;
 }
 
 message EntryResponse {

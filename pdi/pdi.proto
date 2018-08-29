@@ -1,4 +1,3 @@
-
 // See plan-protobuf/README.md
 
 
@@ -8,33 +7,83 @@ package pdi;
 
 
 
-enum EntryVerb {
+enum ChannelAccess {
 
-    // Appends this entry to the channel
-    NEW_ENTRY                   = 0;
+    // Not used
+    NO_ACCESS                   = 0;
 
-    // This entry modifies the channel's non-security-related info
-    ADMINISTER_CHANNEL_INFO     = 1;
+    // Has crypto to decrypt entries from the given channel
+    READ_ACCESS                 = 1;
 
-    // This entry modifies the channel's security-related info
-    ADMINISTER_CHANNEL_ACCESS   = 2;
+    // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES, SUPERCEDE_ENTRY, 
+    READWRITE_ACCESS            = 2;
 
-    // EntryHeader.extras contains info on entrys to effectively mark as removed
-    REMOVE_ENTRIES              = 3;
+    // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES, SUPERCEDE_ENTRY, UPDATE_CHANNEL_INFO, UPDATE_ACCESS
+    MODERATOR_ACCESS            = 3;
 
-    // This entry should effectively replace a previous entry (with EntryHeader.extras containing add'l info) 
-    SUPERCEDE_ENTRY             = 4;
+    // Same as MODERATOR_ACCESS plus can grant others MODERATOR_ACCESS and can issue EDIT_ACCESS_GRANTS
+    SUPER_MODERATOR_ACCESS      = 4;
+
+    // Same as SUPER_MODERATOR_ACCESS plus can grant others SUPER_MODERATOR_ACCESS and can author entry type EDIT_CHANNEL_EPOCH
+    ADMIN_ACCESS                = 5;
+
+}
+
+
+// EntryOp specifies a specific flavor of PDI transaction.  Athough the PLAN UI will not allow the user to things she doesn't 
+//    have permission to do, every pnode in the community rigerously verfiies that the author of any given PDI entry has the permission
+//    they imply they do with the given entry they authored.
+enum EntryOp {
+
+    // Appends this content entry to the specified channel.
+    POST_NEW_CONTENT            = 0;
+
+    // This entry modifies one or more of a given channel's meta fields (e.g. channel description, icon, etc).
+    // A ChannelInfo snapshot/composite can be reconstructed by sequentially applying every UPDATE_CHANNEL_INFO 
+    //    change to the previous ChannelInfo composite up to a given point in time.
+    // Only channel admins or moderators are permitted to originate this type of entry.
+    UPDATE_CHANNEL_INFO         = 1;
+
+    // This entry's body lists one or more channel entries to effectively mark as removed/invisible.
+    REMOVE_ENTRIES              = 2;
+
+    // This entry's body should effectively replace a specified previous entry
+    SUPERCEDE_ENTRY             = 3;
+
+    // Adds or removes access to given member IDs.  Notes:
+    //   - This entry type is only valid for use channels that are access control channels.
+    //   - Members with MODERATOR_ACCESS can only grant/revoke READ_ACCESS and READWRITE_ACCESS.
+    //   - Members with ADMIN_ACCESS can grant/revoke up to and including SUPER_MODERATOR_ACCESS.
+    //   - ADMIN_ACCESS can ONLY be granted by members with ADMIN_ACCESS in the parent access control channel.
+    //   - In some cases, this entry type MAY result a new channel epoch to be initiated (this is because
+    //     a private channel must issue and distribute a new channel encryption key in order to effectively 
+    //     remove access to members that are longer have channel access).
+    UPDATE_ACCESS_GRANTS        = 4;
+
+
+    // This entry initiates a new channel epoch, incorporating one or more changes to the channel's current epoch fields (ChannelEpoch).
+    // Only channel admins are allowed to originate this type of entry.
+    EDIT_CHANNEL_EPOCH          = 5;
+
 
     // Network-level 
-    SECURITY_NOITIFICATION      = 5;
+    SECURITY_ALERT              = 9;
 }
 
 
 
 
+message AccessGrantBatch {
+
+                bytes           granter                 = 1;
+    repeated    bytes           grantee                 = 2;
+    repeated    ChannelAccess   grant                   = 3;
+
+}
 
 
-// Block is a generic attachment-like object, indended to be self-nestable, etc
+
+// Block is a generic attachment/attribute-like object, intended to be nestable, etc
 message Block {
 
     // Any user-assignable label, typically employed as a name for this Block instance (e.g. a field-name).
@@ -54,36 +103,28 @@ message Block {
 // /plan/community/member/epoch
 message MemberEpoch {
 
-    // Names this member epoch -- (a hashname of this epoch)
-                fixed64             epoch_id                = 1;
+    // Random "name" for this member epoch -- must be unique for a member's epoch history (and not 0).  
+                fixed64         epoch_id                = 1;
 
-    // Names the previous epoch
-                fixed64             prev_epoch_id           = 2;
+    // Names the previous epoch.  Set to 0 if there was no previous epoch.
+                fixed64         prev_epoch_id           = 2;
 
     // Unix timestamp when this epoch entered into effect
-                int64               time_created            = 3;
+                int64           time_started            = 3;
 
     // Public keys associated with the given revision
-                bytes               pub_signing_key         = 4;
-                bytes               pub_crypto_key          = 5;
+                bytes           pub_signing_key         = 4;
+                bytes           pub_crypto_key          = 5;
 
     // The ChannelID of this member's "about" channel
-                bytes               about_channel_id        = 7;
+                bytes           about_channel_id        = 7;
 
-    // The ChannelID of this member's home channel -- whwre visitors should first go
-                bytes               home_channel_id         = 8;
+    // The ChannelID of this member's home channel -- where visitors should first go
+                bytes           home_channel_id         = 8;
 
     // Future-proofing
-                Block               extensions              = 9;
-}
+                Block           extensions              = 9;
 
-
-
-
-message Entry {
-                EntryCrypt          crypt                   = 1;
-                EntryHeader         header                  = 2;
-                Block               body                    = 3;
 }
 
 
@@ -91,27 +132,45 @@ message Entry {
 
 
 
+/*
+    ChannelEpoch contains critical and security related properties about a channel.   Once a ChannelEpoch is issued,
+    is is immutable and only a new ChannelEpoch can be issued to supercede it via NEW_CHANNEL_EPOCH. 
+*/
+message ChannelEpoch {
+
+    // Random "name" for this channel epoch -- must be unique for a channel's epoch history (and not 0). 
+                fixed64         epoch_id                    = 1;
+
+    // Names the previous epoch.  Set to 0 if there was no previous epoch.
+                fixed64         prev_epoch_id               = 2;
+
+    // Unix timestamp when this epoch entered into effect
+                int64           time_started                = 3;
+
+    // IF set, channel entries are not allowed to be removed/superceded.
+                bool            entries_are_locked          = 4;
+
+    // If set, entries_are_locked will always be true.
+                bool            entries_are_locked_forever  = 5;
 
 
-message AccessChannelSnapshot {
-
-                bytes           parent_access_channel_id = 1;
-}
-
-
-message ChannelAdmin {
-
-    // Hashname of this ChannelSnapshot.  Non-security related changes to the channel do no affect this value.
-                fixed64         channel_rev             = 1;
-
+    /*  Top-level string describing how entries on this channel are expected to conform.
+        This allows a PLAN client to invoke the appropriate UI and data handlers. 
+        e.g. 
+            /plan/channel-protocol/talk/2
+            /plan/channel-protocol/inventory/1   
+            /plan/channel-protocol/cryptokitty/browser    */
+                string          protocol                    = 6;
 
     /*  
     Does this channel conform to the requirements needed so that it can be used control access for another channel?
     An access channel entries conform to specific standards and serve to:
         (a) transport private channel keys to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
         (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
-                bytes           access_channel_id       = 5;
+                bytes           access_channel_id           = 7;
 
+    // Future-proofing
+                Block           extensions                  = 9;
 
 }
 
@@ -122,22 +181,7 @@ message ChannelInfo {
     // This channel ID (immutable)
                 bytes           channel_id              = 1;
 
-    // When this channel was created (immutable)
-                int64           time_created            = 2;
-
-    // False if entries in this channel allowed be revoked or superceded.   (immutable)
-                bool            entries_are_final       = 3;
-
-    /*  Top-level string describing how entries on this channel are expected to conform.
-        This allows a PLAN client to invoke the approprate UI and data handlers. 
-        e.g. 
-            /plan/channel-protocol/talk/2
-            /plan/channel-protocol/inventory/1   
-            /plan/channel-protocol/cryptokitty/browser    */
-                string          protocol                = 4;
-
-
-   // Container for all content-level properties (e.g. channel title, description, etc) 
+    // Container for all content-level properties (e.g. channel title, description, etc) 
                 uint32          info_rev                = 7;
                 Block           info                    = 8;
 
@@ -158,23 +202,21 @@ message ChannelList {
 
 
 
+// Entry is a convenience container for the peices/parts that a PDI entry may be at during processing or transmission.
+message Entry {
+                EntryCrypt      crypt                   = 1;
+                EntryHeader     header                  = 2;
+                Block           body                    = 3;
+}
+
+
+
 /*
-    EntryCrypt is the "wire" format for PLAN's Persistent Data Interface (PDI) entries.  It contains zero revealing information and
-    is what's sent to/from community data store replciators, such as NEM, DFINITY, and Ethereum.
-
-    An encrypted PDI entry has two segments, its header and body segment.  The header, EntryHeader, is "community-private",
-    meaning that it is encrypted using one of the community's shared symmetric keys.  The entry's body is either also community-private
-    (encrypted with the same community key as EntryHeader), or it is encrypted using the key referenced by body_key_id.
-
-    When a entry is authored, it is intended to be posted to the channel specified by EntryHeader.channel_id.  The current rev of that
-    channel is also listed so that pdi nodes know which channel access rev to use when checking permissions.  
-
-    And awaaaaay we go!
+    EntryCrypt is the "wire" format for PLAN's Persistent Data Interface (PDI) entries.  It contains no revealing information and
+    is what's sent to/from community data store replicators, such as NEM, DFINITY, and Ethereum.
 */
-
 message EntryCrypt {
                 uint64          crypt_info              = 1;        // Allows accessors to apply correct hash and crypto functions to this EntryCrypt 
-                int64           time_created            = 2;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
                 bytes           community_key_id        = 3;        // Needed to access header_crypt
                 bytes           header_crypt            = 5;        // := Encrypt(<EntryHeader>.Marshal(), <EntryCrypt>.community_key_id)
                 bytes           body_crypt              = 6;        // := Encrypt(<Body>.Marshal(), <EntryHeader>.body_key_id)
@@ -182,13 +224,126 @@ message EntryCrypt {
 }
 
 
+/*
+    An encrypted PDI entry has two segments, its header and "body" (content) block.  The header, EntryHeader, is "community-private",
+    meaning that it is encrypted using one of the community's shared symmetric keys.  The entry's body is either also community-private
+    (encrypted with the same community key as EntryHeader), or it is encrypted using the key referenced by body_key_id.
+
+    When a entry is authored, it is intended to be posted to the channel specified by EntryHeader.channel_id.  The current rev of that
+    channel is also listed so that pdi nodes know which channel access rev to use when checking permissions.  
+*/
 message EntryHeader {
-                fixed32         nano_secs               = 2;        // [0,999999999] -- serves 
-                EntryVerb       entry_verb              = 3;
-                bytes           channel_id              = 4;        // Channel id this entry is posted to.
-                fixed64         channel_epoch           = 5;        // Revision hashame of this channel in effect when this entry was sealed
-                bytes           author_member_id        = 6;        // Creator of this entry (and signer of .Sig)
-                fixed64         author_member_epoch     = 7;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
+                int64           time_authored           = 1;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
+                fixed32         time_authored_ns        = 2;        // [0,999999999] -- serves 
+                int64           time_sealed             = 3;        // Unix timestamp
+                EntryOp         entry_op                = 4;
+                bytes           channel_id              = 5;        // Channel id this entry is posted to.
+                fixed64         channel_epoch_id        = 6;        // Epoch of this channel in effect when this entry was sealed
+                bytes           author_member_id        = 7;        // Creator of this entry (and signer of .Sig)
+                fixed64         author_member_epoch     = 8;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
                 bytes           body_key_id             = 10;       // Specifies which key was used to encrypt 
-                Block           extras                  = 11;       // Available for unrestricted client use.
+                Block           extensions              = 11;       // Available for unrestricted client use.
 }
+
+
+
+
+
+
+enum TxnDataDesc {
+
+    // The segments, when reassembled togehter, form EntryCrypt.Marshal()
+    PDI_ENTRY_CRYPT             = 0;
+
+}
+
+
+
+
+enum TxnStatus {
+
+    // The txn is yet to be committed to storage
+    INVALID_TXN                 = 0;
+
+    // This txn was lost or is otherwise unavailable 
+    LOST                        = 1;
+
+    // The txn is yet to be committed to storage
+    NOT_COMMITTED               = 2;
+
+    // The txn has been committed and is in the process of being stored
+    COMMITTED                   = 3;
+
+    // The txn has was committed but was rejected for some reason
+    REJECTED                    = 4;
+
+    // The txn has been commited and has been confirmed as stored (but could still potentially be reverted)
+    CONFIRMED                   = 5;
+
+    // The txn has been commited, was confirmed as stored as some point, but has since been revoked (and is equivalent in status to NOT_COMMITTED) 
+    REVOKED                     = 6;
+
+    // The txn has been commited, confirmed as stored, and faces no possibility of being reverted.
+    FINALIZED                   = 7;
+
+}
+
+
+message TxnReport {
+
+                bytes           txn_name                    = 1;
+
+                TxnStatus       txn_status                  = 3;
+
+    // Copy of StorageTxn.time_committed -- never changes
+                int64           time_committed              = 4;
+
+    // Consensus-based timestamp for this txn.  If txn_status == FINALIZED, this timestamp won't ever change, is universal across storage peers, and is the most trustworty timestamp.
+                int64           time_finalized              = 6;
+
+}
+
+message StorageTxn {
+
+
+    // ---  METADATA  ---
+
+    // Issued by the storage layer -- uniquely identifies this txn and is typically a hashname or serialized integer.
+    // Optional for a storage layer to *actually* store this value since it may be hashname that is only available after a txn
+    //  is committed to storage, but it *is* always filled in when txns are passed to storage service consumers. 
+                bytes           txn_name                    = 1;
+
+                TxnStatus       txn_status                  = 3;
+
+    // Unix timestamp of when this txn was committed for storage
+                int64           time_committed              = 4;
+
+
+    // ---  PAYLOAD  ---
+
+                TxnDataDesc     data_desc                   = 6;        
+                uint32          segment_num                 = 7;    
+                uint32          total_segments              = 8;
+                bytes           segment_data                = 9;
+}
+
+
+
+/*
+message RejectedTxn {
+
+                bytes           txn_name                    = 1;
+
+                int64           time_committed              = 4;
+                int64           time_authored               = 4;
+                int64           time_rejected               = 4;
+
+                int32           reject_code                 = 2;
+
+                string          reject_desc                 = 3;
+}
+*/
+
+
+
+
