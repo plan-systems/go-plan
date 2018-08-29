@@ -94,7 +94,7 @@ func (provider *naclProvider) NewSession() *naclSession {
 func (provider *naclProvider) StartSession(
     inInvocation        string,
     inOpsAllowed        []string,
-    inOnCompletion      func(inErr *plan.Perror, inSession Session),
+    inOnCompletion      func(inSession Session, inErr *plan.Perror),
     inOnSessionEnded    func(inReason string),
 ) *plan.Perror {
 
@@ -113,7 +113,7 @@ func (provider *naclProvider) StartSession(
 
     provider.sessions = append(provider.sessions, session)
 
-    inOnCompletion(nil, session)
+    inOnCompletion(session, nil)
 
     return nil
 }
@@ -180,7 +180,7 @@ type naclSession struct {
 func (session *naclSession) EndSession(inReason string, inOnCompletion plan.Action) {
     err := session.parentProvider.EndSession(session, inReason)
 
-    inOnCompletion(err, nil)
+    inOnCompletion(nil, err)
     return
 }
 
@@ -190,12 +190,12 @@ func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompleti
 
     if ! session.allowedOps[inArgs.OpName] {
         err := plan.Errorf(nil, plan.InsufficientSKIAccess, "insufficient SKI permissions for op %s", inArgs.OpName)
-        inOnCompletion(err, nil)
+        inOnCompletion(nil, err)
         return
     }
 
-    err, results := session.doOp(*inArgs)
-    inOnCompletion(err, results)
+    results, err := session.doOp(*inArgs)
+    inOnCompletion(results, err)
 }
 
 
@@ -205,9 +205,9 @@ func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompleti
 
 
 
-func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Block) {
+func (session *naclSession) doOp(opArgs OpArgs) (*pdi.Block, *plan.Perror) {
 
-    outResults := pdi.Block{}
+    outResults := &pdi.Block{}
 
 
     var err *plan.Perror
@@ -218,12 +218,12 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Block) {
         switch opArgs.OpName {
 
             case OpSendCommunityKeys: {
-                err, opArgs.Msg = session.encodeSendKeysMsg(&opArgs)
+                opArgs.Msg, err = session.encodeSendKeysMsg(&opArgs)
             }
         }
 
         if err != nil {
-            return err, nil
+            return nil, err
         }
     }
 
@@ -262,11 +262,11 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Block) {
         }
 
         if err != nil {
-            return err, nil
+            return nil, err
         }
         
         if len(keyBuf) != privKeySz {
-            return plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", privKeySz, len(keyBuf)), nil
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", privKeySz, len(keyBuf))
         }
 
         copy(peerPubKey[:], opArgs.PeerPubKey)    
@@ -353,14 +353,19 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Block) {
         switch opArgs.OpName {
             case OpAcceptCommunityKeys:
                 err = session.decodeAcceptKeysMsg(msg)
+                msg = nil
         }
     }
 
-    if err == nil && msg != nil {
-        outResults.Content = msg
-    } 
+    if err == nil {
+        if msg != nil {
+            outResults.Content = msg
+        }
+    } else {
+        outResults = nil
+    }
 
-    return err, &outResults
+    return outResults, err
 
 }
 
@@ -368,7 +373,7 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Perror, *pdi.Block) {
 
 
 
-func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []byte){
+func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Perror){
 
 
     var keyListBuf []byte
@@ -382,13 +387,13 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []b
 
         keysNotFound := session.communityKeyring.ExportKeys(opArgs.OpKeyIDs, &keyList)
         if len(keysNotFound) > 0 {
-            return plan.Errorf(nil, plan.FailedToMarshalAccessGrant, "failed to marshal %d keys", len(keysNotFound)), nil 
+            return nil, plan.Errorf(nil, plan.FailedToMarshalAccessGrant, "failed to marshal %d keys", len(keysNotFound))
         }
 
         var err error
         keyListBuf, err = keyList.Marshal()
         if err != nil {
-            return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal exported key list"), nil 
+            return nil, plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal exported key list")
         }
     }
 
@@ -399,10 +404,10 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) (*plan.Perror, []b
 
     msg, err := block.Marshal()
     if err != nil {
-        return plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant block"), nil
+        return nil, plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant block")
     }
 
-    return nil, msg
+    return msg, nil
 
 }
 

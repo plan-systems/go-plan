@@ -20,7 +20,7 @@ type OpArgs struct {
     // A list of key IDs that are specific to a given op.
     OpKeyIDs            []plan.KeyID
 
-    // Sender/Recipient publicly available key -- a public address in the comminity key space
+    // Sender/Recipient publicly available key -- a public address in the community key space
     PeerPubKey          []byte
 
     Msg                 []byte
@@ -31,7 +31,7 @@ type OpArgs struct {
 
 
   // OpCompletionHandler handles the result of a SKI operation
-  type OpCompletionHandler func(inErr *plan.Perror, inResults *pdi.Block)
+  type OpCompletionHandler func(inResults *pdi.Block, inErr *plan.Perror)
 
 
   
@@ -98,7 +98,7 @@ type Provider interface {
     StartSession(
         inInvocation        string,
         inOpsAllowed        []string,
-        inOnCompletion      func(inErr *plan.Perror, inSession Session),
+        inOnSessionStarted  func(inSession Session, inErr error),
         inOnSessionEnded    func(inReason string),
     ) *plan.Perror
 
@@ -112,11 +112,11 @@ type Provider interface {
 // Session provides lambda-lifted crypto services from an opaque service provider. 
 // All calls in this interface are threadsafe.
 type Session interface {
-
+    
     // DispatchOp implements a complete set of SKI ops
     DispatchOp(inOpArgs *OpArgs, inOnCompletion OpCompletionHandler)
 
-    // EndSession ends this SKI session, resulting in the SKI's parent Provider to call its OnSessionClosed() callback followed by inOnCompletion.
+    // EndSession ends this SKI session, resulting in the SKI's parent Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
     // Following a call to EndSession(), no more references to this session should be made -- Provider.StartSession() must be called again.
     EndSession(inReason string, inOnCompletion plan.Action)
 

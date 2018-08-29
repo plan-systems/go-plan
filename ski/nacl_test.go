@@ -22,7 +22,7 @@ func TestCommunityEncryption(t *testing.T) {
     B := newSession(t, "Bob")
 
     // 1) make a new community key
-	err, opResults := A.doOp(OpArgs{
+	opResults, err := A.doOp(OpArgs{
         OpName: OpCreateCommunityKey,
     })
 	if err != nil {
@@ -35,7 +35,7 @@ func TestCommunityEncryption(t *testing.T) {
     fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
 
     // 2) generate a xfer community key msg from A
-    err, opResults = A.doOp(OpArgs{
+    opResults, err = A.doOp(OpArgs{
         OpName: OpSendCommunityKeys,
         OpKeyIDs: []plan.KeyID{communityKeyID},
         PeerPubKey: B.encryptPubKey,
@@ -46,7 +46,7 @@ func TestCommunityEncryption(t *testing.T) {
     }
     
     // 3) insert the new community key into B
-    err, opResults = B.doOp(OpArgs{
+    opResults, err = B.doOp(OpArgs{
         OpName: OpAcceptCommunityKeys,
         Msg: opResults.Content,
         PeerPubKey: A.encryptPubKey,
@@ -58,8 +58,8 @@ func TestCommunityEncryption(t *testing.T) {
 
 	clearMsg := []byte("hello, PLAN community!")
 
-    // Encrypt a new communuty msg on A
-	err, opResults = A.doOp(OpArgs{
+    // Encrypt a new community msg on A
+	opResults, err = A.doOp(OpArgs{
         OpName: OpEncryptForCommunity,
         CryptoKeyID: communityKeyID,
         Msg: clearMsg,
@@ -70,8 +70,8 @@ func TestCommunityEncryption(t *testing.T) {
 
     encryptedMsg := opResults.Content
 
-    // Send the encypted community message to B
-	err, opResults = B.doOp(OpArgs{
+    // Send the encrypted community message to B
+	opResults, err = B.doOp(OpArgs{
         OpName: OpDecryptFromCommunity,
         CryptoKeyID: communityKeyID,
         Msg: encryptedMsg,
@@ -95,7 +95,7 @@ func TestCommunityEncryption(t *testing.T) {
         copy(badMsg, encryptedMsg)
         badMsg[rndPos] += rndAdj
 
-        err, _ = B.doOp(OpArgs{
+        _, err = B.doOp(OpArgs{
             OpName: OpDecryptFromCommunity,
             CryptoKeyID: communityKeyID,
             Msg: badMsg,
@@ -132,12 +132,12 @@ type testSession struct {
 
 
 
-func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Perror, *pdi.Block) {
+func (ts *testSession) doOp(inOpArgs OpArgs) (*pdi.Block, *plan.Perror) {
 
     var outErr *plan.Perror
     var outResults *pdi.Block
 
-    ts.session.DispatchOp(&inOpArgs, func(inErr *plan.Perror, opResults *pdi.Block) {
+    ts.session.DispatchOp(&inOpArgs, func(opResults *pdi.Block, inErr *plan.Perror) {
         outErr = inErr
         outResults = opResults
 
@@ -146,7 +146,7 @@ func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Perror, *pdi.Block) {
 
     <- ts.blocker
 
-    return outErr, outResults
+    return outResults, outErr
 }
 
 
@@ -165,7 +165,7 @@ func newSession(t *testing.T, inName string) *testSession {
     NaclProvider.StartSession(
         InvokeNaCl,
         GatewayRWAccess,
-        func(inErr *plan.Perror, inSession Session) {
+        func(inSession Session, inErr *plan.Perror) {
 
             ts.session = inSession
             ts.blocker <- 1
@@ -174,7 +174,7 @@ func newSession(t *testing.T, inName string) *testSession {
     )
 
     <- ts.blocker
-    err, identityResults := ts.doOp(
+    identityResults, err := ts.doOp(
         OpArgs{
             OpName: OpNewIdentityRev,
         })

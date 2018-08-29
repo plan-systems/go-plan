@@ -167,6 +167,21 @@ const (
 
 
 
+    // StorageErrorFamily errors relate to PLAN's PDI Storage abstraction
+    StorageErrorFamily = 5300 + iota
+
+    // InvalidStorageSession means the given storage session ID was not found
+    InvalidStorageSession
+
+    // InvalidDatabaseID means the database ID provided is suspiciously short or long
+    InvalidDatabaseID
+
+    // FailedToLoadDatabase means an error was encountered when creating or loading the database
+    FailedToLoadDatabase
+
+    // FailedToCommitTxn means an unexpected fatal error occured while committing one ore more StorageTxns
+    FailedToCommitTxn
+
 )
 
 
