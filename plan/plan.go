@@ -8,10 +8,10 @@ import (
 
 
 // DataHandler is a deferred data handler function
-type DataHandler            func(inErr *Perror, inParam []byte)
+type DataHandler            func(inParam []byte, inErr *Perror)
 
 // Action is a deferred generic handler. 
-type Action                 func(inErr *Perror, inParam interface{})
+type Action                 func(inParam interface{}, inErr *Perror)
 
 
 
@@ -20,7 +20,7 @@ const (
 
 	// IdentityAddrSz is the number of bytes PLAN uses for a public addresses.  It's the right-most bytes of any longer public key.
     // Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
-    // Why shouldn't this be smaller or larger?  Now this is becoming an exestential question!  What's the human perceptual difference between,
+    // Why shouldn't this be smaller or larger?  Now this is becoming an existential question!  What's the human perceptual difference between,
     //     say, 1/2^128, 1/2^160, and 1/2^192?  We're living it and finding out!  2^192 outta be enough for anybody.
     IdentityAddrSz      = 24
     
@@ -55,7 +55,7 @@ type PDIEntrySig        []byte
 // ChannelID identifies a specific PLAN channel where PDI entries are posted to.
 type ChannelID          [ChannelIDSz]byte
 
-// MemberID identifies a memeber of a given community and is generared when a member is initially added to the community and never changes 
+// MemberID identifies a member of a given community and is generared when a member is initially added to the community and never changes 
 type MemberID           [MemberIDSz]byte
 
 // MemberEpoch changes each time a member creates a new set of public keys.  The community's MemberRegistryChannel allows 
@@ -115,7 +115,7 @@ var (
 
 
 
-// Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflippiug
+// Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflipping
 //     won't occur until the year 292,471,210,648 CE.  I wonder for-profit orgs will still dominate the OS space.
 // Note: if a nanosecond precision is not available or n/a, then the best available precision should be used (or 0).  
 type Time struct {
