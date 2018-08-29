@@ -112,10 +112,8 @@ type ChannelStore struct {
 
     channelDir              string
 
-    // ChannelActionLog is an ordered list of ChannelAction executed on this channel, starting from when the channel was first created,
-    //    all the way up to the present moment.  This log allows a pnode to verify that a given post to a channel is citing
-    //    a valid, available, and legal access channel (given an author and timestamp)
-    ChannelAdmin             pdi.ChannelAdmin
+    // ChannelEpochs is list of all epochs for this channel since its creation (sorted with newer epochs appearing first) 
+    ChannelEpochs           []*pdi.ChannelEpoch
 
     db                      *sql.DB
     select_timeMatch        *sql.Stmt
@@ -134,32 +132,16 @@ type ChannelStore struct {
 
 
 
-type AccessGrant struct {
-    Timestamp               plan.Time
-
-    Granter                 plan.IdentityAddr
-    Grantee                 plan.IdentityAddr
-
-    // When a channel owner grants access to someone, she is really using the grantee's public key to encrypt 
-    //    the AccessCtrl's master/private key and posting it to the access control list.  Keep in mind that pnodes
-    //    validate incoming grants by ensuring that .Granter has ownership-level permissions.
-    // Since some permissions changes don't require the key to be resent, this value is sometimes nil.
-    //EncryptedChannelKey     *plan.EncryptedChannelKey
-
-    // 
-    UpdatedAccess           AuthorAccessFlags
-}
-
 // ACStore represents an permissions/access control container.  Entries to a AccessChannelID appear as
 //     a given public 
 type ACStore struct {
 
     // This represents the db that contains a sequential list of 
-    RunningHistory          []AccessGrant
+    GrantsHistory           []pdi.AccessGrantBatch
 
     // This is a composite of all entries posted to this access channel.  This table is built up by compositing
     //    all access grant history posted to this access channell, going in order of time. 
-    AccessByAuthor          map[plan.IdentityAddr]AuthorAccessFlags
+    AccessByAuthor          map[plan.IdentityAddr]pdi.ChannelAccess
 
 }
 
@@ -335,7 +317,7 @@ func (CS *ChannelStore) WriteEntryToStorage( inEntry *pdi.EntryCrypt, inHdr *pdi
         var matchRow int 
 
         {
-            err = CS.select_timeMatch.QueryRow( inEntry.TimeCreated ).Scan( &matchRow )
+            err = CS.select_timeMatch.QueryRow( inHdr.TimeAuthored ).Scan( &matchRow )
             if err == sql.ErrNoRows {
 
             } else {

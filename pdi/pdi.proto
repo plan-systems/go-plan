@@ -21,10 +21,10 @@ enum ChannelAccess {
     // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES, SUPERCEDE_ENTRY, UPDATE_CHANNEL_INFO, UPDATE_ACCESS
     MODERATOR_ACCESS            = 3;
 
-    // Same as MODERATOR_ACCESS plus can grant others MODERATOR_ACCESS and can issue EDIT_ACCESS_GRANTS
+    // Same as MODERATOR_ACCESS plus can grant others MODERATOR_ACCESS and can issue UPDATE_ACCESS_GRANTS
     SUPER_MODERATOR_ACCESS      = 4;
 
-    // Same as SUPER_MODERATOR_ACCESS plus can grant others SUPER_MODERATOR_ACCESS and can author entry type EDIT_CHANNEL_EPOCH
+    // Same as SUPER_MODERATOR_ACCESS plus can grant others SUPER_MODERATOR_ACCESS and can author entry type NEW_CHANNEL_EPOCH
     ADMIN_ACCESS                = 5;
 
 }
@@ -63,7 +63,7 @@ enum EntryOp {
 
     // This entry initiates a new channel epoch, incorporating one or more changes to the channel's current epoch fields (ChannelEpoch).
     // Only channel admins are allowed to originate this type of entry.
-    EDIT_CHANNEL_EPOCH          = 5;
+    NEW_CHANNEL_EPOCH          = 5;
 
 
     // Network-level 
@@ -73,11 +73,16 @@ enum EntryOp {
 
 
 
-message AccessGrantBatch {
+message AccessGrant {
 
-                bytes           granter                 = 1;
-    repeated    bytes           grantee                 = 2;
-    repeated    ChannelAccess   grant                   = 3;
+    // Specifies an access level granted to the liven list of grantees. If a pnode sees an access grant given by a member who does
+    // not have permission to do so, the entry will be rejected. 
+                ChannelAccess   access_grant            = 1;
+
+
+    // This is a list of community memebr IDs being given the specified access grant. 
+    // Note: if grantees[0] == "*" AND access_grant <= MODERATOR_ACCESS, then the grant implicitly applies to ALL community members. 
+    repeated    bytes           grantees                = 2;
 
 }
 
@@ -133,26 +138,35 @@ message MemberEpoch {
 
 
 /*
-    ChannelEpoch contains critical and security related properties about a channel.   Once a ChannelEpoch is issued,
-    is is immutable and only a new ChannelEpoch can be issued to supercede it via NEW_CHANNEL_EPOCH. 
+    ChannelEpoch contains critical and security-related properties about a channel and is king while in effect.
+    Other than access grants given or taken away, a ChannelEpoch is immutable and only a NEW_CHANNEL_EPOCH op can change things.
 */
 message ChannelEpoch {
 
     // Random "name" for this channel epoch -- must be unique for a channel's epoch history (and not 0). 
                 fixed64         epoch_id                    = 1;
 
-    // Names the previous epoch.  Set to 0 if there was no previous epoch.
+    // Names the previous epoch.  0 if there was no previous epoch.
                 fixed64         prev_epoch_id               = 2;
 
     // Unix timestamp when this epoch entered into effect
                 int64           time_started                = 3;
 
-    // IF set, channel entries are not allowed to be removed/superceded.
-                bool            entries_are_locked          = 4;
+    /*  If set, this channel conforms to the requirements needed so that it can be used control access for another channel. 
+        An access channel entries conform to specific standards and serve to:
+            (a) transport private channel keys and grants to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
+            (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
+                bool            is_access_channel           = 4;
 
-    // If set, entries_are_locked will always be true.
-                bool            entries_are_locked_forever  = 5;
+    // If set, channel entries are not allowed to be removed/superceded.
+                bool            entries_are_locked          = 5;
 
+    // If set, entries_are_locked must/will always be true.
+                bool            entries_are_locked_forever  = 6;
+
+    // Contains ALL the access grants given during this epoch.
+    // This field is ONLY non-nil/valid if the associated channel is an access channel (is_access_channel == true)
+    repeated    AccessGrant     access_grants               = 7;
 
     /*  Top-level string describing how entries on this channel are expected to conform.
         This allows a PLAN client to invoke the appropriate UI and data handlers. 
@@ -160,17 +174,13 @@ message ChannelEpoch {
             /plan/channel-protocol/talk/2
             /plan/channel-protocol/inventory/1   
             /plan/channel-protocol/cryptokitty/browser    */
-                string          protocol                    = 6;
+                string          protocol                    = 8;
 
-    /*  
-    Does this channel conform to the requirements needed so that it can be used control access for another channel?
-    An access channel entries conform to specific standards and serve to:
-        (a) transport private channel keys to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
-        (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
-                bytes           access_channel_id           = 7;
+    // Specifies the channel that is serving as this channel's access control channel (and has entries that conform to that spec)
+                bytes           access_channel_id           = 9;
 
     // Future-proofing
-                Block           extensions                  = 9;
+                Block           extensions                  = 10;
 
 }
 
