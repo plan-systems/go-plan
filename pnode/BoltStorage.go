@@ -1,6 +1,9 @@
 
 package pnode
 
+// See: go-plan/pdi/StorageProvider.go for interface context
+
+
 import (
     "encoding/base64"
     "path"
@@ -19,10 +22,11 @@ var (
 )
 
 
-// BoltStorage manages one or more bolt databases in a given local directory
+// BoltStorage implements pdi.StorageProvider.  
+// Specifically, it manages one or more bolt databases in a given local directory. 
 type BoltStorage struct {
     sessions            []*boltSession
-    localPathame        string
+    localPathname       string
     alertHandler        pdi.StorageAlertHandler
     fileMode            os.FileMode
 }
@@ -45,11 +49,13 @@ func NewBoltStorage(
 
 
 
+
+
 // StartSession implements StorageProvider.StartSession
 func (storage *BoltStorage) StartSession(
     inDatabaseID []byte,
     inOnCompletion func(pdi.StorageSession, error),
-    inOnTxnReport func(inTxnReports []*pdi.TxnReport),
+    inOnTxnReport func(inTxns []*pdi.StorageTxn),
     inOnSessionEnded func(inReason string),
 ) error {
 
@@ -65,7 +71,7 @@ func (storage *BoltStorage) StartSession(
         parentProvider: storage,
         onTxnReport: inOnTxnReport,
         onSessionEnded: inOnSessionEnded,
-        dbPathname: path.Join(storage.localPathame, string(dbName) + ".bolt"),
+        dbPathname: path.Join(storage.localPathname, string(dbName) + ".bolt"),
     }
 
     opt := bolt.Options {

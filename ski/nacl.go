@@ -17,10 +17,12 @@ import (
 
 
 const (
-    keyListCodecName = "/plan/ski/keylist/1"
 
-    // InvokeNaCl should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
-    InvokeNaCl = "/plan/ski/provider/nacl/1"
+    // NaClKeysCodec is used to express the format in each KeyEntry
+    NaClKeysCodec = "/plan/ski/KeyEntry/nacl/1"
+
+    // NaClProviderName should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
+    NaClProviderName = "/plan/ski/provider/nacl/1"
 
 
     // KeyEntry.KeyType
@@ -81,8 +83,8 @@ func newNaclProvider() *naclProvider {
 func (provider *naclProvider) NewSession() *naclSession {
 	session := &naclSession{
         provider,
-        newKeyring(),
-        newKeyring(),
+        NewKeyring(CommunityKeyring),
+        NewKeyring(PersonalKeyring),
         map[string]bool{},
         nil,
     }
@@ -98,7 +100,7 @@ func (provider *naclProvider) StartSession(
     inOnSessionEnded    func(inReason string),
 ) *plan.Perror {
 
-    if inInvocation != InvokeNaCl {
+    if inInvocation != NaClProviderName {
         return plan.Error(nil, plan.InvocationNotAvailable, "SKI invocation not found or otherwise available")
     }
 
@@ -379,7 +381,8 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Per
     var keyListBuf []byte
     {
         keyList := KeyList{
-            Vers: 1,
+            Label: session.communityKeyring.Label,
+            KeysCodec: session.communityKeyring.KeysCodec,
             Keys: make([]*KeyEntry, 0, len(opArgs.OpKeyIDs)),
         }
 
@@ -398,7 +401,7 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Per
     }
 
     block := pdi.Block {
-        ContentCodec: keyListCodecName,
+        ContentCodec: KeyListProtobufCodec,
         Content: keyListBuf,
     }
 
@@ -421,9 +424,9 @@ func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
     }
 
 
-    keyListBuf := block.GetContentWithCodec(keyListCodecName)
+    keyListBuf := block.GetContentWithCodec(KeyListProtobufCodec)
     if keyListBuf == nil {
-		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", keyListCodecName)
+		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", KeyListProtobufCodec)
     }
 
     keyList := KeyList{}

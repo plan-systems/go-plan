@@ -8,6 +8,37 @@ import (
 
 
 
+const (
+
+    /*************************************************
+    ** PLAN keyring identifiers
+    */
+
+    // CommunityKeyring is the keyring all members of a given PLAN community have
+    CommunityKeyring = "/plan/keyring/community/1"
+
+    // PersonalKeyring is one's personal keyring and is used to encrypt/decrypt private data.
+    PersonalKeyring  = "/plan/keyring/personal/1"
+
+    // StorageKeyring contains keys needed to access or commit txns on a pdi.StorageProvider 
+    StorageKeyring   = "/plan/keyring/storage/1"
+
+
+    /*************************************************
+    ** PLAN SKI codecs
+    */
+
+    // KeyListProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
+    KeyListProtobufCodec = "/plan/ski/keylist/1"
+)
+
+
+
+
+
+
+
+
 // OpArgs maps parameter keys to values
 type OpArgs struct {
 
@@ -150,17 +181,3 @@ var (
 
 )
 
-
-
-
-// PLAN keyring names
-const (
-
-    // CommunityKeyring is the keyring all members of a given PLAN community have
-    CommunityKeyring        = "/plan/keyring/community/1"
-
-    // PersonalKeyring is one's personal keyring and is used to encrypt/decrypt private data.
-    PersonalKeyring         = "/plan/keyring/personal/1"
-
-    DeviceChainKeyring      = "/plan/keyring/devices/1"
-)

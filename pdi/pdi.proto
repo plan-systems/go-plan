@@ -1,4 +1,4 @@
-// See plan-protobuf/README.md
+// See plan-tools/plan-protobuf/README.md
 
 
 syntax = "proto3";
@@ -6,6 +6,12 @@ syntax = "proto3";
 package pdi;
 
 
+/**********************************************************************************************************************
+A channel's access control channel effectively specifies an privilege access level for all member IDs in the community. 
+
+A channel designated as an access control channel can be used for any number of channels, 
+effectively allowing channels used to control access more multiple channels.  This "comes for free" since
+access control channels don't contain any references to channels that use them to control access. */
 
 enum ChannelAccess {
 
@@ -15,13 +21,13 @@ enum ChannelAccess {
     // Has crypto to decrypt entries from the given channel
     READ_ACCESS                 = 1;
 
-    // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES, SUPERCEDE_ENTRY, 
+    // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES (for self), SUPERCEDE_ENTRY (for self) 
     READWRITE_ACCESS            = 2;
 
-    // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES, SUPERCEDE_ENTRY, UPDATE_CHANNEL_INFO, UPDATE_ACCESS
+    // Permitted to author: POST_NEW_CONTENT, REMOVE_ENTRIES (for all), SUPERCEDE_ENTRY (for all), EDIT_CHANNEL_INFO, EDIT_ACCESS_GRANTS
     MODERATOR_ACCESS            = 3;
 
-    // Same as MODERATOR_ACCESS plus can grant others MODERATOR_ACCESS and can issue UPDATE_ACCESS_GRANTS
+    // Same as MODERATOR_ACCESS plus can grant others MODERATOR_ACCESS and can issue EDIT_ACCESS_GRANTS
     SUPER_MODERATOR_ACCESS      = 4;
 
     // Same as SUPER_MODERATOR_ACCESS plus can grant others SUPER_MODERATOR_ACCESS and can author entry type NEW_CHANNEL_EPOCH
@@ -30,27 +36,44 @@ enum ChannelAccess {
 }
 
 
-// EntryOp specifies a specific flavor of PDI transaction.  Athough the PLAN UI will not allow the user to things she doesn't 
-//    have permission to do, every pnode in the community rigerously verfiies that the author of any given PDI entry has the permission
-//    they imply they do with the given entry they authored.
+/**********************************************************************************************************************
+EntryOp specifies a specific flavor of PDI transaction.  Although the PLAN UI will not allow the user to things 
+she doesn't have permission to do, every pnode in the community rigorously verifies that the author of any given 
+PDI entry has the permission they imply they do with the given entry they authored.  */
+
 enum EntryOp {
+
+
+/*****************************************************
+** Ops for ANY channel type
+*/
 
     // Appends this content entry to the specified channel.
     POST_NEW_CONTENT            = 0;
 
-    // This entry modifies one or more of a given channel's meta fields (e.g. channel description, icon, etc).
-    // A ChannelInfo snapshot/composite can be reconstructed by sequentially applying every UPDATE_CHANNEL_INFO 
-    //    change to the previous ChannelInfo composite up to a given point in time.
-    // Only channel admins or moderators are permitted to originate this type of entry.
-    UPDATE_CHANNEL_INFO         = 1;
-
     // This entry's body lists one or more channel entries to effectively mark as removed/invisible.
-    REMOVE_ENTRIES              = 2;
+    REMOVE_ENTRIES              = 1;
 
     // This entry's body should effectively replace a specified previous entry
-    SUPERCEDE_ENTRY             = 3;
+    SUPERCEDE_ENTRY             = 2;
 
-    // Adds or removes access to given member IDs.  Notes:
+    /*  - This entry modifies one or more of a given channel's meta fields (e.g. channel description, icon, etc).
+        - A ChannelInfo snapshot/composite can be reconstructed by sequentially applying every EDIT_CHANNEL_INFO 
+    change to the previous ChannelInfo composite up to the present time.
+        - Only channel admins or moderators are permitted to originate this op. */
+    EDIT_CHANNEL_INFO           = 3;
+
+    // This entry initiates a new channel epoch, inserting one or more changes to the channel's current ChannelEpoch.
+    // This op is mostly issued to access channels since a new epoch is only needed in order to rekey a private access channel.
+    // Only channel admins are permitted to originate this op.
+    NEW_CHANNEL_EPOCH           = 4;
+
+
+    /*********************************
+    ** Ops for access channels ONLY 
+    */
+
+    // Adds or removes access to given member IDs or wildcards.  Notes:
     //   - This entry type is only valid for use channels that are access control channels.
     //   - Members with MODERATOR_ACCESS can only grant/revoke READ_ACCESS and READWRITE_ACCESS.
     //   - Members with ADMIN_ACCESS can grant/revoke up to and including SUPER_MODERATOR_ACCESS.
@@ -58,46 +81,33 @@ enum EntryOp {
     //   - In some cases, this entry type MAY result a new channel epoch to be initiated (this is because
     //     a private channel must issue and distribute a new channel encryption key in order to effectively 
     //     remove access to members that are longer have channel access).
-    UPDATE_ACCESS_GRANTS        = 4;
-
-
-    // This entry initiates a new channel epoch, incorporating one or more changes to the channel's current epoch fields (ChannelEpoch).
-    // Only channel admins are allowed to originate this type of entry.
-    NEW_CHANNEL_EPOCH          = 5;
-
-
-    // Network-level 
-    SECURITY_ALERT              = 9;
-}
-
-
-
-
-message AccessGrant {
-
-    // Specifies an access level granted to the liven list of grantees. If a pnode sees an access grant given by a member who does
-    // not have permission to do so, the entry will be rejected. 
-                ChannelAccess   access_grant            = 1;
-
-
-    // This is a list of community memebr IDs being given the specified access grant. 
-    // Note: if grantees[0] == "*" AND access_grant <= MODERATOR_ACCESS, then the grant implicitly applies to ALL community members. 
-    repeated    bytes           grantees                = 2;
+    EDIT_ACCESS_GRANTS          = 5;
 
 }
 
 
 
-// Block is a generic attachment/attribute-like object, intended to be nestable, etc
+
+/******************************************************************************************************************************************
+Block is a generic attachment/attribute-like object, intended to be nestable, etc.  The purpose of any Block is to be a flexible,
+extensible container that can also hold any number of sub containers, each holding serialized content of any kind and form. 
+
+The principles and purpose behind this fundamental data structure were inspired from http, initiated by Tim Berners-Lee. */
+
 message Block {
 
-    // Any user-assignable label, typically employed as a name for this Block instance (e.g. a field-name).
+    // This is an optional human-readable name/label for this Block's content (a field-name).  Its purpose is so a consumer can distinguish
+    //    one Block from another.  Generally, it conforms to the context/protocol its being used with. It can be any UTF8 string,
+    //    any whitespace is fine, and is case and whitespace sensitive.  The only requirement is no NULs.
+    // E.g. "error_code", "UserID", "key_list", "attachment", 
                 string          label                   = 1;
 
-    // One key purpose of a block is to hold content.  The content_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
+    // content_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
                 string          content_codec           = 2; 
                 bytes           content                 = 3;
 
+    // In addition to it's label-content body, every block can contain a list of "sub" blocks.  A Block's sub blocks can be
+    //    interpreted or employed any way a client or protocol sees fit.
     repeated    Block           subs                    = 4;
 }
 
@@ -136,6 +146,20 @@ message MemberEpoch {
 
 
 
+message AccessGrant {
+
+    // Specifies an access level granted to the liven list of grantees. If a pnode sees an access grant given by a member who does
+    // not have permission to do so, the entry will be rejected. 
+                ChannelAccess   access_grant            = 1;
+
+
+    // This is a list of community member IDs being given the specified access grant. 
+    // Note: if grantees[0] == "*" AND access_grant <= MODERATOR_ACCESS, then the grant implicitly applies to ALL community members. 
+    repeated    bytes           grantees                = 2;
+
+}
+
+
 
 /*
     ChannelEpoch contains critical and security-related properties about a channel and is king while in effect.
@@ -146,27 +170,14 @@ message ChannelEpoch {
     // Random "name" for this channel epoch -- must be unique for a channel's epoch history (and not 0). 
                 fixed64         epoch_id                    = 1;
 
-    // Names the previous epoch.  0 if there was no previous epoch.
-                fixed64         prev_epoch_id               = 2;
-
     // Unix timestamp when this epoch entered into effect
-                int64           time_started                = 3;
+                int64           time_started                = 2;
 
-    /*  If set, this channel conforms to the requirements needed so that it can be used control access for another channel. 
-        An access channel entries conform to specific standards and serve to:
-            (a) transport private channel keys and grants to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
-            (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
-                bool            is_access_channel           = 4;
+    // Names the previous epoch.  0 if there was no previous epoch.
+                fixed64         prev_epoch_id               = 3;
 
-    // If set, channel entries are not allowed to be removed/superceded.
-                bool            entries_are_locked          = 5;
-
-    // If set, entries_are_locked must/will always be true.
-                bool            entries_are_locked_forever  = 6;
-
-    // Contains ALL the access grants given during this epoch.
-    // This field is ONLY non-nil/valid if the associated channel is an access channel (is_access_channel == true)
-    repeated    AccessGrant     access_grants               = 7;
+    // Number of seconds the previous epoch can alternatively be used in place of this epoch.
+                int32           epoch_transition_period     = 4;
 
     /*  Top-level string describing how entries on this channel are expected to conform.
         This allows a PLAN client to invoke the appropriate UI and data handlers. 
@@ -174,13 +185,30 @@ message ChannelEpoch {
             /plan/channel-protocol/talk/2
             /plan/channel-protocol/inventory/1   
             /plan/channel-protocol/cryptokitty/browser    */
-                string          protocol                    = 8;
+                string          protocol                    = 5;
 
-    // Specifies the channel that is serving as this channel's access control channel (and has entries that conform to that spec)
-                bytes           access_channel_id           = 9;
+            // Specifies the channel that is serving as this channel's access control channel (and has entries that conform to that spec)
+                bytes           access_channel_id           = 6;
+
+    // If set, channel entries are not allowed to be removed/superceded.
+                bool            entries_are_locked          = 7;
+
+    // If set, entries_are_locked must/will always be true.
+                bool            entries_are_locked_forever  = 8;
+                        
+    /*  If set, this channel can be used to validate EntryOps applied to other channels (including other access channels).
+        Entries in an access channel conform to a specific protocol and serve to:
+            (a) allow one or more other channels to cite this channel as their access control (access_channel_id)
+            (a) transport private channel keys and grants to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
+            (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
+                bool            is_access_channel           = 9;
+
+    // Contains all the access grants published via EDIT_ACCESS_GRANTS sent to this channel (during this epoch).
+    // If this channel is NOT an access channel (is_access_channel == false), then this field == nil
+    repeated    AccessGrant     access_grants               = 10;
 
     // Future-proofing
-                Block           extensions                  = 10;
+                Block           extensions                  = 11;
 
 }
 
@@ -212,7 +240,7 @@ message ChannelList {
 
 
 
-// Entry is a convenience container for the peices/parts that a PDI entry may be at during processing or transmission.
+// Entry is a convenience container for the pieces/parts that a PDI entry may be at during processing or transmission.
 message Entry {
                 EntryCrypt      crypt                   = 1;
                 EntryHeader     header                  = 2;
@@ -262,8 +290,11 @@ message EntryHeader {
 
 enum TxnDataDesc {
 
-    // The segments, when reassembled togehter, form EntryCrypt.Marshal()
-    PDI_ENTRY_CRYPT             = 0;
+    // The txn data has been omitted and this 
+    DATA_OMITTED                = 0;
+
+    // The segments, when reassembled together, form EntryCrypt.Marshal()
+    PDI_ENTRY_CRYPT             = 1;
 
 }
 
@@ -287,53 +318,47 @@ enum TxnStatus {
     // The txn has was committed but was rejected for some reason
     REJECTED                    = 4;
 
-    // The txn has been commited and has been confirmed as stored (but could still potentially be reverted)
+    // The txn has been committed and has been confirmed as stored (but could still potentially be reverted)
     CONFIRMED                   = 5;
 
-    // The txn has been commited, was confirmed as stored as some point, but has since been revoked (and is equivalent in status to NOT_COMMITTED) 
+    // The txn has been committed, was confirmed as stored as some point, but has since been revoked (and is equivalent in status to NOT_COMMITTED) 
     REVOKED                     = 6;
 
-    // The txn has been commited, confirmed as stored, and faces no possibility of being reverted.
+    // The txn has been committed, confirmed as stored, and faces no possibility of being reverted.
     FINALIZED                   = 7;
 
 }
 
 
-message TxnReport {
-
-                bytes           txn_name                    = 1;
-
-                TxnStatus       txn_status                  = 3;
-
-    // Copy of StorageTxn.time_committed -- never changes
-                int64           time_committed              = 4;
-
-    // Consensus-based timestamp for this txn.  If txn_status == FINALIZED, this timestamp won't ever change, is universal across storage peers, and is the most trustworty timestamp.
-                int64           time_finalized              = 6;
-
-}
 
 message StorageTxn {
 
 
-    // ---  METADATA  ---
 
-    // Issued by the storage layer -- uniquely identifies this txn and is typically a hashname or serialized integer.
-    // Optional for a storage layer to *actually* store this value since it may be hashname that is only available after a txn
+    // Issued by the storage layer -- uniquely identifies this txn and is likely a hashname or serialized integer.
+    // Optional for a storage layer to *actually* store this value since it may be hashname that is ONLY available after a txn
     //  is committed to storage, but it *is* always filled in when txns are passed to storage service consumers. 
                 bytes           txn_name                    = 1;
 
                 TxnStatus       txn_status                  = 3;
 
-    // Unix timestamp of when this txn was committed for storage
+    // Unix timestamp of when this txn was committed for storage (0 if not committed)
                 int64           time_committed              = 4;
 
+    // Consensus-based unix timestamp for this txn (or 0).  
+    // If txn_status == FINALIZED, then this timestamp...
+    //      - won't ever change, 
+    //      - is universal across storage peers
+    //      - is trustworthy
+                int64           time_consensus              = 5;
 
-    // ---  PAYLOAD  ---
-
+    // Segment header
                 TxnDataDesc     data_desc                   = 6;        
                 uint32          segment_num                 = 7;    
                 uint32          total_segments              = 8;
+
+    // Segment data
+    // Note: nil if data_desc == DATA_OMITTED
                 bytes           segment_data                = 9;
 }
 

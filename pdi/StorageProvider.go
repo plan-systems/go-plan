@@ -11,6 +11,8 @@ type StorageAlert int32
 type StorageAlertHandler func(inAlert StorageAlert)
 
 
+
+
 // StorageProvider wraps a persistent storage (or replicating) service "producer".  Perhaps it's locally implemented, or perhaps its implemented by gRPC.
 type StorageProvider interface {
 
@@ -18,14 +20,14 @@ type StorageProvider interface {
     StartSession(
         inDatabaseID []byte,
         inOnSessionStarted func(inSession StorageSession, inErr error),
-        inOnTxnReceived func(inTxns []*StorageTxn),
+        inOnTxnReport func(inTxns []*StorageTxn),
         inOnSessionEnded func(inReason string),
         //inAlertHandler StorageAlertHandler,
     ) error
 
 
     // SegmentForCommit is a utility that segments and packages the given payload into one or more foundational units of storage.
-    // This encapsultates nuances with replicator/storage implementations where there are txn size limits, etc. 
+    // This encapsulates nuances with replicator/storage implementations where there are txn size limits, etc. 
     SegmentIntoTxnsForCommit(
         inData []byte, 
         inDataDesc TxnDataDesc,

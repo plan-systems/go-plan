@@ -1,3 +1,4 @@
+
 package pnode
 
 
@@ -129,15 +130,12 @@ type ChannelStore struct {
 
 
 
-
-
-
 // ACStore represents an permissions/access control container.  Entries to a AccessChannelID appear as
 //     a given public 
 type ACStore struct {
 
     // This represents the db that contains a sequential list of 
-    GrantsHistory           []pdi.AccessGrantBatch
+    //GrantsHistory           []pdi.AccessGrantBatch
 
     // This is a composite of all entries posted to this access channel.  This table is built up by compositing
     //    all access grant history posted to this access channell, going in order of time. 

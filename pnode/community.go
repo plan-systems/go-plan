@@ -112,12 +112,11 @@ Any channel (or access channel) can either be community-public or private.
 
 */
 
-type FetchChannelStoreFlags int32
+type LoadChannelStoreFlags int32
 const (
-    LockForReadAccess           = 0x01
-    LockForWriteAccess          = 0x02
-
-    CitedAsAccessChannel        = 0x10
+    LockForReadAccess    LoadChannelStoreFlags = 0x01
+    LockForWriteAccess   LoadChannelStoreFlags = 0x02
+    CitedAsAccessChannel LoadChannelStoreFlags = 0x10
 )
 
 
@@ -140,15 +139,23 @@ func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRe
     return CR
 }
 
+/*
+ws.targetChannel, perr = ws.CR.LockChannelStoreForOp(ws.entryHeader)
 
-
-
-
-func (CR *CommunityRepo) FetchChannelStore(
+func (CR *CommunityRepo) LockChannelStoreForOp(
     inChannelID []byte,
-    inChannelEpoch uint64,
-    inFlags FetchChannelStoreFlags,
     ) (*ChannelStore, *plan.Perror) {
+
+*/
+
+
+
+
+func (CR *CommunityRepo) LockChannelStore(
+    inChannelID []byte,
+    inFlags LoadChannelStoreFlags,
+    ) (*ChannelStore, *plan.Perror) {
+
 
     var channelID plan.ChannelID
     channelID.AssignFrom(inChannelID)
@@ -241,7 +248,7 @@ func (CR *CommunityRepo) LoadChannelStore(
  
     }
 
-
+/*
     if CS.ChannelEpoch.AccessChannelId != nil {
 
         CS.ACStore = new(ACStore)
@@ -252,7 +259,7 @@ func (CR *CommunityRepo) LoadChannelStore(
 
         }
     }
-
+*/
     return CS, nil
 }
 
@@ -345,8 +352,11 @@ type entryWorkspace struct {
     skiSession      ski.Session
     skiProvider     ski.Provider
 
-    accessChannel   *ChannelStore
-    targetChannel   *ChannelStore
+    accessCh        *ChannelStore
+    accessChFlags   LoadChannelStoreFlags
+
+    targetCh        *ChannelStore
+    targetChFlags   LoadChannelStoreFlags
 
 }
 
@@ -440,21 +450,102 @@ func (ws *entryWorkspace) validateEntry() *plan.Perror {
 }
 
 
- 
+ /*
+     defer {
+        switch {
+        case ( targetChFlags & LockForReadAccess ) != 0:
+            ws.targetChannel.RUnlock()
+        case ( targetChFlags & LockForWriteAccess ) != 0:
+            ws.targetChannel.Unlock()
+        }
+}*/
+
+
+type entryAccessReqs struct {
+    minAccessLevel          pdi.ChannelAccess
+    canEditOthersEntries    bool
+}
 
 
 func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
 
-    var err *plan.Perror
+    plan.Assert( ws.targetChFlags == 0 &&  ws.accessChFlags == 0, "channel store lock flags not reset" )
 
-      // Fetch the data structure container for the cited access channel
-    ws.targetChannel, err = ws.CR.FetchChannelStore(ws.entryHeader.ChannelId, LockForWriteAccess)
+    targetChFlags := LockForWriteAccess
+    accessChFlags := LockForReadAccess | CitedAsAccessChannel
+
+    switch ws.entryHeader.EntryOp {
+        case pdi.EntryOp_EDIT_ACCESS_GRANTS:
+            targetChFlags |= CitedAsAccessChannel
+    }
+
+    // First lock the target channel
+    var perr *plan.Perror
+    ws.targetCh, perr = ws.CR.LockChannelStore(ws.entryHeader.ChannelId, targetChFlags)
+    if perr != nil {
+        return perr
+    }
+
+    // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
+    ws.targetChFlags = targetChFlags
+
+
+    // Step from newest to oldest epoch.
+    var epochMatch *pdi.ChannelEpoch
+    for i, epoch := range ws.targetCh.ChannelEpochs {
+        if epoch.EpochId == ws.entryHeader.ChannelEpochId {
+            if i > 0 {
+                // TODO: ws.targetChannel.ChannelEpoch[i-1].EpochTransitionPeriod
+                {
+
+                    // TargetChannelEpochExpired
+                }
+            }
+        }
+    }
+    if epochMatch == nil {
+        return plan.Errorf(nil, plan.TargetChannelEpochNotFound, "epoch 0x%x for target channel 0x%x not found", ws.entryHeader.ChannelEpochId, ws.entryHeader.ChannelId)
+    }
+
+    // Lookup the latest 
+    ws.accessCh, perr = ws.CR.LockChannelStore(epochMatch.AccessChannelId, accessChFlags)
+    if perr != nil {
+        return perr
+    }
+
+    // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
+    ws.accessChFlags = accessChFlags
+
+    // Ops such as REMOVE_ENTRIES and SUPERCEDE_ENTRY
+    perr = ws.targetCh.FetchRelevantEntriesForOp()
+
+    access := ws.accessCh.LookupAccessForAuthor(ws.entryHeader.AuthorMemberId)
+
+    reqs := entryAccessReqs{
+
+    }
+    switch ws.entryHeader.EntryOp {
+    case POST_NEW_CONTENT:
+        reqs.minAccessLevel = READWRITE_ACCESS
+        case pdi.EntryOp_EDIT_ACCESS_GRANTS:
+            targetChFlags |= CitedAsAccessChannel
+    }
+
+
+
+/*
+      // Fetch and lock the data container for the cited access channel, checking all security permissions
+    ws.targetChannel, err = ws.CR.LockChannelStoreForOp(ws.entryHeader)
     if err != nil {
         return err
     }
 
+    accessLevel, err := ws.targetChannel.AccessLevelForMember(ws.entryHeader.
+    var 
     for i, chEpoch := range ws.targetChannel.ChannelEpochs {
-        if chEpoch.EpochId == ws.entryHeader.ChannelEpochId
+        if chEpoch.EpochId == ws.entryHeader.ChannelEpochId {
+            for 
+        }
     }
 
     fetchFlags := LockForReadAccess
@@ -485,9 +576,9 @@ func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
     if ws.targetChannel.ACStore == nil {
         return plan.Errorf(nil, plan.NotAnAccessChannel, "invalid channel 0x%x", ws.entryHeader.ChannelId )
     }
-*/
-    // TODO: do all of ACStore checking!
 
+    // TODO: do all of ACStore checking!
+*/
     return nil
 }
 
@@ -519,6 +610,7 @@ func (ws *entryWorkspace) processAndMergeEntry(
         if perr != nil {
             inOnCompletion(perr)
         }
+
 
         perr = ws.prepChannelAccess()
         if perr != nil {

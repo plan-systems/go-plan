@@ -117,7 +117,11 @@ const (
     // BadTimestamp means a timestamp is in the excessively distant past or future
     BadTimestamp
 
+    // TargetChannelEpochNotFound means the cited epoch of the target channel did not match any known epochs locally.
+    TargetChannelEpochNotFound
 
+    // TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
+    TargetChannelEpochExpired
 
 
     // SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)

@@ -17,14 +17,16 @@ import (
 type Keyring struct {
     sync.RWMutex
     
-    Name            string
-    Desc            string
+    Label           string
+    KeysCodec       string
     keysByID        map[plan.KeyID]*KeyEntry
 }
 
-func newKeyring() *Keyring {
+func NewKeyring(inLabel string) *Keyring {
 
     return &Keyring{
+        Label: inLabel,
+        KeysCodec: NaClKeysCodec,
         keysByID: map[plan.KeyID]*KeyEntry{},
     }
 }
