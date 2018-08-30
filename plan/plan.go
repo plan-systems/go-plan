@@ -1,4 +1,40 @@
+
+/**********************************************************************************************************************
+
+P           Purposeful
+P  L        Logistics
+P  L  A     Architecture
+P  L  A  N  Network
+
+P  L  A  N
+u  o  r  e
+r  g  c  t
+p  i  h  w
+o  s  i  o
+s  t  t  r
+e  i  e  k
+f  c  c  
+u  s  t
+l     e
+
+
+Welcome to PLAN!  go-plan is the benchmark implementation of PLAN's p2p client-serving node.
+
+PLAN is a secure, all-in-one communications and logistics planning tool for individuals and communities.  It
+is intended to be an instrument of productivity, vision, and self-reliance. 
+
+All the parts of PLAN are free and open-source (GPLv3), and each component and layer is intended to be "pluggable" 
+or an embodiment of an open-protocol.  The design principles of PLAN are similar and consistent with
+Tim Berners-Lee's design and implementation of http. 
+
+Universe willing, may PLAN give organizations and communities with little or no resources
+intuitive solutions to communicate and self-organize "that just works". I see PLAN supporting her users, 
+the members of the PLAN Foundation, and myself such that I could not wish for more.  
+
+~ Proto, Summer 2018  */
+
 package plan
+
 
 import (
     "fmt"
