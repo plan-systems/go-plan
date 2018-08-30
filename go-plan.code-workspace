@@ -5,16 +5,60 @@
         }
     ],
     "settings": {
+    
         "cSpell.words": [
             "Perror",
+            "access",
             "asym",
             "ckid",
             "crypto",
             "grpc",
+            "hashname",
+            "hashnames",
+            "jerr",
+            "key",
+            "nuls",
             "op",
+            "pgateway",
             "pnode",
+            "priv",
+            "privs",
+            "pservice",
+            "readwrite",
             "recip",
-            "repo"
+            "repo",
+            "sz",
+            "uuid"
+        ],
+        "cSpell.enabledLanguageIds": [
+            "asciidoc",
+            "c",
+            "cpp",
+            "csharp",
+            "css",
+            "go",
+            "html",
+            "jade",
+            "javascript",
+            "javascriptreact",
+            "json",
+            "latex",
+            "less",
+            "markdown",
+            "php",
+            "plaintext",
+            "proto",
+            "proto3",
+            "protobuf",
+            "pub",
+            "python",
+            "restructuredtext",
+            "rust",
+            "scss",
+            "text",
+            "typescript",
+            "typescriptreact",
+            "yml"
         ]
     }
 }
