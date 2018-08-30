@@ -10,16 +10,23 @@ package ski;
 message KeyEntry {
                 uint32          key_info                = 1;
                 int64           time_created            = 2;
-                bytes           privKey                 = 3;
-                bytes           pubKey                  = 4;
+                bytes           priv_key                = 3;
+                bytes           pub_key                 = 4;
 }
 
 
 
-
+// A serialized KeyList is named as ski.KeyListProtobufCodec
 message KeyList {
-                int32           vers                    = 1;
-    repeated    KeyEntry        keys                    = 2;
+
+    // Any protocol-dependent label (or not), typically employed as a name for this Block instance (i.e. a field-name).
+                string          label                   = 1;
+
+    // key_entry_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
+    // It expresses expectations on how the key entries on this KeyList can be used or what they conform to.
+                string          keys_codec              = 2;
+
+    repeated    KeyEntry        keys                    = 3;
 }
 
 
