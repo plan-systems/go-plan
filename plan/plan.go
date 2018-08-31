@@ -1,20 +1,9 @@
 /**********************************************************************************************************************
 
-         Purposeful
-      P  Logistics
-   P  L  Architecture
-P  L  A  Network
-u  o  r  e
-r  g  c  t
-p  i  h  w
-o  s  i  o
-s  t  t  r
-e  i  e  k
-f  c  c
-u  s  t
-l     u
-      r
-      e
+         P urposeful
+         L ogistics
+         A rchitecture
+P  L  A  N etwork
 
 Welcome to PLAN!
 
