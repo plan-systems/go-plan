@@ -48,50 +48,60 @@ type Action func(inParam interface{}, inErr *Perror)
 
 const (
 
-	// IdentityAddrSz is the number of bytes PLAN uses for a public addresses.  It's the right-most bytes of any longer public key.
-	// Background on probability of address collision for 20 bytes (160 bits) http://preshing.com/20110504/hash-collision-probabilities/
-	// Why shouldn't this be smaller or larger?  Now this is becoming an existential question!  What's the human perceptual difference between,
-	//     say, 1/2^128, 1/2^160, and 1/2^192?  We're living it and finding out!  2^192 outta be enough for anybody.
-	IdentityAddrSz = 24
+	// CommunityIDSz is the number of bytes PLAN uses for a community ID.
+	// Background on probability of hash collision: http://preshing.com/20110504/hash-collision-probabilities/
+	// Why shouldn't this be smaller or larger?  Philisophically, this value expresses the "size"
+    //    of the (hash) universe req'd for peer-based hashname safety.   2^192 outta be enough for anybody.
+    CommunityIDSz = 24
+    
+    // KeyIDSz is the number of bytes used to identify a key entry on a PLAN keyring.
+    // It's "modest-sized" since a newly generated must pass collision checks before it's put into use.
+    KeyIDSz = 16
+    
+	// ChannelIDSz specifies the byte size of ChannelID
+	ChannelIDSz = 16
 
-	// KeyIDSz is the number of bytes PLAN uses to identify a key entry on a keyring
-	KeyIDSz = 24
+    // MemberIDSz specifies the byte size of KeyID
+    MemberIDSz = 16
 
-	// ChannelIDSz specifies the size of ChannelID
-	ChannelIDSz = 20
+    // MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
+    MemberAliasMaxLen = 127
 
-	// MemberIDSz specifies the size of MemberID
-	MemberIDSz = 16
 )
 
-// KeyID identifies a public-private (asymmetric) key pair OR a private (symmetric) key.
-//    For asymmetric keys, it is defined as the right-most bytes of the public key.
-//    For symmetric keys, it is randomly generated when the key bytes is generated.
-type KeyID [KeyIDSz]byte
 
-// CommunityID identifies a PLAN community
-type CommunityID [IdentityAddrSz]byte
+// CommunityID identifies a PLAN community and is randomly generated during its genesis. 
+type CommunityID [CommunityIDSz]byte
 
-// IdentityPublicKey is the public key of a person, group, or sub community inside a PLAN community.
-type IdentityPublicKey []byte
+// MemberID identifies a member within a given community and never changes -- even when a member initiates
+//    a new "epoch" so their crypto can be regenerated.  
+// Member IDs are considered collision-proof since inside a community, they must be cleared through
+//    the community's new member registration process (which will reject a collision).
+type MemberID [MemberIDSz]byte
 
-// IdentityAddr the rightmost bytes of IdentityPublicKey
-type IdentityAddr [IdentityAddrSz]byte
+// MemberAlias is a self-given community member name and is how they are seen by humans in the community,
+//    making it a convenience tool for humans to easily refer to other members.
+// A member can change their MemberAlias at any time (though there may be reasonable restrictions in place).
+// Note: a MemberID is generated from the right-most bytes of the SHA256 hash of the community ID concatenated 
+//    with the member's first chosen alias (or an alternaitvely entered "member ID generation phrase").  This
+//    scheme makes the member ID recoverable from human memory, even if there is no network access.
+type MemberAlias string
 
-// PDIEntrySig holds a final signature of a PDI entry, verifying the author's private key was used to sign the entry
-type PDIEntrySig []byte
-
-// ChannelID identifies a specific PLAN channel where PDI entries are posted to.
+// ChannelID identifies a specific PLAN channel where PDI entries are posted to (for a given a community ID).
 type ChannelID [ChannelIDSz]byte
 
-// MemberID identifies a member of a given community and is generared when a member is initially added to the community and never changes
-type MemberID [MemberIDSz]byte
+// KeyID identifies a cryptographic key (for a given a community ID).
+//    For asymmetric keys, it is defined as the right-most bytes of the public key.
+//    For symmetric keys, it is randomly generated when the key is generated.
+type KeyID [KeyIDSz]byte
 
 // MemberEpoch changes each time a member creates a new set of public keys.  The community's MemberRegistryChannel allows
 //    any member to lookup public keys for a member for each crypto rev they've ever done, allows community members to:
 //    (1) send private messages to a given member
 //    (2) verify sigs on anything to ensure that they are authentic
 type MemberEpoch uint64
+
+
 
 var (
 
@@ -101,7 +111,6 @@ var (
 	//    the hierarchy of access channels is rooted in this channel.
 	// Note that the parent access channel is set to itself by default.
 	RootAccessChannel = ChannelID{
-		0, 0, 0, 0,
 		0, 0, 0, 0,
 		0, 0, 0, 0,
 		0, 0, 0, 0,
@@ -122,7 +131,6 @@ var (
 		0, 0, 0, 0,
 		0, 0, 0, 0,
 		0, 0, 0, 0,
-		0, 0, 0, 0,
 		0, 0, 0, 2,
 	}
 
@@ -131,7 +139,6 @@ var (
 	//     visible to other community though access can be granted to other select users.  This channel allows users to find
 	//     any community-public channel, regardless if the channel has been linked in a public workspace.
 	ChannelCatalogChannel = ChannelID{
-		0, 0, 0, 0,
 		0, 0, 0, 0,
 		0, 0, 0, 0,
 		0, 0, 0, 0,
@@ -178,22 +185,51 @@ func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 	}
 }
 
-// AssignFrom sets this CommunityID from the given buffer
-func (cid *CommunityID) AssignFrom(in []byte) {
-	copy(cid[:], in[len(in)-IdentityAddrSz:])
+
+// GetCommunityID returns the CommunityID for the given buffer
+func GetCommunityID(in []byte) CommunityID {
+
+    var out CommunityID
+    
+    overhang := CommunityIDSz - len(in)
+    if overhang < 0 {
+        in = in[-overhang:]
+        overhang = 0
+    }
+
+    copy(out[overhang:], in)
+    return out
 }
 
-// AssignFrom sets this CommunityID from the given buffer
-func (cid *IdentityAddr) AssignFrom(in []byte) {
-	copy(cid[:], in[len(in)-IdentityAddrSz:])
+
+// GetKeyID returns the KeyID for the given buffer
+func GetKeyID(in []byte) KeyID {
+
+    var out KeyID
+    
+    overhang := KeyIDSz - len(in)
+    if overhang < 0 {
+        in = in[-overhang:]
+        overhang = 0
+    }
+
+    copy(out[overhang:], in)
+    return out
 }
 
-// AssignFrom sets this CommunityID from the given buffer
-func (kid *KeyID) AssignFrom(in []byte) {
-	copy(kid[:], in[len(in)-KeyIDSz:])
-}
 
-// AssignFrom sets this ChannelID from the given buffer
-func (cid *ChannelID) AssignFrom(in []byte) {
-	copy(cid[:], in[len(in)-ChannelIDSz:])
+
+// GetChannelID returns the KeyID for the given buffer
+func GetChannelID(in []byte) ChannelID {
+
+    var out ChannelID
+    
+    overhang := ChannelIDSz - len(in)
+    if overhang < 0 {
+        in = in[-overhang:]
+        overhang = 0
+    }
+
+    copy(out[overhang:], in)
+    return out
 }
