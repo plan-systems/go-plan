@@ -127,9 +127,12 @@ message MemberEpoch {
     // Unix timestamp when this epoch entered into effect
                 int64           time_started            = 3;
 
+    // Specifies a UTF8 textual label that this member chooses to appear as in the community.
+                string          alias                   = 4;
+
     // Public keys associated with the given revision
-                bytes           pub_signing_key         = 4;
-                bytes           pub_crypto_key          = 5;
+                bytes           pub_signing_key         = 5;
+                bytes           pub_crypto_key          = 6;
 
     // The ChannelID of this member's "about" channel
                 bytes           about_channel_id        = 7;
