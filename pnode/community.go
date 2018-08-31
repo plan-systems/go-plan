@@ -86,6 +86,13 @@ type CommunityRepo struct {
 }
 
 
+type CommunityRules struct {
+
+    MaxMemberAliasChangesPerMonth int //= 30
+
+}
+
+
 
 /*
 const (
@@ -157,8 +164,7 @@ func (CR *CommunityRepo) LockChannelStore(
     ) (*ChannelStore, *plan.Perror) {
 
 
-    var channelID plan.ChannelID
-    channelID.AssignFrom(inChannelID)
+    channelID := plan.GetChannelID(inChannelID)
 
     CR.loadedChannels.RLock()
     CS := CR.loadedChannels.table[channelID]
@@ -211,7 +217,7 @@ func (CR *CommunityRepo) LoadChannelStore(
     ) (*ChannelStore, *plan.Perror) {
 
     CS := new( ChannelStore )
-    CS.ChannelID.AssignFrom( inChannelID )
+    CS.ChannelID = plan.GetChannelID(inChannelID)
 
     CS.Lock()
 
@@ -384,7 +390,7 @@ func (ws *entryWorkspace) unpackHeader(
 
         &ski.OpArgs {
             OpName: ski.OpDecryptFromCommunity,
-            CryptoKeyID: ws.entry.GetCommunityKeyID(),
+            CryptoKeyID: plan.GetKeyID(ws.entry.CommunityKeyId),
             Msg: ws.entry.HeaderCrypt,
         }, 
 

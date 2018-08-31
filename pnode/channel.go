@@ -139,7 +139,7 @@ type ACStore struct {
 
     // This is a composite of all entries posted to this access channel.  This table is built up by compositing
     //    all access grant history posted to this access channell, going in order of time. 
-    AccessByAuthor          map[plan.IdentityAddr]pdi.ChannelAccess
+    AccessByAuthor          map[plan.MemberID]pdi.ChannelAccess
 
 }
 
@@ -156,7 +156,7 @@ type ChannelAdminAction struct {
    Time                    plan.Time                    `json:"when"`
 
    // Who authored this action (only channel owners are allowed to insert channel admin actions)
-   Author                  plan.IdentityAddr            `json:"author"`
+   Author                  plan.MemberID                `json:"author"`
 
    // ChannelAction is a json encoding of a sequence of channel params and actions that are set/executed.
    ChannelAction           []byte                       `json:"action"`

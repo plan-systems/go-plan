@@ -237,7 +237,7 @@ func (pnID PnodeID) UnmarshalJSON( inText []byte ) error {
 
 func (pn *Pnode) InitOnDisk() error {
 
-    pn.config.PnodeID = make( []byte, plan.IdentityAddrSz )
+    pn.config.PnodeID = make( []byte, plan.CommunityIDSz )
     rand.Read( pn.config.PnodeID )
 
     return pn.WriteConfigOut()
@@ -304,7 +304,7 @@ func (pn *Pnode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
     
     {
         info.CommunityName = inCommunityName
-        info.CommunityID = make( []byte, plan.IdentityAddrSz )
+        info.CommunityID = make( []byte, plan.CommunityIDSz )
         rand.Read( info.CommunityID )
 
         {
@@ -369,8 +369,7 @@ func (pn *Pnode) BeginSession(
     in *pservice.SessionRequest,
     ) (*pservice.SessionInfo, error) {
 
-    var communityID plan.CommunityID
-    communityID.AssignFrom(in.CommunityId)
+    communityID := plan.GetCommunityID(in.CommunityId)
 
     CR := pn.CRbyID[communityID]
     if CR == nil {

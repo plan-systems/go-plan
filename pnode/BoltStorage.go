@@ -135,7 +135,7 @@ func (storage *BoltStorage) endSession(inSession *boltSession, inReason string) 
 
 type boltSession struct {
     parentProvider *BoltStorage
-    onTxnReport func(inTxnReports []*pdi.TxnReport)
+    onTxnReport func(inTxns []*pdi.StorageTxn)
     onSessionEnded func(inReason string)
 
     dbPathname string
