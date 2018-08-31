@@ -1,9 +1,9 @@
 /**********************************************************************************************************************
 
-P          Purposeful
-P  L       Logistics
-P  L  A    Architecture
-P  L  A  N Network
+         Purposeful
+      P  Logistics
+   P  L  Architecture
+P  L  A  Network
 u  o  r  e
 r  g  c  t
 p  i  h  w
