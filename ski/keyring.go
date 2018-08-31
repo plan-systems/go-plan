@@ -22,6 +22,7 @@ type Keyring struct {
     keysByID        map[plan.KeyID]*KeyEntry
 }
 
+// NewKeyring creates and empty keyring with the given label/name.
 func NewKeyring(inLabel string) *Keyring {
 
     return &Keyring{

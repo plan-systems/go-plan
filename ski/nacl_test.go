@@ -163,7 +163,7 @@ func newSession(t *testing.T, inName string) *testSession {
 
 
     NaclProvider.StartSession(
-        InvokeNaCl,
+        NaClProviderName,
         GatewayRWAccess,
         func(inSession Session, inErr *plan.Perror) {
 
