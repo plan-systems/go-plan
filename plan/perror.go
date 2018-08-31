@@ -1,30 +1,35 @@
-
 package plan
 
-
 import (
-    "fmt"
-    "strings"
+	"fmt"
+	"strings"
 )
 
+// Assert asserts essential assumptions
+func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 
+	if !inCond {
+		panic(fmt.Sprintf(inFormat, inArgs))
+	}
+}
 
+/*****************************************************
+ * Perror / plan.Error()
+**/
 
-
-// Perror is PLAN's commonly used error type
-// https://github.com/golang/go/wiki/Errors
+// Perror is PLAN's common error struct.  Perror.Code allows easy matching while allowing error strings to contain useful contextual information.
 type Perror struct {
 	Code int32
-    Msg  string
-    Err  error
+	Msg  string
+	Err  error
 }
 
 // Error create a new PError
 func Error(inErr error, inCode int32, inMsg string) *Perror {
 	return &Perror{
 		inCode,
-        inMsg,
-        inErr,
+		inMsg,
+		inErr,
 	}
 }
 
@@ -32,161 +37,165 @@ func Error(inErr error, inCode int32, inMsg string) *Perror {
 func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *Perror {
 	return &Perror{
 		inCode,
-        fmt.Sprintf(inFormat, inArgs),
-        inErr,
+		fmt.Sprintf(inFormat, inArgs),
+		inErr,
 	}
 }
 
+// Error implements error's Error()
 func (e *Perror) Error() string {
-    if e == nil {
-        return "<nil>"
-    }
+	if e == nil {
+		return "<nil>"
+	}
 
-    var s []string
+	var s []string
 
-    // e.Msg
-    if len(e.Msg) > 0 {
-        s = append(s, e.Msg)
-    } else {
-        s = append(s, "Perror")
-    }
+	// e.Msg
+	if len(e.Msg) > 0 {
+		s = append(s, e.Msg)
+	} else {
+		s = append(s, "Perror")
+	}
 
-    // e.Code
-    s = append(s, fmt.Sprintf(" {code:%d", e.Code)) 
+	// e.Code
+	s = append(s, fmt.Sprintf(" {code:%d", e.Code))
 
-    // e.Err
-    if e.Err != nil {
-        s = append(s, ", err:{")
-        s = append(s, e.Err.Error())
-        s = append(s, "}")
-    }
+	// e.Err
+	if e.Err != nil {
+		s = append(s, ", err:{")
+		s = append(s, e.Err.Error())
+		s = append(s, "}")
+	}
 
-    s = append(s, "}")
-    
-    return strings.Join(s, "")
+	s = append(s, "}")
+
+	return strings.Join(s, "")
 
 }
 
-
-
-
-
 const (
 
-    // GenericErrorFamily errors generally relate to pnode
-    GenericErrorFamily = 5000 + iota
+	/*************************************************
+	 * Universal errors
+	**/
 
-    // AssertFailure means an unreachable part of code was...reached.  :\
-    AssertFailure
+	// GenericErrorFamily errors generally relate to pnode
+	GenericErrorFamily = 5000 + iota
 
+	// AssertFailure means an unreachable part of code was...reached.  :\
+	AssertFailure
 
+	/*************************************************
+	 * PDI
+	**/
 
-    // PDIEntryErrorFamily errors generally relate to pnode
-    PDIEntryErrorFamily = 5100 + iota
+	// PDIEntryErrorFamily errors generally relate to pnode
+	PDIEntryErrorFamily = 5100 + iota
 
-    // BadPDIEntryFormat means the PDI entry being processed is corrupted or was created using an unsupported format
-    BadPDIEntryFormat
+	// BadPDIEntryFormat means the PDI entry being processed is corrupted or was created using an unsupported format
+	BadPDIEntryFormat
 
-    // CommunityNotFound means the specified community name or ID did not match any of the registered communities
-    CommunityNotFound
+	// CommunityNotFound means the specified community name or ID did not match any of the registered communities
+	CommunityNotFound
 
-    // ChannelNotFound means the given ChannelID was not found in the community repo
-    ChannelNotFound
+	// ChannelNotFound means the given ChannelID was not found in the community repo
+	ChannelNotFound
 
-    // FailedToLoadChannelFromDisk means a channel failed to load all its files from its host community repo
-    FailedToLoadChannelFromDisk
+	// FailedToLoadChannelFromDisk means a channel failed to load all its files from its host community repo
+	FailedToLoadChannelFromDisk
 
-    // InvalidEntrySignature means the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
-    InvalidEntrySignature
+	// InvalidEntrySignature means the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
+	InvalidEntrySignature
 
-    // AuthorNotFound means the given author was not found in the given access control list.
-    AuthorNotFound
+	// AuthorNotFound means the given author was not found in the given access control list.
+	AuthorNotFound
 
-    // AccessChannelNotFound means the access channel specified by a given PDI entry was not found
-    AccessChannelNotFound
+	// AccessChannelNotFound means the access channel specified by a given PDI entry was not found
+	AccessChannelNotFound
 
-    // NotAnAccessChannel means the access channel specified by a given PDI entry was not actually an access channel
-    NotAnAccessChannel
+	// NotAnAccessChannel means the access channel specified by a given PDI entry was not actually an access channel
+	NotAnAccessChannel
 
-    // FailedToProcessPDIHeader means decryption or unmarshalling of a PDI failed
-    FailedToProcessPDIHeader
-    
-    // AuthorLacksWritePermission means the given PDI entry's author does not have write permission to the specified channel
-    AuthorLacksWritePermission
+	// FailedToProcessPDIHeader means decryption or unmarshalling of a PDI failed
+	FailedToProcessPDIHeader
 
-    // BadTimestamp means a timestamp is in the excessively distant past or future
-    BadTimestamp
+	// AuthorLacksWritePermission means the given PDI entry's author does not have write permission to the specified channel
+	AuthorLacksWritePermission
 
-    // TargetChannelEpochNotFound means the cited epoch of the target channel did not match any known epochs locally.
-    TargetChannelEpochNotFound
+	// BadTimestamp means a timestamp is in the excessively distant past or future
+	BadTimestamp
 
-    // TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
-    TargetChannelEpochExpired
+	// TargetChannelEpochNotFound means the cited epoch of the target channel did not match any known epochs locally.
+	TargetChannelEpochNotFound
 
+	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
+	TargetChannelEpochExpired
 
-    // SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)
-    SecurityErrorFamily = 5200 + iota
+	/*************************************************
+	 * SKI / Security
+	**/
 
-    // InvocationNotAvailable means an SKI session was started with an unrecognized invocation string
-    InvocationNotAvailable
+	// SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)
+	SecurityErrorFamily = 5200 + iota
 
-    // KeyringNotSpecified means no keyring scope name was given for the SKI operation
-    KeyringNotSpecified
+	// InvocationNotAvailable means an SKI session was started with an unrecognized invocation string
+	InvocationNotAvailable
 
-    // KeyringNotFound means the given keyring name was not found
-    KeyringNotFound
+	// KeyringNotSpecified means no keyring scope name was given for the SKI operation
+	KeyringNotSpecified
 
-    // UnknownSKIOpName means the given SKI op name was not recognized
-    UnknownSKIOpName
+	// KeyringNotFound means the given keyring name was not found
+	KeyringNotFound
 
-    // InsufficientSKIAccess means the requested permissions were not issued to allow the operation to proceed
-    InsufficientSKIAccess
+	// UnknownSKIOpName means the given SKI op name was not recognized
+	UnknownSKIOpName
 
-    // InvalidSKISession means the given session is not currently open 
-    InvalidSKISession
+	// InsufficientSKIAccess means the requested permissions were not issued to allow the operation to proceed
+	InsufficientSKIAccess
 
-    // KeyIDNotFound means a key source did not contain the requested key ID
-    KeyIDNotFound
+	// InvalidSKISession means the given session is not currently open
+	InvalidSKISession
 
-    // KeyIDCollision occurs when a key is placed in a keyring that already contains the key ID
-    KeyIDCollision
+	// KeyIDNotFound means a key source did not contain the requested key ID
+	KeyIDNotFound
 
-    // BadKeyFormat means key data was a length or format that was invalid or unexpected
-    BadKeyFormat
+	// KeyIDCollision occurs when a key is placed in a keyring that already contains the key ID
+	KeyIDCollision
 
-    // FailedToDecryptAccessGrant means a PDI entry body content failed to decrypt
-    FailedToDecryptAccessGrant
+	// BadKeyFormat means key data was a length or format that was invalid or unexpected
+	BadKeyFormat
 
-    // FailedToProcessAccessGrant means that an error occurred while processing a PDI security access grant
-    FailedToProcessAccessGrant
+	// FailedToDecryptAccessGrant means a PDI entry body content failed to decrypt
+	FailedToDecryptAccessGrant
 
-    // FailedToMarshalAccessGrant means an error occurred while encoding a PDI security access grant
-    FailedToMarshalAccessGrant
+	// FailedToProcessAccessGrant means that an error occurred while processing a PDI security access grant
+	FailedToProcessAccessGrant
 
-    // FailedToDecryptCommunityData means the 
-    FailedToDecryptCommunityData
+	// FailedToMarshalAccessGrant means an error occurred while encoding a PDI security access grant
+	FailedToMarshalAccessGrant
 
-    // FailedToDecryptPersonalData means personal decryption failed
-    FailedToDecryptPersonalData
+	// FailedToDecryptCommunityData means the
+	FailedToDecryptCommunityData
 
+	// FailedToDecryptPersonalData means personal decryption failed
+	FailedToDecryptPersonalData
 
+	/*************************************************
+	 * StorageSession / StorageProvider
+	**/
 
-    // StorageErrorFamily errors relate to PLAN's PDI Storage abstraction
-    StorageErrorFamily = 5300 + iota
+	// StorageErrorFamily errors relate to PLAN's PDI Storage abstraction
+	StorageErrorFamily = 5300 + iota
 
-    // InvalidStorageSession means the given storage session ID was not found
-    InvalidStorageSession
+	// InvalidStorageSession means the given storage session ID was not found
+	InvalidStorageSession
 
-    // InvalidDatabaseID means the database ID provided is suspiciously short or long
-    InvalidDatabaseID
+	// InvalidDatabaseID means the database ID provided is suspiciously short or long
+	InvalidDatabaseID
 
-    // FailedToLoadDatabase means an error was encountered when creating or loading the database
-    FailedToLoadDatabase
+	// FailedToLoadDatabase means an error was encountered when creating or loading the database
+	FailedToLoadDatabase
 
-    // FailedToCommitTxn means an unexpected fatal error occured while committing one ore more StorageTxns
-    FailedToCommitTxn
-
+	// FailedToCommitTxn means an unexpected fatal error occurred while committing one ore more StorageTxns
+	FailedToCommitTxn
 )
-
-
-

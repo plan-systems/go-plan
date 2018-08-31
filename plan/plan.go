@@ -25,7 +25,6 @@ the members of the PLAN Foundation, and myself such that I could not wish for mo
 package plan
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -39,31 +38,29 @@ const (
 
 	// CommunityIDSz is the number of bytes PLAN uses for a community ID.
 	// Background on probability of hash collision: http://preshing.com/20110504/hash-collision-probabilities/
-	// Why shouldn't this be smaller or larger?  Philisophically, this value expresses the "size"
-    //    of the (hash) universe req'd for peer-based hashname safety.   2^192 outta be enough for anybody.
-    CommunityIDSz = 24
-    
-    // KeyIDSz is the number of bytes used to identify a key entry on a PLAN keyring.
-    // It's "modest-sized" since a newly generated must pass collision checks before it's put into use.
-    KeyIDSz = 16
-    
+	// Should this be smaller or larger?  Philosophically, this value expresses the size of the hash universe,
+	//    where nodes can "safely" generate hashnames alongside peers.  2^192 outta be enough for anybody.
+	CommunityIDSz = 24
+
+	// KeyIDSz is the number of bytes used to identify a key entry on a PLAN keyring.
+	// It's "modest-sized" since a newly generated must pass collision checks before it's put into use.
+	KeyIDSz = 16
+
 	// ChannelIDSz specifies the byte size of ChannelID
 	ChannelIDSz = 16
 
-    // MemberIDSz specifies the byte size of KeyID
-    MemberIDSz = 16
+	// MemberIDSz specifies the byte size of KeyID
+	MemberIDSz = 16
 
-    // MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
-    MemberAliasMaxLen = 127
-
+	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
+	MemberAliasMaxLen = 127
 )
 
-
-// CommunityID identifies a PLAN community and is randomly generated during its genesis. 
+// CommunityID identifies a PLAN community and is randomly generated during its genesis.
 type CommunityID [CommunityIDSz]byte
 
 // MemberID identifies a member within a given community and never changes -- even when a member initiates
-//    a new "epoch" so their crypto can be regenerated.  
+//    a new "epoch" so their crypto can be regenerated.
 // Member IDs are considered collision-proof since inside a community, they must be cleared through
 //    the community's new member registration process (which will reject a collision).
 type MemberID [MemberIDSz]byte
@@ -71,8 +68,8 @@ type MemberID [MemberIDSz]byte
 // MemberAlias is a self-given community member name and is how they are seen by humans in the community,
 //    making it a convenience tool for humans to easily refer to other members.
 // A member can change their MemberAlias at any time (though there may be reasonable restrictions in place).
-// Note: a MemberID is generated from the right-most bytes of the SHA256 hash of the community ID concatenated 
-//    with the member's first chosen alias (or an alternaitvely entered "member ID generation phrase").  This
+// Note: a MemberID is generated from the right-most bytes of the SHA256 hash of the community ID concatenated
+//    with the member's first chosen alias (or an alternatively entered "member ID generation phrase").  This
 //    scheme makes the member ID recoverable from human memory, even if there is no network access.
 type MemberAlias string
 
@@ -89,8 +86,6 @@ type KeyID [KeyIDSz]byte
 //    (1) send private messages to a given member
 //    (2) verify sigs on anything to ensure that they are authentic
 type MemberEpoch uint64
-
-
 
 var (
 
@@ -162,63 +157,51 @@ const (
 	DistantPast int64 = -DistantFuture
 )
 
-///////////////////////////////////////////
-//  Common Utility & Conversion Helpers  //
-///////////////////////////////////////////
-
-// Assert is PLAN's easy assert
-func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
-
-	if !inCond {
-		panic(fmt.Sprintf(inFormat, inArgs))
-	}
-}
-
+/*****************************************************
+ * Utility & Conversion Helpers
+**/
 
 // GetCommunityID returns the CommunityID for the given buffer
 func GetCommunityID(in []byte) CommunityID {
 
-    var out CommunityID
-    
-    overhang := CommunityIDSz - len(in)
-    if overhang < 0 {
-        in = in[-overhang:]
-        overhang = 0
-    }
+	var out CommunityID
 
-    copy(out[overhang:], in)
-    return out
+	overhang := CommunityIDSz - len(in)
+	if overhang < 0 {
+		in = in[-overhang:]
+		overhang = 0
+	}
+
+	copy(out[overhang:], in)
+	return out
 }
-
 
 // GetKeyID returns the KeyID for the given buffer
 func GetKeyID(in []byte) KeyID {
 
-    var out KeyID
-    
-    overhang := KeyIDSz - len(in)
-    if overhang < 0 {
-        in = in[-overhang:]
-        overhang = 0
-    }
+	var out KeyID
 
-    copy(out[overhang:], in)
-    return out
+	overhang := KeyIDSz - len(in)
+	if overhang < 0 {
+		in = in[-overhang:]
+		overhang = 0
+	}
+
+	copy(out[overhang:], in)
+	return out
 }
-
-
 
 // GetChannelID returns the KeyID for the given buffer
 func GetChannelID(in []byte) ChannelID {
 
-    var out ChannelID
-    
-    overhang := ChannelIDSz - len(in)
-    if overhang < 0 {
-        in = in[-overhang:]
-        overhang = 0
-    }
+	var out ChannelID
 
-    copy(out[overhang:], in)
-    return out
+	overhang := ChannelIDSz - len(in)
+	if overhang < 0 {
+		in = in[-overhang:]
+		overhang = 0
+	}
+
+	copy(out[overhang:], in)
+	return out
 }
