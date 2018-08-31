@@ -35,20 +35,13 @@ func NewKeyring(inLabel string) *Keyring {
 
 
 // NewIdentity generates encryption and signing keys, adds them to the
-// Keyring, and returns the public keys associated with those private
-// keys.
-func (kr *Keyring) NewIdentity() (outSigningKey plan.IdentityPublicKey, outEncKey plan.IdentityPublicKey) {
+// Keyring, and returns the public keys associated with those private keys.
+func (kr *Keyring) NewIdentity() (outSigningKey []byte, outEncKey []byte) {
 
-    encrKey := generateKeyEntry(naclEncryptionKey)
-    signKey := generateKeyEntry(naclSigningKey)
+    encrKey := kr.NewKeyEntry(naclEncryptionKey)
+    signKey := kr.NewKeyEntry(naclSigningKey)
 
-	// store it in the Keyring and return the public keys
-    kr.Lock()
-	kr.keysByID[encrKey.GetKeyID()] = encrKey
-    kr.keysByID[signKey.GetKeyID()] = signKey
-    kr.Unlock()
-
-	return signKey.PubKey, encrKey.PubKey
+    return signKey.PubKey, encrKey.PubKey
 }
 
 
@@ -56,18 +49,34 @@ func (kr *Keyring) NewIdentity() (outSigningKey plan.IdentityPublicKey, outEncKe
 // NewSymmetricKey generates a new symmetric key and adds it to the Keyring,
 // and returns the CommunityKeyID associated with that key.
 func (kr *Keyring) NewSymmetricKey() plan.KeyID {
-	
-    symKey := generateKeyEntry(naclSymmetricKey)
-
-    keyID := symKey.GetKeyID()
-
-    kr.Lock()
-    kr.keysByID[keyID] = symKey
-    kr.Unlock()
-
-	return keyID
+    return kr.NewKeyEntry(naclSymmetricKey).GetKeyID()
 }
 
+// NewKeyEntry generates a new KeyEntry of the given type 
+func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *KeyEntry {
+
+    for {
+        keyEntry := generateKeyEntry(inKeyInfo)
+
+        keyID := keyEntry.GetKeyID()
+    
+        kr.Lock()
+
+        // If we get a collision, keep regenerating a key
+        if kr.keysByID[keyID] != nil {
+            keyEntry = nil
+        } else {
+            kr.keysByID[keyID] = keyEntry            
+        }
+        kr.Unlock()
+    
+        if keyEntry != nil {
+            return keyEntry
+        }
+    }
+   
+
+}
 
 
 // ExportKeys exports the given list of keys into a buffer t
@@ -267,9 +276,7 @@ func (entry *KeyEntry) EqualTo(other *KeyEntry) bool {
 
 // GetKeyID is a convenience function that returns this key's fixed ID (determined by the key's public key)
 func (entry *KeyEntry) GetKeyID() plan.KeyID {
-    var keyID plan.KeyID
-    copy(keyID[:], entry.PubKey[len(entry.PubKey)-plan.KeyIDSz:])
-    return keyID
+    return plan.GetKeyID(entry.PubKey)
 }
 
 

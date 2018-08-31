@@ -28,8 +28,7 @@ func TestCommunityEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
     }
-    var communityKeyID plan.KeyID
-    communityKeyID.AssignFrom(opResults.Content)
+    communityKeyID := plan.GetKeyID(opResults.Content)
 
     fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
     fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
@@ -183,10 +182,10 @@ func newSession(t *testing.T, inName string) *testSession {
     }
 
 
-    ts.signingKeyID.AssignFrom( identityResults.GetContentWithLabel(PubSigningKeyName) )
+    ts.signingKeyID = plan.GetKeyID( identityResults.GetContentWithLabel(PubSigningKeyName) )
 
     ts.encryptPubKey = identityResults.GetContentWithLabel(PubCryptoKeyName)
-    ts.encryptPubKeyID.AssignFrom(ts.encryptPubKey)
+    ts.encryptPubKeyID = plan.GetKeyID( ts.encryptPubKey )
 
     return ts
 }
