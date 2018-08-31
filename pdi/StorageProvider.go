@@ -41,11 +41,11 @@ type StorageProvider interface {
 // All calls in this interface are threadsafe.
 type StorageSession interface {
 
-    // ReadTxns reads the given txn names and returns the data.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN. 
-    ReadTxns(inTxnNames [][]byte) ([]StorageTxn, error)
+    // ReportTxns requests that the given txn names to be added to the report stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN. 
+    ReportTxns(inTxnNames [][]byte, inOmitData bool)
 
     // StartReporting sets the metaphorical read head, causing inOnTxnReport() to receive txn reports onward from the given time index.
-    StartReporting(inStartFromTime int64) error
+    StartReporting(inFromTime, inFromTimeWithData int64)
 
     // CommitTxns submits the given finished entry to the storage implementation for publishing.   
     CommitTxns(inTxns []StorageTxn) error

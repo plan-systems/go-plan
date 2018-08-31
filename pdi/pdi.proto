@@ -46,7 +46,7 @@ enum EntryOp {
 
 /*****************************************************
 ** Ops for ANY channel type
-*/
+**/
 
     // Appends this content entry to the specified channel.
     POST_NEW_CONTENT            = 0;
@@ -69,9 +69,9 @@ enum EntryOp {
     NEW_CHANNEL_EPOCH           = 4;
 
 
-    /*********************************
-    ** Ops for access channels ONLY 
-    */
+    /*************************************************
+     * Ops for access channels ONLY 
+    **/
 
     // Adds or removes access to given member IDs or wildcards.  Notes:
     //   - This entry type is only valid for use channels that are access control channels.
@@ -340,7 +340,7 @@ message StorageTxn {
 
     // Issued by the storage layer -- uniquely identifies this txn and is likely a hashname or serialized integer.
     // Optional for a storage layer to *actually* store this value since it may be hashname that is ONLY available after a txn
-    //  is committed to storage, but it *is* always filled in when txns are passed to storage service consumers. 
+    //   is committed to storage, but it *is* always filled in when txns are passed to storage service consumers. 
                 bytes           txn_name                    = 1;
 
                 TxnStatus       txn_status                  = 3;
@@ -349,7 +349,7 @@ message StorageTxn {
                 int64           time_committed              = 4;
 
     // Consensus-based unix timestamp for this txn (or 0).  
-    // If txn_status == FINALIZED, then this timestamp...
+    // If txn_status == FINALIZED, then this timestamp:
     //      - won't ever change, 
     //      - is universal across storage peers
     //      - is trustworthy
@@ -361,7 +361,7 @@ message StorageTxn {
                 uint32          total_segments              = 8;
 
     // Segment data
-    // Note: nil if data_desc == DATA_OMITTED
+    // Note: If data_desc == DATA_OMITTED then segment_data == nil
                 bytes           segment_data                = 9;
 }
 
