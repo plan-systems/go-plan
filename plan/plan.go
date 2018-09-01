@@ -7,7 +7,7 @@ P  L  A  N etwork
 
 Welcome to PLAN!
 
-PLAN is a secure, all-in-one communications and logistics planning tool for individuals and communities.
+PLAN is a secure, all-in-one communications and logistics planning tool for individuals and organizations.
 It is intended to be an instrument of productivity, vision, and self-reliance.
 
 All the parts of PLAN are free and open-source (GPLv3), and each component and layer is intended to be "pluggable"
@@ -20,7 +20,7 @@ Universe willing, may PLAN give organizations and communities with little or no 
 the ability to communicate and self-organize intuitively and reliably. I see PLAN supporting her users,
 the members of the PLAN Foundation, and myself such that I could not wish for more.
 
-~ Proto, Summer 2018  */
+~ proto, summer 2018  */
 
 package plan
 
