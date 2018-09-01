@@ -1,0 +1,32 @@
+// See plan-protobuf/README.md
+
+syntax = "proto3";
+
+package plan;
+
+
+/******************************************************************************************************************************************
+Block is a generic attachment/attribute-like object, intended to be nestable, etc.  The purpose of any Block is to be a flexible,
+extensible container that can also hold any number of sub containers, each holding serialized content of any kind and form. 
+
+The principles and purpose behind this fundamental data structure were inspired from http, initiated by Tim Berners-Lee. */
+
+message Block {
+
+    // This is an optional human-readable name/label for this Block's content (a field-name).  Its purpose is so a consumer can distinguish
+    //    one Block from another.  Generally, it conforms to the context/protocol its being used with. It can be any UTF8 string,
+    //    any whitespace is fine, and is case and whitespace sensitive.  The only requirement is no NULs.
+    // E.g. "error_code", "UserID", "key_list", "attachment", 
+                string          label                   = 1;
+
+    // content_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
+                string          content_codec           = 2; 
+                bytes           content                 = 3;
+
+    // In addition to it's label-content body, every block can contain a list of "sub" blocks.  A Block's sub blocks can be
+    //    interpreted or employed any way a client or protocol sees fit.
+    repeated    Block           subs                    = 4;
+}
+
+
+
