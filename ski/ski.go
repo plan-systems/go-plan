@@ -3,7 +3,6 @@ package ski
 
 import (
     "github.com/plan-tools/go-plan/plan"
-    "github.com/plan-tools/go-plan/pdi"
 )
 
 
@@ -62,7 +61,7 @@ type OpArgs struct {
 
 
   // OpCompletionHandler handles the result of a SKI operation
-  type OpCompletionHandler func(inResults *pdi.Block, inErr *plan.Perror)
+  type OpCompletionHandler func(inResults *plan.Block, inErr *plan.Perror)
 
 
   

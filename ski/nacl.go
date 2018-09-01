@@ -6,7 +6,6 @@ import (
     //"net/http"
     //"log"
 
-	"github.com/plan-tools/go-plan/pdi"
 	"github.com/plan-tools/go-plan/plan"
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
@@ -207,9 +206,9 @@ func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompleti
 
 
 
-func (session *naclSession) doOp(opArgs OpArgs) (*pdi.Block, *plan.Perror) {
+func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
 
-    outResults := &pdi.Block{}
+    outResults := &plan.Block{}
 
 
     var err *plan.Perror
@@ -400,7 +399,7 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Per
         }
     }
 
-    block := pdi.Block {
+    block := plan.Block {
         ContentCodec: KeyListProtobufCodec,
         Content: keyListBuf,
     }
@@ -417,7 +416,7 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Per
 
 func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
 
-    block := pdi.Block{}
+    block := plan.Block{}
     err := block.Unmarshal(inMsg)
 	if err != nil {
 		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")

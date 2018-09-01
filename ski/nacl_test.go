@@ -7,7 +7,6 @@ import (
 
     "testing"
 
-	"github.com/plan-tools/go-plan/pdi"
 	"github.com/plan-tools/go-plan/plan"
 )
 
@@ -131,12 +130,12 @@ type testSession struct {
 
 
 
-func (ts *testSession) doOp(inOpArgs OpArgs) (*pdi.Block, *plan.Perror) {
+func (ts *testSession) doOp(inOpArgs OpArgs) (*plan.Block, *plan.Perror) {
 
     var outErr *plan.Perror
-    var outResults *pdi.Block
+    var outResults *plan.Block
 
-    ts.session.DispatchOp(&inOpArgs, func(opResults *pdi.Block, inErr *plan.Perror) {
+    ts.session.DispatchOp(&inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
         outErr = inErr
         outResults = opResults
 
