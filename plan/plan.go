@@ -18,7 +18,7 @@ go-plan is the benchmark implementation of PLAN's p2p client-serving node.
 
 Universe willing, may PLAN give organizations and communities with little or no resources
 the ability to communicate and self-organize intuitively and reliably. I see PLAN supporting her users,
-the members of the PLAN Foundation, and myself such that I could not wish for more.
+the members of the PLAN Foundation, and myself so that I could not wish for more.
 
 ~ proto, summer 2018  */
 
@@ -158,7 +158,7 @@ const (
 )
 
 /*****************************************************
- * Utility & Conversion Helpers
+** Utility & Conversion Helpers
 **/
 
 // GetCommunityID returns the CommunityID for the given buffer

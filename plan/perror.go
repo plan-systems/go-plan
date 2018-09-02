@@ -14,11 +14,11 @@ func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 }
 
 /*****************************************************
- * Perror / plan.Error()
+** Perror / plan.Error()
 **/
 
 // Perror is PLAN's common error struct.  Perror.Code allows easy matching while allowing error strings to contain useful contextual information.
-type Perror struct {
+type Perror struct {    
 	Code int32
 	Msg  string
 	Err  error
@@ -75,8 +75,8 @@ func (e *Perror) Error() string {
 
 const (
 
-	/*************************************************
-	 * Universal errors
+	/*****************************************************
+	** Universal errors
 	**/
 
 	// GenericErrorFamily errors generally relate to pnode
@@ -85,8 +85,8 @@ const (
 	// AssertFailure means an unreachable part of code was...reached.  :\
 	AssertFailure
 
-	/*************************************************
-	 * PDI
+	/*****************************************************
+	** PDI
 	**/
 
 	// PDIEntryErrorFamily errors generally relate to pnode
@@ -131,8 +131,8 @@ const (
 	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
 	TargetChannelEpochExpired
 
-	/*************************************************
-	 * SKI / Security
+    /*****************************************************
+	** SKI / Security
 	**/
 
 	// SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)
@@ -180,8 +180,8 @@ const (
 	// FailedToDecryptPersonalData means personal decryption failed
 	FailedToDecryptPersonalData
 
-	/*************************************************
-	 * StorageSession / StorageProvider
+	/*****************************************************
+	** StorageSession / StorageProvider
 	**/
 
 	// StorageErrorFamily errors relate to PLAN's PDI Storage abstraction
