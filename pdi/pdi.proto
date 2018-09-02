@@ -44,10 +44,9 @@ PDI entry has the permission they imply they do with the given entry they author
 
 enum EntryOp {
 
-
-/*****************************************************
-** Ops for ANY channel type
-**/
+    /*****************************************************
+    ** Ops for ANY channel type
+    **/
 
     // Appends this content entry to the specified channel.
     POST_NEW_CONTENT            = 0;
@@ -70,8 +69,8 @@ enum EntryOp {
     NEW_CHANNEL_EPOCH           = 4;
 
 
-    /*************************************************
-     * Ops for access channels ONLY 
+    /*****************************************************
+    ** Ops for access channels ONLY 
     **/
 
     // Adds or removes access to given member IDs or wildcards.  Notes:
@@ -214,7 +213,9 @@ message ChannelList {
 }
 
 
-
+enum EntryVersion {
+    V0                          = 0;
+}
 
 
 
@@ -278,32 +279,33 @@ enum TxnDataDesc {
 
 
 
-
+// TxnStatus describes how far along a StorageTxn is on being stored on a PDI StorageProvider.
+// Note: odd values reflect an error state
 enum TxnStatus {
 
     // The txn is yet to be committed to storage
-    INVALID_TXN                 = 0;
-
-    // This txn was lost or is otherwise unavailable 
-    LOST                        = 1;
-
-    // The txn is yet to be committed to storage
-    NOT_COMMITTED               = 2;
+    AWAITING_COMMIT             = 0;
 
     // The txn has been committed and is in the process of being stored
-    COMMITTED                   = 3;
+    COMMITTING                  = 2;
 
-    // The txn has was committed but was rejected for some reason
-    REJECTED                    = 4;
+    // The txn is yet to be committed to storage
+    INVALID_TXN                 = 3;
+
+    // This txn was lost or is otherwise not available 
+    LOST                        = 5;
+
+    // This txn has failed to commit because of an error (or the storage provider rejected it for some reason) 
+    FAILED_TO_COMMIT            = 7;
 
     // The txn has been committed and has been confirmed as stored (but could still potentially be reverted)
-    CONFIRMED                   = 5;
+    COMMITTED                   = 8;
 
-    // The txn has been committed, was confirmed as stored as some point, but has since been revoked (and is equivalent in status to NOT_COMMITTED) 
-    REVOKED                     = 6;
+    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equiivalent state to AWAITING_COMMIT)
+    REVOKED                     = 9;
 
     // The txn has been committed, confirmed as stored, and faces no possibility of being reverted.
-    FINALIZED                   = 7;
+    FINALIZED                   = 16;
 
 }
 
