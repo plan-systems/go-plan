@@ -6,7 +6,7 @@ import (
     //"fmt"
     "log"
     "os"
-    //"io"
+    "path"
     "io/ioutil"
     //"strings"
     "sync"
@@ -62,13 +62,17 @@ type CommunityRepo struct {
     Info                    *CommunityRepoInfo
 
     // This will move and is just a hack for now
-    activeSession           ClientSession
+    //activeSession           ClientSession
 
     DefaultFileMode         os.FileMode
     DirEncoding             *base64.Encoding
 
-    // Incoming encrypted entries "off the wire" that are ready to be processed (and written to local community repo)
-    entryInbox              chan *pdi.EntryCrypt
+    storage                 pdi.StorageSession
+    storageProvider         pdi.StorageProvider
+
+
+    txnReportInbox          chan pdi.TxnReport
+    storageAlertInbox       chan pdi.StorageAlert
 
     ParentPnode             *Pnode
     
@@ -134,15 +138,15 @@ const (
 
 func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRepo {
 
-    CR := new( CommunityRepo )
-    CR.Info = inInfo
-    CR.DirEncoding = base64.RawURLEncoding
-
-    // Runtime support
-    CR.entryInbox = make(chan *pdi.EntryCrypt, 32)
-    CR.DefaultFileMode = inParent.config.DefaultFileMode
-    CR.ParentPnode = inParent
-
+    CR := &CommunityRepo{
+        ParentPnode: inParent,
+        Info: inInfo,
+        DirEncoding: base64.RawURLEncoding,
+        DefaultFileMode: inParent.config.DefaultFileMode
+        txnReportInbox: make(chan *pdi.TxnReport, 8)   // should this be buffered!?
+        storageAlertInbox: make(chan *pdi.EntryCrypt, 8)
+    }
+  
     return CR
 }
 
@@ -282,6 +286,17 @@ func (CR *CommunityRepo) LookupMember(
 
 func (CR *CommunityRepo) StartService() {
 
+    CR.storageProvider = NewBoltStorage(
+        path.Join(CR.Info.RepoPath, "bolt"),
+        CR.DefaultFileMode,
+    )
+
+    CR.storage = CR.storageProvider.StartSession(
+    )
+
+    entryInbox
+
+
     go func() {
         var ws entryWorkspace
         ws.CR = CR
@@ -348,7 +363,7 @@ type entryWorkspace struct {
 
     entryHash       []byte
     entryHeader     pdi.EntryHeader
-    entryBody       pdi.Block
+    entryBody       plan.Block
     
     authorEpoch     pdi.MemberEpoch
 
@@ -377,11 +392,11 @@ func (ws *entryWorkspace) unpackHeader(
 
     ws.timeStart = plan.Now()
 
-    switch ws.entry.GetEntryVersion() {
-        case pdi.EntryVersion1: 
+    switch vers := ws.entry.GetEntryVersion(); vers {
+        case pdi.EntryVersion_V0:
             //ws.skiVersion = ski.CryptSKIVersion
         default:
-            inOnCompletion(plan.Error(nil, plan.BadPDIEntryFormat, "bad or unsupported PDI entry format"))
+            inOnCompletion(plan.Errorf(nil, plan.BadPDIEntryFormat, "bad or unsupported PDI entry version {vers:%d}", vers))
             return
     }
 
@@ -394,7 +409,7 @@ func (ws *entryWorkspace) unpackHeader(
             Msg: ws.entry.HeaderCrypt,
         }, 
 
-        func(inRespose *pdi.Block, inErr *plan.Perror) {
+        func(inRespose *plan.Block, inErr *plan.Perror) {
             if inErr != nil {
                 inOnCompletion(inErr)
                 return
@@ -522,6 +537,7 @@ func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
     // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
     ws.accessChFlags = accessChFlags
 
+/*
     // Ops such as REMOVE_ENTRIES and SUPERCEDE_ENTRY
     perr = ws.targetCh.FetchRelevantEntriesForOp()
 
@@ -536,7 +552,7 @@ func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
         case pdi.EntryOp_EDIT_ACCESS_GRANTS:
             targetChFlags |= CitedAsAccessChannel
     }
-
+*/
 
 
 /*
