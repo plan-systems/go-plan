@@ -6,25 +6,48 @@ package plan;
 
 
 /******************************************************************************************************************************************
-Block is a generic attachment/attribute-like object, intended to be nestable, etc.  The purpose of any Block is to be a flexible,
-extensible container that can also hold any number of sub containers, each holding serialized content of any kind and form. 
+plan.Block is a fundamental PLAN data structure intended for generic content packaging and serialization. 
+Its purpose is to be a flexible, extensible content container able to hold any number of sub containers, 
+each containing content serialized in any form.
 
-The principles and purpose behind this fundamental data structure were inspired from http, initiated by Tim Berners-Lee. */
+The principles behind Block were inspired from http, championed by Tim Berners-Lee and others in the 1990s. 
+In http, "Content-Type" specifies a MIME type, a codec descriptor that specifies the binary format of content. 
+In PLAN, every content blob (Block) has BOTH a label AND codec descriptor, allowing for more powerful use cases. 
+Block.label tells clients HOW TO USE Block.content while Block.codec tells clients WHICH DATA HANDLER should be applied.
+
+Examples:
+
+    Block.label     Block.codec             Block.content
+    -----------     -----------             -------------
+    episode         audio/mp3               <mp3 data>
+    episode         video/mpeg              <mpeg data>
+    about           application/json        {title:"Introducing PLAN!", ep_num:42}
+    icon            image/png               <png data>
+    contact         /twitter/username       @banjocat
+    contact         /emailto                sj@apple.com 
+    Extras          /plan/Block/1           <protobuf encoding of plan.Block>
+    personal-keys   /plan/ski/KeyList/1     <protobuf encoding of ski.KeyList>
+    Message         text/plain              Hello, Universe!
+    Message         text/rtf                {\rtf1\ansi\ansicpg1252...
+
+*/
 
 message Block {
 
-    // This is an optional human-readable name/label for this Block's content (a field-name).  Its purpose is so a consumer can distinguish
-    //    one Block from another.  Generally, it conforms to the context/protocol its being used with. It can be any UTF8 string,
-    //    any whitespace is fine, and is case and whitespace sensitive.  The only requirement is no NULs.
-    // E.g. "error_code", "UserID", "key_list", "attachment", 
+    // This is an optional, human-understandable name/label for this Block (i.e. a field-name). 
+    // In general, a Block's label conforms to the context/protocol its being used in or with (if applicable).
                 string          label                   = 1;
 
-    // content_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
-                string          content_codec           = 2; 
+    // Similar to a MIME type, this field self-describes the binary format of Block.content.  
+    // Anyone handed this Block only needs to look a Block's codec in order to accurately process/deserialize its content.
+    // This field is a "multicodec path" -- see: https://github.com/multiformats/multistream
+                string          codec                   = 2; 
+
+    // Data of any kind, serialized in conformance with the accompanying codec descriptor (above).
                 bytes           content                 = 3;
 
-    // In addition to it's label-content body, every block can contain a list of "sub" blocks.  A Block's sub blocks can be
-    //    interpreted or employed any way a client or protocol sees fit.
+    // In addition to it's label and content, a Block can contain nested "sub" blocks.  A Block's sub blocks
+    //    can be interpreted or employed any way a client or protocol sees fit.
     repeated    Block           subs                    = 4;
 }
 
