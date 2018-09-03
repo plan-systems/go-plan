@@ -1,6 +1,4 @@
-
 package plan
-
 
 // BlockSearchScope specifies what parts of a Block to search for matches.
 // The GetBlock*() calls below that don't accept a BlockSearchScope parameter implicitly use:
@@ -128,7 +126,7 @@ func (block *Block) AddContentWithCodec(inContent []byte, inCodec string) {
 	block.Subs = append(
 		block.Subs,
 		&Block{
-			Codec: inCodec,
+			Codec:   inCodec,
 			Content: inContent,
 		},
 	)
