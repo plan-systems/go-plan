@@ -56,12 +56,12 @@ func (block *Block) GetBlockWithLabel(inLabel string) *Block {
 func (block *Block) GetBlocksWithCodec(inCodec string) []*Block {
 	var matches []*Block
 
-	if inCodec == block.ContentCodec {
+	if inCodec == block.Codec {
 		matches = append(matches, block)
 	}
 
 	for _, sub := range block.Subs {
-		if sub.ContentCodec == inCodec {
+		if sub.Codec == inCodec {
 			matches = append(matches, sub)
 		}
 	}
@@ -72,12 +72,12 @@ func (block *Block) GetBlocksWithCodec(inCodec string) []*Block {
 // GetBlockWithCodec returns the first-appearing Block with a matching codec string
 func (block *Block) GetBlockWithCodec(inCodec string) *Block {
 
-	if inCodec == block.ContentCodec {
+	if inCodec == block.Codec {
 		return block
 	}
 
 	for _, sub := range block.Subs {
-		if sub.ContentCodec == inCodec {
+		if sub.Codec == inCodec {
 			return sub
 		}
 	}
@@ -128,8 +128,8 @@ func (block *Block) AddContentWithCodec(inContent []byte, inCodec string) {
 	block.Subs = append(
 		block.Subs,
 		&Block{
-			ContentCodec: inCodec,
-			Content:      inContent,
+			Codec: inCodec,
+			Content: inContent,
 		},
 	)
 }

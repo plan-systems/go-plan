@@ -24,7 +24,7 @@ const (
 	**/
 
 	// KeyListProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
-	KeyListProtobufCodec = "/plan/ski/keylist/1"
+	KeyListProtobufCodec = "/plan/ski/KeyList/1"
 )
 
 /*****************************************************
@@ -168,7 +168,7 @@ const (
 	OpNewIdentityRev = "new_identity_rev"
 
 	/*****************************************************
-	** Uses personal AND communury keyrings
+	** Uses personal AND community keyrings
 	**/
 
 	// OpSendCommunityKeys securely "sends" the community keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,

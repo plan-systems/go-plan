@@ -18,10 +18,10 @@ import (
 const (
 
     // NaClKeysCodec is used to express the format in each KeyEntry
-    NaClKeysCodec = "/plan/ski/KeyEntry/nacl/1"
+    NaClKeysCodec = "/plan/ski/KeyEntry/NaCl/1"
 
     // NaClProviderName should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
-    NaClProviderName = "/plan/ski/provider/nacl/1"
+    NaClProviderName = "/plan/ski/Provider/NaCl/1"
 
 
     // KeyEntry.KeyType
@@ -400,7 +400,7 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Per
     }
 
     block := plan.Block {
-        ContentCodec: KeyListProtobufCodec,
+        Codec: KeyListProtobufCodec,
         Content: keyListBuf,
     }
 
