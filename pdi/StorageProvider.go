@@ -10,14 +10,15 @@ import (
 ** StorageProvider
 **/
 
-// StorageProvider wraps a persistent storage (or replicating) service "producer".  Perhaps it's locally implemented, or perhaps its implemented by gRPC.
+// StorageProvider wraps a persistent storage service "producer".  The StorageProvider+StorageSession model is designed
+//    to wrap ANY kind of append-only database, particularly a blockchain.  Further this interface design allows the
+//    provider to be remote (and serve requests via RPC).
 type StorageProvider interface {
 
 	// StartSession initiates a new session with a given db/repo identifier (typically a UUID or hashname)
 	StartSession(
 		inDatabaseID []byte,
-		inTxnReportChannel chan<- TxnReport,
-		iAlertChannel chan<- StorageAlert,
+		inMsgChannel chan<- StorageMsg,
 		inOnCompletion func(StorageSession, error),
 	) error
 
@@ -29,13 +30,17 @@ type StorageProvider interface {
 	) ([]StorageTxn, error)
 }
 
-// TxnRequestID allows a StorageSession client to identify TxnReports as they arrive from the session
-type TxnRequestID uint32
+// RequestID allows a StorageSession client to identify/match StorageReports as they arrive from the StorageProvider.
+type RequestID uint32
 
-// TxnReport is emitted from a StorageSession, initiated by
-type TxnReport struct {
-	RequestID TxnRequestID
-	Txns      []*StorageTxn // READ-ONLY
+// StorageMsg serves two purposes:
+//    (a) transport requested StorageTxns (and their status) to StorageSession clients
+//    (b) sending important storage alerts to storage clients (e.g. txn failures or system shutdown warnings)
+type StorageMsg struct {
+	RequestID RequestID     // Set to 0 if n/a
+	Txns      []*StorageTxn // READ-ONLY.  These txns have finished processing (successfully or unsuccessfully)
+	AlertCode AlertCode     // Set to 0 if n/a or no alert given
+	AlertMsg  string        // Human-readable amplifying information
 }
 
 /*****************************************************
@@ -49,17 +54,17 @@ type StorageSession interface {
 	// IsReady reports if this session is open and ready to receive requests
 	IsReady() bool
 
-	// ReportTxns requests that the given txn names to be added to the report stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
-	ReportTxns(inTxnNames [][]byte, inOmitData bool) (TxnRequestID, error)
+	// ReportTxns requests that the given txn names to be added to the msg stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
+	ReportTxns(inTxnNames [][]byte, inOmitData bool) (RequestID, error)
 
 	// ReportFromBookmark sets the session's metaphorical read head based on state information returned via GetBookmark() from this or a previous session.
-	ReportFromBookmark(inFromBookmark plan.Block) (TxnRequestID, error)
+	ReportFromBookmark(inFromBookmark plan.Block) (RequestID, error)
 
 	// GetBookmark returns an opaque, StorageProvider-specifc blob of state information that a client uses for StartReporting().
 	GetBookmark() (*plan.Block, error)
 
 	// CommitTxns submits the given finished entry to the storage implementation for publishing.
-	CommitTxns(inTxns []StorageTxn) (TxnRequestID, error)
+	CommitTxns(inTxns []StorageTxn) (RequestID, error)
 
 	// EndSession ends this session, resulting in the sessions parent provider signal the session's end.
 	// Following a call to EndSession(), no more references to this session should be made -- StorageProvider.StartSession() must be called again.
@@ -70,16 +75,8 @@ type StorageSession interface {
 ** StorageAlert
 **/
 
-// StorageAlert identifies a specific warning, error, or unfolding situation occuring with a StorageProvider
-type StorageAlert struct {
-	AlertCode AlertCode
-	Msg       string       // Human-readable amplifying information
-	Txn       *StorageTxn  // If not applicable, nil
-	RequestID TxnRequestID // If not applicable, set to 0
-}
-
-func (alert *StorageAlert) Error() string {
-	return fmt.Sprintf("%s {code:%d}", alert.Msg, alert.AlertCode)
+func (alert *StorageMsg) Error() string {
+	return fmt.Sprintf("%s {code:%d}", alert.AlertMsg, alert.AlertCode)
 }
 
 // AlertCode allows a StorageAlert to be easily classified
@@ -102,11 +99,8 @@ const (
 	// SessionErroredOut means this StorageSession ended due to an error
 	SessionErroredOut
 
-	// FailedToCommitTxn a txn failed to commit (and generally means the StorageProvider is having issues)
-	FailedToCommitTxn
-
-	//
-
+	// FailedToCommit a txn batch failed to commit (and generally means the StorageProvider is having issues)
+	FailedToCommit
 )
 
 /*****************************************************
