@@ -23,13 +23,15 @@ Examples:
     episode         video/mpeg              <mpeg data>
     about           application/json        {title:"Introducing PLAN!", ep_num:42}
     icon            image/png               <png data>
-    contact         /twitter/username       @banjocat
-    contact         /emailto                sj@apple.com 
+    contact         /twitter/username       @juanbenet
+    contact         /emailto                sj@apple.com
     Extras          /plan/Block/1           <protobuf encoding of plan.Block>
     personal-keys   /plan/ski/KeyList/1     <protobuf encoding of ski.KeyList>
     Message         text/plain              Hello, Universe!
     Message         text/rtf                {\rtf1\ansi\ansicpg1252...
-
+    do-some-op      eth-block-list          <Ethereum RLP>
+    do-other-op     eth-block-list          <Ethereum RLP>
+    
 */
 
 message Block {
@@ -41,14 +43,18 @@ message Block {
     // Similar to a MIME type, this field self-describes the binary format of Block.content.  
     // Anyone handed this Block only needs to look a Block's codec in order to accurately process/deserialize its content.
     // This field is a "multicodec path" -- see: https://github.com/multiformats/multistream
-                string          codec                   = 2; 
+                string          codec                   = 2;
+
+    // This is alternative numerical repesentation of Block.codec
+    // For a list of codes: https://github.com/multiformats/multicodec/blob/master/table.csv
+                uint32          codec_code              = 3;
 
     // Data of any kind, serialized in conformance with the accompanying codec descriptor (above).
-                bytes           content                 = 3;
+                bytes           content                 = 4;
 
     // In addition to it's label and content, a Block can contain nested "sub" blocks.  A Block's sub blocks
     //    can be interpreted or employed any way a client or protocol sees fit.
-    repeated    Block           subs                    = 4;
+    repeated    Block           subs                    = 5;
 }
 
 
