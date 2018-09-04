@@ -16,9 +16,10 @@ Tim Berners-Lee's design and implementation of http.
 
 go-plan is the benchmark implementation of PLAN's p2p client-serving node.
 
-Universe willing, may PLAN give organizations and communities with little or no resources
-the ability to communicate and self-organize intuitively and reliably. I see PLAN supporting her users,
-the members of the PLAN Foundation, and myself so that I could not wish for more.
+Universe willing, may PLAN empower organizations and individuals with little or no resources
+to communicate and self-organize intuitively and reliably. 
+
+I see PLAN supporting her users, the members of the PLAN Foundation, and myself so that I could not wish for more.
 
 ~ proto, summer 2018  */
 

@@ -4,29 +4,6 @@ import (
 	"github.com/plan-tools/go-plan/plan"
 )
 
-const (
-
-	/*****************************************************
-	** PLAN keyring codec names
-	**/
-
-	// CommunityKeyring is the keyring all members of a given PLAN community have
-	CommunityKeyring = "/plan/keyring/community/1"
-
-	// PersonalKeyring is one's personal keyring and is used to encrypt/decrypt private data.
-	PersonalKeyring = "/plan/keyring/personal/1"
-
-	// StorageKeyring contains keys needed to access or commit txns on a pdi.StorageProvider
-	StorageKeyring = "/plan/keyring/storage/1"
-
-	/*****************************************************
-	** PLAN SKI serialization codec names
-	**/
-
-	// KeyListProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
-	KeyListProtobufCodec = "/plan/ski/KeyList/1"
-)
-
 /*****************************************************
 ** ski.Session
 **/
@@ -177,4 +154,31 @@ const (
 
 	// OpAcceptCommunityKeys adds the keys contained in OpArgs.Msg to its community keyring, decrypting using the key indexed by OpArgs.CryptoKeyID.
 	OpAcceptCommunityKeys = "accept_keys"
+)
+
+/*****************************************************
+** Const-astics
+**/
+
+const (
+
+	/*****************************************************
+	** PLAN keyring codec names
+	**/
+
+	// CommunityKeyring is the keyring all members of a given PLAN community have
+	CommunityKeyring = "/plan/keyring/community/1"
+
+	// PersonalKeyring is one's personal keyring and is used to encrypt/decrypt private data.
+	PersonalKeyring = "/plan/keyring/personal/1"
+
+	// StorageKeyring contains keys needed to access or commit txns on a pdi.StorageProvider
+	StorageKeyring = "/plan/keyring/storage/1"
+
+	/*****************************************************
+	** PLAN SKI serialization codec names
+	**/
+
+	// KeyListProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
+	KeyListProtobufCodec = "/plan/ski/KeyList/1"
 )
