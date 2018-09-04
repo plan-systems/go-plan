@@ -423,7 +423,7 @@ func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
     }
 
 
-    keyListBuf := block.GetContentWithCodec(KeyListProtobufCodec)
+    keyListBuf := block.GetContentWithCodec(KeyListProtobufCodec, 0)
     if keyListBuf == nil {
 		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", KeyListProtobufCodec)
     }
