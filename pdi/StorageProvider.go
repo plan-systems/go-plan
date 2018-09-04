@@ -6,10 +6,6 @@ import (
 	"github.com/plan-tools/go-plan/plan"
 )
 
-// StorageTxnNameSz is the size of a StorageTxn (hash)name
-const StorageTxnNameSz = 24
-
-
 /*****************************************************
 ** StorageProvider
 **/
@@ -25,7 +21,6 @@ type StorageProvider interface {
 		inMsgChannel chan<- StorageMsg,
 		inOnCompletion func(StorageSession, error),
 	) error
-
 }
 
 /*****************************************************
@@ -42,8 +37,8 @@ type StorageSession interface {
 	// RequestTxns requests that the given txn names to be added to the msg stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
 	RequestTxns(inTxnRequests []TxnRequest) (RequestID, error)
 
-	// ReportFromBookmark sets the session's metaphorical read head based on state information returned via GetBookmark() from this or a previous session.
-	ReportFromBookmark(inFromBookmark plan.Block) (RequestID, error)
+	// RequestFromBookmark sets the session's "read head position" based on state information returned via GetBookmark() from this or a previous session.
+	RequestFromBookmark(inFromBookmark plan.Block) (RequestID, error)
 
 	// GetBookmark returns an opaque, StorageProvider-specifc blob of state information that a client uses for StartReporting().
 	GetBookmark() (*plan.Block, error)
@@ -108,55 +103,6 @@ const (
 	// StorageFailure means database access failed in an unexpected way
 	StorageFailure
 
-    // CommitFailed means the given CommitTxns() request failed
-    CommitFailed
-
+	// CommitFailed means the given CommitTxns() request failed
+	CommitFailed
 )
-
-/*****************************************************
-** Utils
-**/
-
-
-/*
-// SegmentIntoTxnsForMaxSize is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
-func SegmentIntoTxnsForMaxSize(
-	inData []byte,
-	inDataDesc TxnDataDesc,
-	inMaxSegmentSize int,
-) ([]*StorageTxn, error) {
-
-	bytesRemain := len(inData)
-	pos := 0
-
-	N := (len(inData) + inMaxSegmentSize - 1) / inMaxSegmentSize
-	txns := make([]*StorageTxn, 0, N)
-
-	for bytesRemain > 0 {
-
-		segSz := bytesRemain
-		if segSz < inMaxSegmentSize {
-			segSz = inMaxSegmentSize
-		}
-
-		txns = append(txns, &StorageTxn{
-			TxnStatus:   TxnStatus_AWAITING_COMMIT,
-			DataDesc:    inDataDesc,
-			SegmentData: inData[pos:segSz],
-		})
-
-		pos += segSz
-	}
-
-	for i, txn := range txns {
-		txn.SegmentNum = uint32(i)
-		txn.TotalSegments = uint32(len(txns))
-	}
-
-	return txns, nil
-
-	//if bytesRemain != 0 {
-	//    return plan.Error(nil, plan.AssertFailure, "assertion failed in SegmentPayloadForSegmentSize {N:%d, bytesRemain:%d}", N, bytesRemain)
-	//}
-}
-*/
