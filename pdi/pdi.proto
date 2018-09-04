@@ -266,17 +266,17 @@ message EntryHeader {
 
 
 
-
+/*
 enum TxnDataDesc {
 
-    // The txn data has been omitted and this 
+    // The txn data has been omitted 
     DATA_OMITTED                = 0;
 
     // The segments, when reassembled together, form EntryCrypt.Marshal()
     PDI_ENTRY_CRYPT             = 1;
 
 }
-
+*/
 
 
 // TxnStatus describes how far along a StorageTxn is on being stored on a PDI StorageProvider.
@@ -313,33 +313,31 @@ enum TxnStatus {
 
 message StorageTxn {
 
-
-
-    // Issued by the storage layer -- uniquely identifies this txn and is likely a hashname or serialized integer.
-    // Optional for a storage layer to *actually* store this value since it may be hashname that is ONLY available after a txn
-    //   is committed to storage, but it *is* always filled in when txns are passed to storage service consumers. 
+    // Issued by clients (not the storage layer) -- uniquely identifies this txn and is likely a hashname or binary integer.
                 bytes           txn_name                    = 1;
 
-                TxnStatus       txn_status                  = 3;
+    // The segment number out of the total number of segments (one-based indexing)
+                uint32          segment_num                 = 2;
+
+    // The total number of segments associated with this txn (one-based indexing)
+                uint32          num_segments                = 3;
 
     // Unix timestamp of when this txn was committed for storage (0 if not committed)
                 int64           time_committed              = 4;
 
-    // Consensus-based unix timestamp for this txn (or 0).  
+    // Consensus-based unix timestamp for this txn (or 0 if not available).  
     // If txn_status == FINALIZED, then this timestamp:
     //      - won't ever change, 
     //      - is universal across storage peers
     //      - is trustworthy
                 int64           time_consensus              = 5;
 
-    // Segment header
-                TxnDataDesc     data_desc                   = 6;        
-                uint32          segment_num                 = 7;    
-                uint32          total_segments              = 8;
+    // Describes the state of this txn segment number
+                TxnStatus       txn_status                  = 6;
 
-    // Segment data
-    // Note: If data_desc == DATA_OMITTED then segment_data == nil
-                bytes           segment_data                = 9;
+    // Txn payload
+                plan.Block      body                        = 7;        
+
 }
 
 
