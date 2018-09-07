@@ -313,32 +313,27 @@ enum TxnStatus {
 
 message StorageTxn {
 
-    // Issued by clients (not the storage layer) -- uniquely identifies this txn and is likely a hashname or binary integer.
-                bytes           txn_name                    = 1;
-
-    // The segment number out of the total number of segments (one-based indexing)
-                uint32          segment_num                 = 2;
-
-    // The total number of segments associated with this txn (one-based indexing)
-                uint32          num_segments                = 3;
+    // Issued by the storage layer (not storage clients) and cane be longer than 32 bytes
+                bytes           txn_id                      = 1;
 
     // Unix timestamp of when this txn was committed for storage (0 if not committed)
-                int64           time_committed              = 4;
+                int64           time_committed              = 2;
 
     // Consensus-based unix timestamp for this txn (or 0 if not available).  
     // If txn_status == FINALIZED, then this timestamp:
     //      - won't ever change, 
     //      - is universal across storage peers
     //      - is trustworthy
-                int64           time_consensus              = 5;
+                int64           time_consensus              = 3;
 
     // Describes the state of this txn segment number
-                TxnStatus       txn_status                  = 6;
+                TxnStatus       txn_status                  = 4;
 
-    // Txn payload
-                plan.Block      body                        = 7;        
-
+    // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
+                plan.Block      body                        = 5;     
 }
+
+
 
 
 
