@@ -69,13 +69,14 @@ type CommunityRepo struct {
 
     storage                 pdi.StorageSession
     storageProvider         pdi.StorageProvider
-
-
-    txnReportInbox          chan pdi.TxnReport
-    storageAlertInbox       chan pdi.StorageAlert
+    storageMsgInbox         chan pdi.StorageMsg
 
     ParentPnode             *Pnode
-    
+
+    // Newly authored entries from active sessions on this pnode that are using this CommunityRepo.
+    // These entries are first validated/processed as if they came off the wire, merged with the local db, and commited to the active storage sessions.
+    authoredInbox           chan pdi.EntryCrypt
+
     // deamonSKIs makes it possible for community public encrypted data to be decrypted, even when there are NO
     //     client sessions open.  Or, a community repo may have its security settings such that the community keyring
     //     is dropped when there are no more active client sessions open.
@@ -88,6 +89,13 @@ type CommunityRepo struct {
     openChannels            ChannelStoreGroup
 
 }
+
+
+              case txn := <-CR.newlyAuthoredInbox:
+
+                // If no newly authored entries await processing, see if there's any incoming from the storage session.
+                default:
+                    storageMsg := <-CR.storageMsgInbox
 
 
 type CommunityRules struct {
@@ -142,9 +150,8 @@ func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRe
         ParentPnode: inParent,
         Info: inInfo,
         DirEncoding: base64.RawURLEncoding,
-        DefaultFileMode: inParent.config.DefaultFileMode
-        txnReportInbox: make(chan *pdi.TxnReport, 8)   // should this be buffered!?
-        storageAlertInbox: make(chan *pdi.EntryCrypt, 8)
+        DefaultFileMode: inParent.config.DefaultFileMode,
+        storageMsgInbox: make(chan pdi.StorageMsg, 8),   // should this be buffered!?
     }
   
     return CR
@@ -284,6 +291,31 @@ func (CR *CommunityRepo) LookupMember(
 }
 
 
+func extract
+/*
+New txns appear in 1 of 2 possible ways to a pnode:
+    (1) pdi.StorageSession() reports a new StorageMsg
+        - For each contained StorageTxn, StorageTxn.Body is deserialized into one or more EntryCrypts
+        - Each entry is merged into appropriate repo 
+            - dupes are ignored
+            - illegal/invalid entries are dropped or logged into a reject pool
+        - For each channel all an active session has a query open for, send out new entries on that queru
+    (2) An active community memebr session on a pnode submits a newly authored and signed EntryCrypt
+        - *same* exact steps above AND a new StorageTxn is submitted to the community's active StorageSession(s)
+        - The listening channels get entry txn status as it updates.
+        
+A StorageTxn contains a single plan.Block.   
+Given that Block's codec info, it's expands into a sequence of zero or more EntryCrypt. 
+    - This means an EntryCrypt is addressed by:
+        1) its commit time (uint64)
+        2) it's StorageTxn name  
+    - Every entry would have *two* separate hashnames (the parent StorageTxn hashname and one to identify the entry)
+        => Two BSTs would be needed, yikes
+If one entry (max) per StorageTxn
+    + An entry's hashname + commit time could be used universially and uniquely
+    + An EntryCrypt's hash could be used as the txn hashname
+*/
+
 func (CR *CommunityRepo) StartService() {
 
     CR.storageProvider = NewBoltStorage(
@@ -292,9 +324,17 @@ func (CR *CommunityRepo) StartService() {
     )
 
     CR.storage = CR.storageProvider.StartSession(
+        CR.Info.CommunityID,
+        CR.storageMsgInbox,
+
+
     )
 
-    entryInbox
+ 
+
+
+
+
 
 
     go func() {
@@ -303,7 +343,42 @@ func (CR *CommunityRepo) StartService() {
 
         doNextEntry := make(chan bool)
 
-        for entry := range CR.entryInbox {
+        for {
+               
+            var authoredEntry *pdi.EntryCrypt
+            var storageMsg *pdi.StorageMsg
+
+            // First, draw from the newly authored entry inbox (from currently connection community member sessions).
+            select {
+                case authoredEntry = <-CR.authoredInbox:
+
+                // If no newly authored entries await processing, see if there's any incoming from the storage session.
+                default:
+                    
+                    select {
+
+                        case authoredEntry = <-CR.authoredInbox:
+
+                        case storageMsg = <-CR.storageMsgInbox:
+                    }
+
+            }
+
+            if authoredEntry != nil {
+                ws.entry = authoredEntry
+                ws.storageTxn = pdi.StorageTxn{
+                    TxnStatus: TxnStatus_AWAITING_COMMIT
+                }
+            } else {
+                extract
+
+            }
+
+            // Attempt to deserialize StorageTxn.Body into a EntryCrypt
+One entry per StorageTxn, or one StorageTxn per StorageMSg?
+Likeing the idea of singylar storage Txns, containing one or more entries.  problem is that entries won't have unique names
+- solution: have sorted txn hashnames, where each hashname has a row for each contained entry (the entry's hashname relies on the sig)
+
             ws.entry = entry
 
             ws.processAndMergeEntry(func (inErr *plan.Perror) {
@@ -352,14 +427,28 @@ type failedEntry struct {
 }
 
 
+
+type txnWorkspace {
+
+    entryIndex      int               // This is the index currently being processed
+    entryBatch      []*pdi.EntryCrypt // All the entries contained (or to be contained) in .txn
+    txn             pdi.StorageTxn    // Host/Container of each entry in .entryBatch[:] 
+
+}
+
+
+
 // entryWorkspace is a workspace used to pass around
 type entryWorkspace struct {
     CR              *CommunityRepo    
 
     timeStart       plan.Time
 
-    skiVersion      []byte                  
     entry           *pdi.EntryCrypt
+
+    entryBatch      []*pdi.EntryCrypt // 
+    entryIndex      int               // This is the index number into entryBatch that is currently being processed
+    entryTxn        pdi.StorageTxn
 
     entryHash       []byte
     entryHeader     pdi.EntryHeader
