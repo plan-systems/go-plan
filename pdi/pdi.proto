@@ -172,20 +172,23 @@ message ChannelEpoch {
 
     // If set, entries_are_locked must/will always be true.
                 bool            entries_are_locked_forever  = 8;
+
+    // If set, pnodes with web services running will attempt to share this channel to outside the community
+                bool            is_externally_shared        = 9;
                         
     /*  If set, this channel can be used to validate EntryOps applied to other channels (including other access channels).
         Entries in an access channel conform to a specific protocol and serve to:
             (a) allow one or more other channels to cite this channel as their access control (access_channel_id)
             (a) transport private channel keys and grants to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
             (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
-                bool            is_access_channel           = 9;
+                bool            is_access_channel           = 10;
 
     // Contains all the access grants published via EDIT_ACCESS_GRANTS sent to this channel (during this epoch).
     // If this channel is NOT an access channel (is_access_channel == false), then this field == nil
-    repeated    AccessGrant     access_grants               = 10;
+    repeated    AccessGrant     access_grants               = 11;
 
     // Future-proofing
-                plan.Block      extensions                  = 11;
+                plan.Block      extensions                  = 12;
 
 }
 
@@ -314,7 +317,7 @@ enum TxnStatus {
 message StorageTxn {
 
     // Issued by the storage layer (not storage clients) and cane be longer than 32 bytes
-                bytes           txn_id                      = 1;
+                bytes           txn_name                    = 1;
 
     // Unix timestamp of when this txn was committed for storage (0 if not committed)
                 int64           time_committed              = 2;
@@ -332,25 +335,6 @@ message StorageTxn {
     // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
                 plan.Block      body                        = 5;     
 }
-
-
-
-
-
-/*
-message RejectedTxn {
-
-                bytes           txn_name                    = 1;
-
-                int64           time_committed              = 4;
-                int64           time_authored               = 4;
-                int64           time_rejected               = 4;
-
-                int32           reject_code                 = 2;
-
-                string          reject_desc                 = 3;
-}
-*/
 
 
 
