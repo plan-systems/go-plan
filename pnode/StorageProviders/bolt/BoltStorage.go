@@ -1,4 +1,4 @@
-package pnode
+package bolt
 
 // See: go-plan/pdi/StorageProvider.go for interface context
 
@@ -21,51 +21,49 @@ var (
 	storageTxnBucketName = []byte("/plan/protobuf/StorageTxn")
 )
 
-// BoltStorage implements pdi.StorageProvider.
+// provider implements pdi.StorageProvider.
 // Specifically, it manages one or more bolt databases in a given local directory.
-type BoltStorage struct {
+type boltProvider struct {
     pdi.StorageProvider
 
 	sessions    []*boltSession
 	dbsPathname string
 	fileMode    os.FileMode
-	maxSegSize  int
 }
 
-// NewBoltStorage creates a bolt-based StorageProvider with the given params
-func NewBoltStorage(
+
+// NewBoltProvider creates a bolt-based StorageProvider with the given params
+func NewBoltProvider(
 	inDBsPathname string,
 	inFileMode os.FileMode,
-) *BoltStorage {
+) *boltProvider {
 
-	storage := &BoltStorage{
+	storage := &boltProvider{
 		dbsPathname: inDBsPathname,
 		fileMode:    inFileMode,
-		maxSegSize:  1000000,
 	}
 
 	return storage
 }
 
 // StartSession implements StorageProvider.StartSession
-func (storage *BoltStorage) StartSession(
+func (provider *boltProvider) StartSession(
 	inDatabaseID []byte,
     inMsgChannel chan<- pdi.StorageMsg,
-    inOnCompletion func(pdi.StorageSession, error),
-) error {
+) (pdi.StorageSession, error) {
 
 	if len(inDatabaseID) < 2 || len(inDatabaseID) > 64 {
-		return plan.Errorf(nil, plan.InvalidDatabaseID, "got database ID of length %d", len(inDatabaseID))
+		return nil, plan.Errorf(nil, plan.InvalidDatabaseID, "got database ID of length %d", len(inDatabaseID))
 	}
 
 	var dbName []byte
 	base64.RawURLEncoding.Encode(dbName, inDatabaseID)
 
 	session := &boltSession{
-		parentProvider:           storage,
+		parentProvider:           provider,
 		msgsOut:                  inMsgChannel,
         txnBatchInbox:            make(chan *txnBatch, 8),
-		dbPathname:               path.Join(storage.dbsPathname, string(dbName)+".bolt"),
+		dbPathname:               path.Join(provider.dbsPathname, string(dbName)+".bolt"),
 		maxTxnReportsBeforePause: 10,
 		maxTxnBytesBeforePause:   1000000,
         //alertOutbox:              make([]pdi.StorageAlert, 0, 10),
@@ -77,9 +75,9 @@ func (storage *BoltStorage) StartSession(
 	}
 
 	var err error
-	session.db, err = bolt.Open(session.dbPathname, storage.fileMode, &opt)
+	session.db, err = bolt.Open(session.dbPathname, provider.fileMode, &opt)
 	if err != nil {
-		return plan.Errorf(err, plan.FailedToLoadDatabase, "failed to open bolt db %s", session.dbPathname)
+		return nil, plan.Errorf(err, plan.FailedToLoadDatabase, "failed to open bolt db %s", session.dbPathname)
 	}
 
 	err = session.db.Update(func(tx *bolt.Tx) error {
@@ -88,15 +86,18 @@ func (storage *BoltStorage) StartSession(
 		return err
 	})
 	if err != nil {
-		return plan.Error(err, plan.FailedToLoadDatabase, "failed to create root bucket")
+		return nil, plan.Error(err, plan.FailedToLoadDatabase, "failed to create root bucket")
 	}
 
-	storage.sessions = append(storage.sessions, session)
+	provider.sessions = append(provider.sessions, session)
 
     session.status = pdi.SessionIsReady
-	go inOnCompletion(session, nil)
 
-	return nil
+    inMsgChannel <- pdi.StorageMsg{
+        AlertCode: pdi.SessionIsReady,
+    }
+
+	return session, nil
 }
 
 /*
@@ -109,18 +110,18 @@ func (storage *BoltStorage) SegmentIntoTxnsForCommit(
 	return pdi.SegmentIntoTxnsForMaxSize(inData, inDataDesc, storage.maxSegSize)
 }
 */
-func (storage *BoltStorage) endSession(inSession *boltSession, msg pdi.StorageMsg) *plan.Perror {
+func (provider *boltProvider) endSession(inSession *boltSession, msg pdi.StorageMsg) *plan.Perror {
 
     if inSession.status != pdi.SessionIsReady {
         return nil
     }
 
     // TODO: concurrency safety analysis
-	for i, session := range storage.sessions {
+	for i, session := range provider.sessions {
 		if session == inSession {
-			n := len(storage.sessions) - 1
-			storage.sessions[i] = storage.sessions[n]
-			storage.sessions = storage.sessions[:n]
+			n := len(provider.sessions) - 1
+			provider.sessions[i] = provider.sessions[n]
+			provider.sessions = provider.sessions[:n]
             inSession.msgsOut <- msg
 			return nil
 		}
@@ -143,7 +144,7 @@ type boltSession struct {
     pdi.StorageSession
 
     status           pdi.AlertCode
-	parentProvider   *BoltStorage
+	parentProvider   *boltProvider
 	msgsOut       chan<- pdi.StorageMsg
 
 	dbPathname string
@@ -227,33 +228,35 @@ func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.Sto
     var err error
     count := 0
 
-    for k, txnBuf := c.Seek(session.readheadPos[:]); k != nil && count < len(txns); k, txnBuf = c.Next() {
+    for curKey, txnBuf := c.Seek(session.readheadPos[:]); curKey != nil && count < len(txns); curKey, txnBuf = c.Next() {
 
         bytesProcessed += len(txnBuf)
 
-        err = txns[count].UnmarshalWithOptionalBody(txnBuf, true)
+        txn := &txns[count]
+
+        err = txn.UnmarshalWithOptionalBody(txnBuf, true)
         if err != nil {
             err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
         } else {
-            if txn.TimeCommitted != req.TimeCommitted || bytes.Compare(txn.TxnName, req.TxnName) != 0 {
-                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verificiation failed")
+            session.readheadPos = pdi.FormTimeSortableKey(txn.TimeCommitted, txn.TxnName)
+            if bytes.Compare(session.readheadPos[:], curKey) != 0 {
+                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
             }
         }
 
-        copy(session.readheadPos[:], k[:])
-        session.readheadPos.Incrment()
+        if err != nil {
+            // TODO send an alert
+        }
 
-        count++
+        session.readheadPos.Increment()
+
+        txnCount++
         if bytesProcessed > session.maxTxnBytesBeforePause {
             break;
         }
-
     }
 
-    txns = txns[:txnCount]
-
-
-    return nil
+    return txns[:txnCount]
 }
 
 
@@ -284,7 +287,7 @@ func (session *boltSession) readTxns(tx *bolt.Tx, bucket *bolt.Bucket, txnsReque
                 err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
             } else {
                 if txn.TimeCommitted != req.TimeCommitted || bytes.Compare(txn.TxnName, req.TxnName) != 0 {
-                    err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verificiation failed")
+                    err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
                 }
             }
 
