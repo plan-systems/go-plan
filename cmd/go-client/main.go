@@ -24,6 +24,34 @@ Here's roughly what the order of events:
     11)  When the client authors a new entry, it's sent to pgateway where it is encrypted and forwarded onto pnode for processing.  
     
     
+The client has 3 main op modes:
+
+A) admin mode -- assuming the user is an admin, new members can be created, etc
+B) channel talk/interact mode 
+    1) fetches the community registry (for step 3)
+    2) opens the specified channel ID as a talk channel (hash of some input str)
+    3) displays all entries in the cannel (mapping each author member ID to the member's alias using registry from step 1)
+    4) newly typed entries are sent to the channel, etc
+C) diagnostic (simulated traffic) mode -- sends and checks dense traffic for testing, etc.
+
+
+Maybe pnode and pgateway are fused and it's storage layer this is remote (or is implmemented locally but uses RPC call to, say, matrix)
+
+
+    1)  If not already running, the client starts pnode
+    2)  The client starts a gRPC session is started with pnode
+    3)  One of 2 authentication methods 
+        - the client prompts the user to authenticate w/ a password that pnode uses to unlock the personal keyring
+        - the client uses their crypto device and unlocks their keyring that way
+    4)  With the personal keyring unlocked, the gateway can now decrypt and encrypt community entries and personal entries
+    5a) With the community keyring in hand, pnode can now process entries from the designated storage provider(s) in the background
+        - During this time, pnode "syncs" up (relatively fast since the data is already locally within the storage layer)
+    6)  The client issues channel queries and awaits decrypted entries
+    7)  pnode handle queries, decrypting entries on the fly and sending them to the client
+    8)  When the client authors a new entry, it's sent to pnode where it is encrypted and forwarded onto pnode for processing.  
+
+
+
 */
 
 
