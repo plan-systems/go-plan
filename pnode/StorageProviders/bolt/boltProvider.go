@@ -5,6 +5,7 @@ package bolt
 import (
     "bytes"
     "encoding/base64"
+    "encoding/binary"
     "os"
     "path"
     "time"
@@ -21,6 +22,7 @@ var (
 	storageTxnBucketName = []byte("/plan/protobuf/StorageTxn")
 )
 
+
 // provider implements pdi.StorageProvider.
 // Specifically, it manages one or more bolt databases in a given local directory.
 type boltProvider struct {
@@ -36,12 +38,13 @@ type boltProvider struct {
 func NewBoltProvider(
 	inDBsPathname string,
 	inFileMode os.FileMode,
-) *boltProvider {
+) pdi.StorageProvider {
 
 	storage := &boltProvider{
 		dbsPathname: inDBsPathname,
 		fileMode:    inFileMode,
 	}
+
 
 	return storage
 }
@@ -56,7 +59,12 @@ func (provider *boltProvider) StartSession(
 		return nil, plan.Errorf(nil, plan.InvalidDatabaseID, "got database ID of length %d", len(inDatabaseID))
 	}
 
-	var dbName []byte
+    err := os.MkdirAll(provider.dbsPathname, provider.fileMode)
+    if err != nil {
+		return nil, plan.Errorf(err, plan.FailedToAccessPath, "failed to access path %s", provider.dbsPathname)
+    }
+
+	dbName := make([]byte, base64.RawURLEncoding.EncodedLen(len(inDatabaseID)))
 	base64.RawURLEncoding.Encode(dbName, inDatabaseID)
 
 	session := &boltSession{
@@ -74,7 +82,6 @@ func (provider *boltProvider) StartSession(
 		NoGrowSync: false,
 	}
 
-	var err error
 	session.db, err = bolt.Open(session.dbPathname, provider.fileMode, &opt)
 	if err != nil {
 		return nil, plan.Errorf(err, plan.FailedToLoadDatabase, "failed to open bolt db %s", session.dbPathname)
@@ -158,7 +165,7 @@ type boltSession struct {
 	txnBatchInbox    chan *txnBatch
     nextRequestID  uint32
 
-    readheadPos  pdi.TimeSortableKey
+    readheadPos  timeSortableKey
     readerReqID  pdi.RequestID
 	readerEvent    chan int32
 
@@ -238,7 +245,7 @@ func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.Sto
         if err != nil {
             err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
         } else {
-            session.readheadPos = pdi.FormTimeSortableKey(txn.TimeCommitted, txn.TxnName)
+            session.readheadPos = formTimeSortableKey(txn.TimeCommitted, txn.TxnName)
             if bytes.Compare(session.readheadPos[:], curKey) != 0 {
                 err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
             }
@@ -250,13 +257,13 @@ func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.Sto
 
         session.readheadPos.Increment()
 
-        txnCount++
+        count++
         if bytesProcessed > session.maxTxnBytesBeforePause {
             break;
         }
     }
 
-    return txns[:txnCount]
+    return txns[:count]
 }
 
 
@@ -271,7 +278,7 @@ func (session *boltSession) readTxns(tx *bolt.Tx, bucket *bolt.Bucket, txnsReque
             txn := &txns[i]
 
             // Lookup the txn (speedy since its keyed by time)
-            timeKey := pdi.FormTimeSortableKey(req.TimeCommitted, req.TxnName)
+            timeKey := formTimeSortableKey(req.TimeCommitted, req.TxnName)
             txnBuf := bucket.Get(timeKey[:])
             if txnBuf == nil {
                 txn.TxnName       = req.TxnName
@@ -325,11 +332,19 @@ func (session *boltSession) commitTxns(tx *bolt.Tx, bucket *bolt.Bucket, txns []
 
         // In a local db like this, once the entry is written, it won't ever revert (and we need to set this before marshalling)
         txn.TxnStatus = pdi.TxnStatus_FINALIZED
-        
+
+        var commitID uint64
+        commitID, err = bucket.NextSequence()
+        if err != nil {
+            break
+        }
+
+        timeKey := formTimeSortableKeyWithID(txn.TimeCommitted, commitID)
+        txn.TxnName = timeKey[:]
+
         txnBuf, err = txn.MarshalForOptionalBody(txnBuf)
 
         if err == nil {
-            timeKey := pdi.FormTimeSortableKey(txn.TimeCommitted, txn.TxnName)
             err = bucket.Put(timeKey[:], txnBuf)
         }
 
@@ -338,7 +353,7 @@ func (session *boltSession) commitTxns(tx *bolt.Tx, bucket *bolt.Bucket, txns []
 
         // If a txn errors, now (and the below will be called)
         if err != nil {
-            return err
+            break
         }
     }
 
@@ -747,11 +762,17 @@ func (session *boltSession) startNewRequest() *txnBatch {
 
 
 
+func (session *boltSession) IsReady() bool {
+    return session != nil && session.status == pdi.SessionIsReady
+}
+
+
+
 func (session *boltSession) RequestTxns(
 	inTxnRequests []pdi.TxnRequest,
     ) (pdi.RequestID, error) {
 
-    if session.status != pdi.SessionIsReady {
+    if ! session.IsReady() {
         return 0, plan.Error(nil, plan.SessionNotReady, "storage session not ready for RequestTxns()")
     }
   
@@ -766,17 +787,21 @@ func (session *boltSession) RequestTxns(
 
 
 
-func (session *boltSession) CommitTxns(
-    inTxns []pdi.StorageTxn,
+func (session *boltSession) CommitTxn(
+    inTxnBody *plan.Block,
     ) (pdi.RequestID, error) {
 
-    if session.status != pdi.SessionIsReady {
+    if ! session.IsReady() {
         return 0, plan.Error(nil, plan.SessionNotReady, "storage session not ready for CommitTxns()")
     }
 
+
     batch := session.startNewRequest()
-    batch.txnsToCommit = append(batch.txnsToCommit, inTxns[:]...)
-    
+    batch.txnsToCommit = append(batch.txnsToCommit, pdi.StorageTxn{
+        TxnStatus: pdi.TxnStatus_COMMITTING,
+        Body: inTxnBody,
+    })
+        
     session.txnBatchInbox <- batch
     
     return batch.requestID, nil
@@ -785,7 +810,100 @@ func (session *boltSession) CommitTxns(
 
 
 
+
+
+
+
+
+
+// storageTxnNameSz is sizeof(bolt.Bucket.NextSequence())
+const storageTxnNameSz = 8
+
+// timeSortableKeySz reflects the size of a uint6 time index plus the size of a StorageTxnName
+const timeSortableKeySz = 8 + storageTxnNameSz
+
+// timeSortableKey is concatenation of a 8-byte unix timestamp followed by a StorageTxnName.
+type timeSortableKey [timeSortableKeySz]byte
+
+
+func formTimeSortableKey(inTime int64, inTxnName []byte) timeSortableKey {
+	var k timeSortableKey
+
+	binary.BigEndian.PutUint64(k[0:8], uint64(inTime))
+
+	overhang := storageTxnNameSz - len(inTxnName)
+	if overhang < 0 {
+		copy(k[8:], inTxnName[-overhang:])
+	} else {
+		copy(k[8+overhang:], inTxnName)
+	}
+
+	return k
+}
+
+func formTimeSortableKeyWithID(inTime int64, inTxnName uint64) timeSortableKey {
+	var k timeSortableKey
+
+	binary.BigEndian.PutUint64(k[0:8], uint64(inTime))
+	binary.BigEndian.PutUint64(k[8:16], inTxnName)
+
+	return k
+}
+
+
+
+// Increment "adds 1" to a TimeSortableKey, alloing a search routine to increment to the next possible hashname.
+// Purpose is to increment.  E.g.
+//   ... 39 00 => ... 39 01
+//   ... 39 01 => ... 39 02
+//            ...
+//   ... 39 ff => ... 3A 00
+func (tk *timeSortableKey) Increment() {
+
+	// pos says which byte-significan't digit we're on -- start at the least signigicant
+	pos := timeSortableKeySz - 1
+	for {
+
+		// Increment and stop if there's no carry
+		tk[pos]++
+		if tk[pos] > 0 {
+			break
+		}
+
+		// We're here because there's a carry -- so move to the next byte digit
+		pos--
+	}
+}
+
 /*
+
+// This allows efficient time-based sorting of StorageTxn hashnames.  For a hash collision to occur with these sizes,
+//     the txns would have to occur during the *same* second AND be 1 in 10^77 (AND would have to occur in the *same* communty)
+
+
+
+
+// FormTimeSortableKey lays out a unix timestamp in 8 bytes in big-endian followed by and a TimeSortableKey (a hashname).
+// This gives these time+hashname keys (and their accompanying value) the property to be stored, sorted by timestamp.
+func FormTimeSortableKey(inTime int64, inTxnName []byte) TimeSortableKey {
+	var k TimeSortableKey
+
+	binary.BigEndian.PutUint64(k[0:8], uint64(inTime))
+
+	overhang := StorageTxnNameSz - len(inTxnName)
+	if overhang < 0 {
+		copy(k[8:], inTxnName[-overhang:])
+	} else {
+		copy(k[8+overhang:], inTxnName)
+	}
+
+	return k
+}
+
+
+
+
+
 
 
 
