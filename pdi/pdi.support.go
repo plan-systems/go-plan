@@ -3,12 +3,18 @@
 package pdi
 
 import (
-	"encoding/binary"
-
 	"github.com/plan-tools/go-plan/plan"
 
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 )
+
+// EntryAddr specifies the address of a PDI entry (an EntryCrypt) in a given StorageProvider.
+// Since a StorageTxn can potentially hold more than one entry, EntryIndex specifies which one (using zero-based indexing).
+type EntryAddr struct {
+	TimeCommited int64
+	TxnName      []byte
+	EntryIndex   uint16
+}
 
 // EntryVersionMask is a bit mask on EntryCrypt.CryptInfo to extract pdi.EntryVersion
 const EntryVersionMask = 0xFF
@@ -35,58 +41,6 @@ func (entry *EntryCrypt) ComputeHash() []byte {
 
 	return hw.Sum(nil)
 
-}
-
-// StorageTxnNameSz is the size of a StorageTxn hashname (2^256)
-const StorageTxnNameSz = 32
-
-// TimeSortableKeySz reflects the size of a uint64 plus the size of a StorageTxnName
-const TimeSortableKeySz = 8 + StorageTxnNameSz
-
-// TimeSortableKey is concatenation of a 8-byte unix timestamp followed by a StorageTxnName (hashname).
-// This allows efficient time-based sorting of StorageTxn hashnames.  For a hash collision to occur with these sizes,
-//     the txns would have to occur during the *same* second AND be 1 in 10^77 (AND would have to occur in the *same* communty)
-type TimeSortableKey [TimeSortableKeySz]byte
-
-// Increment "adds 1" to a TimeSortableKey, alloing a search routine to increment to the next possible hashname.
-// Purpose is to increment.  E.g.
-//   ... 39 00 => ... 39 01
-//   ... 39 01 => ... 39 02
-//            ...
-//   ... 39 ff => ... 3A 00
-func (tk *TimeSortableKey) Increment() {
-
-
-	// pos says which byte-significan't digit we're on -- start at the least signigicant
-	pos := TimeSortableKeySz - 1
-	for {
-
-		// Increment and stop if there's no carry
-		tk[pos]++
-		if tk[pos] > 0 {
-			break
-		}
-
-		// We're here because there's a carry -- so move to the next byte digit
-		pos--
-	}
-}
-
-// GetTimeSortableKey lays out a unix timestamp in 8 bytes in big-endian followed by and a TimeSortableKey (a hashname).
-// This gives these time+hashname keys (and their accompanying value) the property to be stored, sorted by timestamp. 
-func GetTimeSortableKey(inTime int64, inTxnName []byte) TimeSortableKey {
-	var k TimeSortableKey
-
-	binary.BigEndian.PutUint64(k[0:8], uint64(inTime))
-
-	overhang := StorageTxnNameSz - len(inTxnName)
-	if overhang < 0 {
-		copy(k[8:], inTxnName[-overhang:])
-	} else {
-		copy(k[8+overhang:], inTxnName)
-	}
-
-	return k
 }
 
 /*****************************************************
