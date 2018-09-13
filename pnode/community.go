@@ -91,13 +91,7 @@ type CommunityRepo struct {
 }
 
 
-              case txn := <-CR.newlyAuthoredInbox:
-
-                // If no newly authored entries await processing, see if there's any incoming from the storage session.
-                default:
-                    storageMsg := <-CR.storageMsgInbox
-
-
+    
 type CommunityRules struct {
 
     MaxMemberAliasChangesPerMonth int //= 30
@@ -291,7 +285,7 @@ func (CR *CommunityRepo) LookupMember(
 }
 
 
-func extract
+
 /*
 New txns appear in 1 of 2 possible ways to a pnode:
     (1) pdi.StorageSession() reports a new StorageMsg
@@ -429,6 +423,7 @@ type failedEntry struct {
 
 
 type txnWorkspace {
+    CR              *CommunityRepo    
 
     entryIndex      int               // This is the index currently being processed
     entryBatch      []*pdi.EntryCrypt // All the entries contained (or to be contained) in .txn
