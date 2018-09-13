@@ -316,7 +316,9 @@ enum TxnStatus {
 
 message StorageTxn {
 
-    // Issued by the storage layer (not storage clients) and cane be longer than 32 bytes
+    // Issued by the storage layer (not storage clients) some time after StorageSession.Commit()
+    // Since a StorageProvier creates/assigns txn names, they can be any length (typically 8 to 32 bytes),
+    //    but the length is *never* changes when a StorageProvier inits a new repo.
                 bytes           txn_name                    = 1;
 
     // Unix timestamp of when this txn was committed for storage (0 if not committed)

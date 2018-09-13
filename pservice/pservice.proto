@@ -45,13 +45,14 @@ offer that lower service layer available). Each set of services are made availab
 via either gRPC+protobufs or direct embedding.  
 
 To start session with a pnode, the client must present credentials that confirm that the client is a member of the community
-that she is requesting access to.  This is an important security layer, affording that a community's channel traffic patterns and
-information organization is completely inaccessible to non-community members.  This is in contrast to systems where "the world"
-has access to your traffic and could conduct rich signal analysis & intelligence (despite all traffic being encrypted).  
+that she is requesting access to. This means a community's channel traffic patterns and organization 
+is completely inaccessible to non-community members.  This is in contrast to systems where "the world"
+has access to your traffic where an adversary could conduct correlation analysis (despite all traffic being encrypted).  
 
     1) Layer 1 -- Storage/Replication service layer
         - The pnode is running without any community or personal keys in hand.
-        - Lowest security liability in this layer-mode since the pnode has neither community or personal keys on hand.
+        - Lowest security liability in this layer-mode since the pnode doesn't have any keys to lose and 
+            all data stored is already all encrypted.
         - Storage and replication operates w/o restriction (though none of the newly arriving entries can be merged into the community's repo)
         - This layer is characterized by the storage/replication implementation with the L1 service implementation on top.
             (e.g local db, [matrix], DFINITY, Ethereum)
