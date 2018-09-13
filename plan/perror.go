@@ -82,8 +82,14 @@ const (
 	// GenericErrorFamily errors generally relate to pnode
 	GenericErrorFamily = 5000 + iota
 
-	// AssertFailure means an unreachable part of code was...reached.  :\
-	AssertFailure
+	// AssertFailed means an unreachable part of code was...reached.  :\
+	AssertFailed
+
+    // FailedToMarshal means Marshal() returned an error
+    FailedToMarshal
+
+    // FailedToUnmarshal means Unmarshal() returned an error
+    FailedToUnmarshal
 
 	/*****************************************************
 	** PDI
@@ -193,9 +199,18 @@ const (
 	// InvalidDatabaseID means the database ID provided is suspiciously short or long
 	InvalidDatabaseID
 
+    // FailedToAccessPath means a pathname was unable to be created or otherwise accessed
+    FailedToAccessPath
+
 	// FailedToLoadDatabase means an error was encountered when creating or loading the database
 	FailedToLoadDatabase
 
 	// FailedToCommitTxn means an unexpected fatal error occurred while committing one ore more StorageTxns
 	FailedToCommitTxn
+
+    // FailedToUnmarshalTxn means a StorageTxn failed to Unmarshal
+    FailedToUnmarshalTxn
+
+    // SessionNotReady means the given StorageSession is not ready/open/started
+    SessionNotReady
 )
