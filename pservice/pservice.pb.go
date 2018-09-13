@@ -8,18 +8,17 @@
 		pservice.proto
 
 	It has these top-level messages:
+		MemberInfoRequest
+		MemberInfoResponse
+		SessionRequest
+		SessionInfo
+		EntryQuery
+		EntryResponse
+		EntryOpArgs
+		EntryOpStatus
+		Perror
 		StatusQuery
 		StatusReply
-		ClientInfo
-		SessionInfo
-		PStatus
-		HeaderEntry
-		PDIChannelInfo
-		PDIChannelList
-		PDIChannelProperties
-		PDIEntry
-		PDIEntryHeader
-		PDIBodyPart
 		ChannelSearchParams
 		ChannelEntryQuery
 */
@@ -28,11 +27,11 @@ package pservice
 import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"
 import math "math"
+import pdi "github.com/plan-tools/go-plan/pdi"
+import ski "github.com/plan-tools/go-plan/ski"
 
 import context "golang.org/x/net/context"
 import grpc "google.golang.org/grpc"
-
-import binary "encoding/binary"
 
 import io "io"
 
@@ -47,66 +46,171 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
-type StatusQuery struct {
-	TestGreeting string `protobuf:"bytes,1,opt,name=test_greeting,json=testGreeting,proto3" json:"test_greeting,omitempty"`
+type EntryOp int32
+
+const (
+	EntryOp_PUBLISH_ENTRY EntryOp = 0
+)
+
+var EntryOp_name = map[int32]string{
+	0: "PUBLISH_ENTRY",
+}
+var EntryOp_value = map[string]int32{
+	"PUBLISH_ENTRY": 0,
 }
 
-func (m *StatusQuery) Reset()                    { *m = StatusQuery{} }
-func (m *StatusQuery) String() string            { return proto.CompactTextString(m) }
-func (*StatusQuery) ProtoMessage()               {}
-func (*StatusQuery) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{0} }
+func (x EntryOp) String() string {
+	return proto.EnumName(EntryOp_name, int32(x))
+}
+func (EntryOp) EnumDescriptor() ([]byte, []int) { return fileDescriptorPservice, []int{0} }
 
-func (m *StatusQuery) GetTestGreeting() string {
-	if m != nil {
-		return m.TestGreeting
-	}
-	return ""
+type PserviceScope int32
+
+const (
+	PserviceScope_REPLICATION_GET  PserviceScope = 0
+	PserviceScope_REPLICATION_POST PserviceScope = 1
+	PserviceScope_COMMUNITY_READ   PserviceScope = 2
+	PserviceScope_COMMUNITY_WRITE  PserviceScope = 3
+	PserviceScope_PERSONAL_READ    PserviceScope = 4
+	PserviceScope_PERSONAL_WRITE   PserviceScope = 5
+)
+
+var PserviceScope_name = map[int32]string{
+	0: "REPLICATION_GET",
+	1: "REPLICATION_POST",
+	2: "COMMUNITY_READ",
+	3: "COMMUNITY_WRITE",
+	4: "PERSONAL_READ",
+	5: "PERSONAL_WRITE",
+}
+var PserviceScope_value = map[string]int32{
+	"REPLICATION_GET":  0,
+	"REPLICATION_POST": 1,
+	"COMMUNITY_READ":   2,
+	"COMMUNITY_WRITE":  3,
+	"PERSONAL_READ":    4,
+	"PERSONAL_WRITE":   5,
 }
 
-type StatusReply struct {
-	TestReply string `protobuf:"bytes,1,opt,name=test_reply,json=testReply,proto3" json:"test_reply,omitempty"`
+func (x PserviceScope) String() string {
+	return proto.EnumName(PserviceScope_name, int32(x))
+}
+func (PserviceScope) EnumDescriptor() ([]byte, []int) { return fileDescriptorPservice, []int{1} }
+
+type QueryOption int32
+
+const (
+	QueryOption_DECRYPT_PDI_HEADER QueryOption = 0
+	QueryOption_DECRYPT_PDI_BODY   QueryOption = 1
+)
+
+var QueryOption_name = map[int32]string{
+	0: "DECRYPT_PDI_HEADER",
+	1: "DECRYPT_PDI_BODY",
+}
+var QueryOption_value = map[string]int32{
+	"DECRYPT_PDI_HEADER": 0,
+	"DECRYPT_PDI_BODY":   1,
 }
 
-func (m *StatusReply) Reset()                    { *m = StatusReply{} }
-func (m *StatusReply) String() string            { return proto.CompactTextString(m) }
-func (*StatusReply) ProtoMessage()               {}
-func (*StatusReply) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{1} }
+func (x QueryOption) String() string {
+	return proto.EnumName(QueryOption_name, int32(x))
+}
+func (QueryOption) EnumDescriptor() ([]byte, []int) { return fileDescriptorPservice, []int{2} }
 
-func (m *StatusReply) GetTestReply() string {
-	if m != nil {
-		return m.TestReply
-	}
-	return ""
+type MemberInfoRequest struct {
+	// Identifes which community member
+	MemberId []byte `protobuf:"bytes,1,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
 }
 
-type ClientInfo struct {
-	CommunityId   []byte `protobuf:"bytes,1,opt,name=community_id,json=communityId,proto3" json:"community_id,omitempty"`
-	MemberId      []byte `protobuf:"bytes,2,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
-	WorkstationId []byte `protobuf:"bytes,3,opt,name=workstation_id,json=workstationId,proto3" json:"workstation_id,omitempty"`
-}
+func (m *MemberInfoRequest) Reset()                    { *m = MemberInfoRequest{} }
+func (m *MemberInfoRequest) String() string            { return proto.CompactTextString(m) }
+func (*MemberInfoRequest) ProtoMessage()               {}
+func (*MemberInfoRequest) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{0} }
 
-func (m *ClientInfo) Reset()                    { *m = ClientInfo{} }
-func (m *ClientInfo) String() string            { return proto.CompactTextString(m) }
-func (*ClientInfo) ProtoMessage()               {}
-func (*ClientInfo) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{2} }
-
-func (m *ClientInfo) GetCommunityId() []byte {
-	if m != nil {
-		return m.CommunityId
-	}
-	return nil
-}
-
-func (m *ClientInfo) GetMemberId() []byte {
+func (m *MemberInfoRequest) GetMemberId() []byte {
 	if m != nil {
 		return m.MemberId
 	}
 	return nil
 }
 
-func (m *ClientInfo) GetWorkstationId() []byte {
+type MemberInfoResponse struct {
+	// Identifies which community member
+	MemberId []byte `protobuf:"bytes,1,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
+	// Identifies which community member
+	MemberEpoch *pdi.MemberEpoch `protobuf:"bytes,2,opt,name=member_epoch,json=memberEpoch" json:"member_epoch,omitempty"`
+}
+
+func (m *MemberInfoResponse) Reset()                    { *m = MemberInfoResponse{} }
+func (m *MemberInfoResponse) String() string            { return proto.CompactTextString(m) }
+func (*MemberInfoResponse) ProtoMessage()               {}
+func (*MemberInfoResponse) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{1} }
+
+func (m *MemberInfoResponse) GetMemberId() []byte {
 	if m != nil {
-		return m.WorkstationId
+		return m.MemberId
+	}
+	return nil
+}
+
+func (m *MemberInfoResponse) GetMemberEpoch() *pdi.MemberEpoch {
+	if m != nil {
+		return m.MemberEpoch
+	}
+	return nil
+}
+
+type SessionRequest struct {
+	// Normally the empty string, this is used when an existing session_token needs to be included.
+	// Initially, it's the salt of the data encrypted with the user's passphrase (which is compared t
+	SessionToken []byte `protobuf:"bytes,1,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
+	// Which community this session wants to access (a pnode hosts multiple communities)
+	CommunityId []byte `protobuf:"bytes,2,opt,name=community_id,json=communityId,proto3" json:"community_id,omitempty"`
+	// Identifies who is requesting the session.
+	ClientId []byte `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// Specifies which scopes are being requested
+	ServiceScopes []PserviceScope `protobuf:"varint,4,rep,packed,name=service_scopes,json=serviceScopes,enum=pservice.PserviceScope" json:"service_scopes,omitempty"`
+	// A set of keys and tokens presumed to allow a new session to begin
+	Keys *ski.KeyList `protobuf:"bytes,5,opt,name=keys" json:"keys,omitempty"`
+}
+
+func (m *SessionRequest) Reset()                    { *m = SessionRequest{} }
+func (m *SessionRequest) String() string            { return proto.CompactTextString(m) }
+func (*SessionRequest) ProtoMessage()               {}
+func (*SessionRequest) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{2} }
+
+func (m *SessionRequest) GetSessionToken() []byte {
+	if m != nil {
+		return m.SessionToken
+	}
+	return nil
+}
+
+func (m *SessionRequest) GetCommunityId() []byte {
+	if m != nil {
+		return m.CommunityId
+	}
+	return nil
+}
+
+func (m *SessionRequest) GetClientId() []byte {
+	if m != nil {
+		return m.ClientId
+	}
+	return nil
+}
+
+func (m *SessionRequest) GetServiceScopes() []PserviceScope {
+	if m != nil {
+		return m.ServiceScopes
+	}
+	return nil
+}
+
+func (m *SessionRequest) GetKeys() *ski.KeyList {
+	if m != nil {
+		return m.Keys
 	}
 	return nil
 }
@@ -127,276 +231,199 @@ func (m *SessionInfo) GetSessionToken() string {
 	return ""
 }
 
-type PStatus struct {
-	StatusCode int32  `protobuf:"varint,1,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`
-	StatusMsg  string `protobuf:"bytes,2,opt,name=status_msg,json=statusMsg,proto3" json:"status_msg,omitempty"`
+// Starts a new query that returns an ongoing stream of PDI entries.
+// The query criteria are highly limited to timestamp and hashname since PDI entries are community private
+type EntryQuery struct {
+	QueryOptions   QueryOption `protobuf:"varint,1,opt,name=query_options,json=queryOptions,proto3,enum=pservice.QueryOption" json:"query_options,omitempty"`
+	ChannelId      []byte      `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	TimestampMin   uint64      `protobuf:"varint,3,opt,name=timestamp_min,json=timestampMin,proto3" json:"timestamp_min,omitempty"`
+	TimestampMax   uint64      `protobuf:"varint,4,opt,name=timestamp_max,json=timestampMax,proto3" json:"timestamp_max,omitempty"`
+	EntryHashnames [][]byte    `protobuf:"bytes,5,rep,name=entry_hashnames,json=entryHashnames" json:"entry_hashnames,omitempty"`
 }
 
-func (m *PStatus) Reset()                    { *m = PStatus{} }
-func (m *PStatus) String() string            { return proto.CompactTextString(m) }
-func (*PStatus) ProtoMessage()               {}
-func (*PStatus) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{4} }
+func (m *EntryQuery) Reset()                    { *m = EntryQuery{} }
+func (m *EntryQuery) String() string            { return proto.CompactTextString(m) }
+func (*EntryQuery) ProtoMessage()               {}
+func (*EntryQuery) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{4} }
 
-func (m *PStatus) GetStatusCode() int32 {
+func (m *EntryQuery) GetQueryOptions() QueryOption {
+	if m != nil {
+		return m.QueryOptions
+	}
+	return QueryOption_DECRYPT_PDI_HEADER
+}
+
+func (m *EntryQuery) GetChannelId() []byte {
+	if m != nil {
+		return m.ChannelId
+	}
+	return nil
+}
+
+func (m *EntryQuery) GetTimestampMin() uint64 {
+	if m != nil {
+		return m.TimestampMin
+	}
+	return 0
+}
+
+func (m *EntryQuery) GetTimestampMax() uint64 {
+	if m != nil {
+		return m.TimestampMax
+	}
+	return 0
+}
+
+func (m *EntryQuery) GetEntryHashnames() [][]byte {
+	if m != nil {
+		return m.EntryHashnames
+	}
+	return nil
+}
+
+type EntryResponse struct {
+	Entries []*pdi.Entry `protobuf:"bytes,1,rep,name=entries" json:"entries,omitempty"`
+}
+
+func (m *EntryResponse) Reset()                    { *m = EntryResponse{} }
+func (m *EntryResponse) String() string            { return proto.CompactTextString(m) }
+func (*EntryResponse) ProtoMessage()               {}
+func (*EntryResponse) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{5} }
+
+func (m *EntryResponse) GetEntries() []*pdi.Entry {
+	if m != nil {
+		return m.Entries
+	}
+	return nil
+}
+
+// EntryOpArgs is an open-ended invocation for the given encrypted PDI entry.
+type EntryOpArgs struct {
+	Id      int32             `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	EntryOp EntryOp           `protobuf:"varint,2,opt,name=entry_op,json=entryOp,proto3,enum=pservice.EntryOp" json:"entry_op,omitempty"`
+	OpArgs  map[string][]byte `protobuf:"bytes,3,rep,name=op_args,json=opArgs" json:"op_args,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Entry   *pdi.Entry        `protobuf:"bytes,4,opt,name=entry" json:"entry,omitempty"`
+}
+
+func (m *EntryOpArgs) Reset()                    { *m = EntryOpArgs{} }
+func (m *EntryOpArgs) String() string            { return proto.CompactTextString(m) }
+func (*EntryOpArgs) ProtoMessage()               {}
+func (*EntryOpArgs) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{6} }
+
+func (m *EntryOpArgs) GetId() int32 {
+	if m != nil {
+		return m.Id
+	}
+	return 0
+}
+
+func (m *EntryOpArgs) GetEntryOp() EntryOp {
+	if m != nil {
+		return m.EntryOp
+	}
+	return EntryOp_PUBLISH_ENTRY
+}
+
+func (m *EntryOpArgs) GetOpArgs() map[string][]byte {
+	if m != nil {
+		return m.OpArgs
+	}
+	return nil
+}
+
+func (m *EntryOpArgs) GetEntry() *pdi.Entry {
+	if m != nil {
+		return m.Entry
+	}
+	return nil
+}
+
+type EntryOpStatus struct {
+	Id         int32             `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	StatusCode int32             `protobuf:"varint,2,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`
+	StatusData map[string][]byte `protobuf:"bytes,3,rep,name=status_data,json=statusData" json:"status_data,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (m *EntryOpStatus) Reset()                    { *m = EntryOpStatus{} }
+func (m *EntryOpStatus) String() string            { return proto.CompactTextString(m) }
+func (*EntryOpStatus) ProtoMessage()               {}
+func (*EntryOpStatus) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{7} }
+
+func (m *EntryOpStatus) GetId() int32 {
+	if m != nil {
+		return m.Id
+	}
+	return 0
+}
+
+func (m *EntryOpStatus) GetStatusCode() int32 {
 	if m != nil {
 		return m.StatusCode
 	}
 	return 0
 }
 
-func (m *PStatus) GetStatusMsg() string {
+func (m *EntryOpStatus) GetStatusData() map[string][]byte {
 	if m != nil {
-		return m.StatusMsg
+		return m.StatusData
+	}
+	return nil
+}
+
+type Perror struct {
+	Code int32  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Msg  string `protobuf:"bytes,2,opt,name=msg,proto3" json:"msg,omitempty"`
+}
+
+func (m *Perror) Reset()                    { *m = Perror{} }
+func (m *Perror) String() string            { return proto.CompactTextString(m) }
+func (*Perror) ProtoMessage()               {}
+func (*Perror) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{8} }
+
+func (m *Perror) GetCode() int32 {
+	if m != nil {
+		return m.Code
+	}
+	return 0
+}
+
+func (m *Perror) GetMsg() string {
+	if m != nil {
+		return m.Msg
 	}
 	return ""
 }
 
-type HeaderEntry struct {
-	FieldName  string   `protobuf:"bytes,1,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
-	FieldValue []string `protobuf:"bytes,2,rep,name=field_value,json=fieldValue" json:"field_value,omitempty"`
+type StatusQuery struct {
+	TestGreeting string `protobuf:"bytes,1,opt,name=test_greeting,json=testGreeting,proto3" json:"test_greeting,omitempty"`
 }
 
-func (m *HeaderEntry) Reset()                    { *m = HeaderEntry{} }
-func (m *HeaderEntry) String() string            { return proto.CompactTextString(m) }
-func (*HeaderEntry) ProtoMessage()               {}
-func (*HeaderEntry) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{5} }
+func (m *StatusQuery) Reset()                    { *m = StatusQuery{} }
+func (m *StatusQuery) String() string            { return proto.CompactTextString(m) }
+func (*StatusQuery) ProtoMessage()               {}
+func (*StatusQuery) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{9} }
 
-func (m *HeaderEntry) GetFieldName() string {
+func (m *StatusQuery) GetTestGreeting() string {
 	if m != nil {
-		return m.FieldName
+		return m.TestGreeting
 	}
 	return ""
 }
 
-func (m *HeaderEntry) GetFieldValue() []string {
+type StatusReply struct {
+	TestReply string `protobuf:"bytes,1,opt,name=test_reply,json=testReply,proto3" json:"test_reply,omitempty"`
+}
+
+func (m *StatusReply) Reset()                    { *m = StatusReply{} }
+func (m *StatusReply) String() string            { return proto.CompactTextString(m) }
+func (*StatusReply) ProtoMessage()               {}
+func (*StatusReply) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{10} }
+
+func (m *StatusReply) GetTestReply() string {
 	if m != nil {
-		return m.FieldValue
-	}
-	return nil
-}
-
-type PDIChannelInfo struct {
-	ChannelId        []byte         `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	AccessChannelId  []byte         `protobuf:"bytes,2,opt,name=access_channel_id,json=accessChannelId,proto3" json:"access_channel_id,omitempty"`
-	AccessChannelRev int64          `protobuf:"varint,3,opt,name=access_channel_rev,json=accessChannelRev,proto3" json:"access_channel_rev,omitempty"`
-	Header           []*HeaderEntry `protobuf:"bytes,4,rep,name=header" json:"header,omitempty"`
-}
-
-func (m *PDIChannelInfo) Reset()                    { *m = PDIChannelInfo{} }
-func (m *PDIChannelInfo) String() string            { return proto.CompactTextString(m) }
-func (*PDIChannelInfo) ProtoMessage()               {}
-func (*PDIChannelInfo) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{6} }
-
-func (m *PDIChannelInfo) GetChannelId() []byte {
-	if m != nil {
-		return m.ChannelId
-	}
-	return nil
-}
-
-func (m *PDIChannelInfo) GetAccessChannelId() []byte {
-	if m != nil {
-		return m.AccessChannelId
-	}
-	return nil
-}
-
-func (m *PDIChannelInfo) GetAccessChannelRev() int64 {
-	if m != nil {
-		return m.AccessChannelRev
-	}
-	return 0
-}
-
-func (m *PDIChannelInfo) GetHeader() []*HeaderEntry {
-	if m != nil {
-		return m.Header
-	}
-	return nil
-}
-
-type PDIChannelList struct {
-	Channels []*PDIChannelInfo `protobuf:"bytes,1,rep,name=channels" json:"channels,omitempty"`
-}
-
-func (m *PDIChannelList) Reset()                    { *m = PDIChannelList{} }
-func (m *PDIChannelList) String() string            { return proto.CompactTextString(m) }
-func (*PDIChannelList) ProtoMessage()               {}
-func (*PDIChannelList) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{7} }
-
-func (m *PDIChannelList) GetChannels() []*PDIChannelInfo {
-	if m != nil {
-		return m.Channels
-	}
-	return nil
-}
-
-type PDIChannelProperties struct {
-	ChannelName string         `protobuf:"bytes,1,opt,name=channel_name,json=channelName,proto3" json:"channel_name,omitempty"`
-	ChannelDesc string         `protobuf:"bytes,2,opt,name=channel_desc,json=channelDesc,proto3" json:"channel_desc,omitempty"`
-	Header      []*HeaderEntry `protobuf:"bytes,4,rep,name=header" json:"header,omitempty"`
-}
-
-func (m *PDIChannelProperties) Reset()                    { *m = PDIChannelProperties{} }
-func (m *PDIChannelProperties) String() string            { return proto.CompactTextString(m) }
-func (*PDIChannelProperties) ProtoMessage()               {}
-func (*PDIChannelProperties) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{8} }
-
-func (m *PDIChannelProperties) GetChannelName() string {
-	if m != nil {
-		return m.ChannelName
+		return m.TestReply
 	}
 	return ""
-}
-
-func (m *PDIChannelProperties) GetChannelDesc() string {
-	if m != nil {
-		return m.ChannelDesc
-	}
-	return ""
-}
-
-func (m *PDIChannelProperties) GetHeader() []*HeaderEntry {
-	if m != nil {
-		return m.Header
-	}
-	return nil
-}
-
-type PDIEntry struct {
-	EntryInfo   int32           `protobuf:"varint,1,opt,name=entry_info,json=entryInfo,proto3" json:"entry_info,omitempty"`
-	Sig         []byte          `protobuf:"bytes,2,opt,name=sig,proto3" json:"sig,omitempty"`
-	Hash        []byte          `protobuf:"bytes,3,opt,name=hash,proto3" json:"hash,omitempty"`
-	EntryHeader *PDIEntryHeader `protobuf:"bytes,4,opt,name=entry_header,json=entryHeader" json:"entry_header,omitempty"`
-	EntryParts  []*PDIBodyPart  `protobuf:"bytes,5,rep,name=entry_parts,json=entryParts" json:"entry_parts,omitempty"`
-}
-
-func (m *PDIEntry) Reset()                    { *m = PDIEntry{} }
-func (m *PDIEntry) String() string            { return proto.CompactTextString(m) }
-func (*PDIEntry) ProtoMessage()               {}
-func (*PDIEntry) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{9} }
-
-func (m *PDIEntry) GetEntryInfo() int32 {
-	if m != nil {
-		return m.EntryInfo
-	}
-	return 0
-}
-
-func (m *PDIEntry) GetSig() []byte {
-	if m != nil {
-		return m.Sig
-	}
-	return nil
-}
-
-func (m *PDIEntry) GetHash() []byte {
-	if m != nil {
-		return m.Hash
-	}
-	return nil
-}
-
-func (m *PDIEntry) GetEntryHeader() *PDIEntryHeader {
-	if m != nil {
-		return m.EntryHeader
-	}
-	return nil
-}
-
-func (m *PDIEntry) GetEntryParts() []*PDIBodyPart {
-	if m != nil {
-		return m.EntryParts
-	}
-	return nil
-}
-
-type PDIEntryHeader struct {
-	Verb             int32          `protobuf:"varint,1,opt,name=verb,proto3" json:"verb,omitempty"`
-	ChannelId        []byte         `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	AuthorId         []byte         `protobuf:"bytes,3,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
-	AccessChannelId  []byte         `protobuf:"bytes,4,opt,name=access_channel_id,json=accessChannelId,proto3" json:"access_channel_id,omitempty"`
-	AccessChannelRev int64          `protobuf:"varint,5,opt,name=access_channel_rev,json=accessChannelRev,proto3" json:"access_channel_rev,omitempty"`
-	Time             uint64         `protobuf:"fixed64,6,opt,name=time,proto3" json:"time,omitempty"`
-	AuxHeader        []*HeaderEntry `protobuf:"bytes,7,rep,name=aux_header,json=auxHeader" json:"aux_header,omitempty"`
-}
-
-func (m *PDIEntryHeader) Reset()                    { *m = PDIEntryHeader{} }
-func (m *PDIEntryHeader) String() string            { return proto.CompactTextString(m) }
-func (*PDIEntryHeader) ProtoMessage()               {}
-func (*PDIEntryHeader) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{10} }
-
-func (m *PDIEntryHeader) GetVerb() int32 {
-	if m != nil {
-		return m.Verb
-	}
-	return 0
-}
-
-func (m *PDIEntryHeader) GetChannelId() []byte {
-	if m != nil {
-		return m.ChannelId
-	}
-	return nil
-}
-
-func (m *PDIEntryHeader) GetAuthorId() []byte {
-	if m != nil {
-		return m.AuthorId
-	}
-	return nil
-}
-
-func (m *PDIEntryHeader) GetAccessChannelId() []byte {
-	if m != nil {
-		return m.AccessChannelId
-	}
-	return nil
-}
-
-func (m *PDIEntryHeader) GetAccessChannelRev() int64 {
-	if m != nil {
-		return m.AccessChannelRev
-	}
-	return 0
-}
-
-func (m *PDIEntryHeader) GetTime() uint64 {
-	if m != nil {
-		return m.Time
-	}
-	return 0
-}
-
-func (m *PDIEntryHeader) GetAuxHeader() []*HeaderEntry {
-	if m != nil {
-		return m.AuxHeader
-	}
-	return nil
-}
-
-type PDIBodyPart struct {
-	Header  []*HeaderEntry `protobuf:"bytes,1,rep,name=header" json:"header,omitempty"`
-	Content []byte         `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
-}
-
-func (m *PDIBodyPart) Reset()                    { *m = PDIBodyPart{} }
-func (m *PDIBodyPart) String() string            { return proto.CompactTextString(m) }
-func (*PDIBodyPart) ProtoMessage()               {}
-func (*PDIBodyPart) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{11} }
-
-func (m *PDIBodyPart) GetHeader() []*HeaderEntry {
-	if m != nil {
-		return m.Header
-	}
-	return nil
-}
-
-func (m *PDIBodyPart) GetContent() []byte {
-	if m != nil {
-		return m.Content
-	}
-	return nil
 }
 
 type ChannelSearchParams struct {
@@ -406,7 +433,7 @@ type ChannelSearchParams struct {
 func (m *ChannelSearchParams) Reset()                    { *m = ChannelSearchParams{} }
 func (m *ChannelSearchParams) String() string            { return proto.CompactTextString(m) }
 func (*ChannelSearchParams) ProtoMessage()               {}
-func (*ChannelSearchParams) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{12} }
+func (*ChannelSearchParams) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{11} }
 
 func (m *ChannelSearchParams) GetFlags() int32 {
 	if m != nil {
@@ -422,7 +449,7 @@ type ChannelEntryQuery struct {
 func (m *ChannelEntryQuery) Reset()                    { *m = ChannelEntryQuery{} }
 func (m *ChannelEntryQuery) String() string            { return proto.CompactTextString(m) }
 func (*ChannelEntryQuery) ProtoMessage()               {}
-func (*ChannelEntryQuery) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{13} }
+func (*ChannelEntryQuery) Descriptor() ([]byte, []int) { return fileDescriptorPservice, []int{12} }
 
 func (m *ChannelEntryQuery) GetFlags() int32 {
 	if m != nil {
@@ -432,20 +459,22 @@ func (m *ChannelEntryQuery) GetFlags() int32 {
 }
 
 func init() {
+	proto.RegisterType((*MemberInfoRequest)(nil), "pservice.MemberInfoRequest")
+	proto.RegisterType((*MemberInfoResponse)(nil), "pservice.MemberInfoResponse")
+	proto.RegisterType((*SessionRequest)(nil), "pservice.SessionRequest")
+	proto.RegisterType((*SessionInfo)(nil), "pservice.SessionInfo")
+	proto.RegisterType((*EntryQuery)(nil), "pservice.EntryQuery")
+	proto.RegisterType((*EntryResponse)(nil), "pservice.EntryResponse")
+	proto.RegisterType((*EntryOpArgs)(nil), "pservice.EntryOpArgs")
+	proto.RegisterType((*EntryOpStatus)(nil), "pservice.EntryOpStatus")
+	proto.RegisterType((*Perror)(nil), "pservice.Perror")
 	proto.RegisterType((*StatusQuery)(nil), "pservice.StatusQuery")
 	proto.RegisterType((*StatusReply)(nil), "pservice.StatusReply")
-	proto.RegisterType((*ClientInfo)(nil), "pservice.ClientInfo")
-	proto.RegisterType((*SessionInfo)(nil), "pservice.SessionInfo")
-	proto.RegisterType((*PStatus)(nil), "pservice.PStatus")
-	proto.RegisterType((*HeaderEntry)(nil), "pservice.HeaderEntry")
-	proto.RegisterType((*PDIChannelInfo)(nil), "pservice.PDIChannelInfo")
-	proto.RegisterType((*PDIChannelList)(nil), "pservice.PDIChannelList")
-	proto.RegisterType((*PDIChannelProperties)(nil), "pservice.PDIChannelProperties")
-	proto.RegisterType((*PDIEntry)(nil), "pservice.PDIEntry")
-	proto.RegisterType((*PDIEntryHeader)(nil), "pservice.PDIEntryHeader")
-	proto.RegisterType((*PDIBodyPart)(nil), "pservice.PDIBodyPart")
 	proto.RegisterType((*ChannelSearchParams)(nil), "pservice.ChannelSearchParams")
 	proto.RegisterType((*ChannelEntryQuery)(nil), "pservice.ChannelEntryQuery")
+	proto.RegisterEnum("pservice.EntryOp", EntryOp_name, EntryOp_value)
+	proto.RegisterEnum("pservice.PserviceScope", PserviceScope_name, PserviceScope_value)
+	proto.RegisterEnum("pservice.QueryOption", QueryOption_name, QueryOption_value)
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -456,57 +485,41 @@ var _ grpc.ClientConn
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion4
 
-// Client API for Pservice service
+// Client API for Pnode service
 
-type PserviceClient interface {
-	BeginSession(ctx context.Context, in *ClientInfo, opts ...grpc.CallOption) (*SessionInfo, error)
-	ReportStatus(ctx context.Context, in *StatusQuery, opts ...grpc.CallOption) (*StatusReply, error)
-	QueryChannels(ctx context.Context, in *ChannelSearchParams, opts ...grpc.CallOption) (*PDIChannelList, error)
-	OpenChannelEntryQuery(ctx context.Context, in *ChannelEntryQuery, opts ...grpc.CallOption) (Pservice_OpenChannelEntryQueryClient, error)
-	PublishChannelEntry(ctx context.Context, in *PDIEntry, opts ...grpc.CallOption) (*PStatus, error)
+type PnodeClient interface {
+	// StartSession() is the first call a client makes to a pnode daemon once a GRPC channel
+	//    connection is established.  It returns an auth/session token that the client must inject into
+	//    channel's metadata as "session_token" in order for all the other rpc calls.
+	StartSession(ctx context.Context, in *SessionRequest, opts ...grpc.CallOption) (*SessionInfo, error)
+	DoEntryOp(ctx context.Context, in *EntryOpArgs, opts ...grpc.CallOption) (Pnode_DoEntryOpClient, error)
+	DoEntryOpStream(ctx context.Context, opts ...grpc.CallOption) (Pnode_DoEntryOpStreamClient, error)
+	LookupMember(ctx context.Context, in *MemberInfoRequest, opts ...grpc.CallOption) (*MemberInfoResponse, error)
 }
 
-type pserviceClient struct {
+type pnodeClient struct {
 	cc *grpc.ClientConn
 }
 
-func NewPserviceClient(cc *grpc.ClientConn) PserviceClient {
-	return &pserviceClient{cc}
+func NewPnodeClient(cc *grpc.ClientConn) PnodeClient {
+	return &pnodeClient{cc}
 }
 
-func (c *pserviceClient) BeginSession(ctx context.Context, in *ClientInfo, opts ...grpc.CallOption) (*SessionInfo, error) {
+func (c *pnodeClient) StartSession(ctx context.Context, in *SessionRequest, opts ...grpc.CallOption) (*SessionInfo, error) {
 	out := new(SessionInfo)
-	err := grpc.Invoke(ctx, "/pservice.Pservice/BeginSession", in, out, c.cc, opts...)
+	err := grpc.Invoke(ctx, "/pservice.Pnode/StartSession", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *pserviceClient) ReportStatus(ctx context.Context, in *StatusQuery, opts ...grpc.CallOption) (*StatusReply, error) {
-	out := new(StatusReply)
-	err := grpc.Invoke(ctx, "/pservice.Pservice/ReportStatus", in, out, c.cc, opts...)
+func (c *pnodeClient) DoEntryOp(ctx context.Context, in *EntryOpArgs, opts ...grpc.CallOption) (Pnode_DoEntryOpClient, error) {
+	stream, err := grpc.NewClientStream(ctx, &_Pnode_serviceDesc.Streams[0], c.cc, "/pservice.Pnode/DoEntryOp", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
-}
-
-func (c *pserviceClient) QueryChannels(ctx context.Context, in *ChannelSearchParams, opts ...grpc.CallOption) (*PDIChannelList, error) {
-	out := new(PDIChannelList)
-	err := grpc.Invoke(ctx, "/pservice.Pservice/QueryChannels", in, out, c.cc, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *pserviceClient) OpenChannelEntryQuery(ctx context.Context, in *ChannelEntryQuery, opts ...grpc.CallOption) (Pservice_OpenChannelEntryQueryClient, error) {
-	stream, err := grpc.NewClientStream(ctx, &_Pservice_serviceDesc.Streams[0], c.cc, "/pservice.Pservice/OpenChannelEntryQuery", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &pserviceOpenChannelEntryQueryClient{stream}
+	x := &pnodeDoEntryOpClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -516,168 +529,874 @@ func (c *pserviceClient) OpenChannelEntryQuery(ctx context.Context, in *ChannelE
 	return x, nil
 }
 
-type Pservice_OpenChannelEntryQueryClient interface {
-	Recv() (*PDIEntry, error)
+type Pnode_DoEntryOpClient interface {
+	Recv() (*EntryOpStatus, error)
 	grpc.ClientStream
 }
 
-type pserviceOpenChannelEntryQueryClient struct {
+type pnodeDoEntryOpClient struct {
 	grpc.ClientStream
 }
 
-func (x *pserviceOpenChannelEntryQueryClient) Recv() (*PDIEntry, error) {
-	m := new(PDIEntry)
+func (x *pnodeDoEntryOpClient) Recv() (*EntryOpStatus, error) {
+	m := new(EntryOpStatus)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func (c *pserviceClient) PublishChannelEntry(ctx context.Context, in *PDIEntry, opts ...grpc.CallOption) (*PStatus, error) {
-	out := new(PStatus)
-	err := grpc.Invoke(ctx, "/pservice.Pservice/PublishChannelEntry", in, out, c.cc, opts...)
+func (c *pnodeClient) DoEntryOpStream(ctx context.Context, opts ...grpc.CallOption) (Pnode_DoEntryOpStreamClient, error) {
+	stream, err := grpc.NewClientStream(ctx, &_Pnode_serviceDesc.Streams[1], c.cc, "/pservice.Pnode/DoEntryOpStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &pnodeDoEntryOpStreamClient{stream}
+	return x, nil
+}
+
+type Pnode_DoEntryOpStreamClient interface {
+	Send(*EntryOpArgs) error
+	Recv() (*EntryOpStatus, error)
+	grpc.ClientStream
+}
+
+type pnodeDoEntryOpStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *pnodeDoEntryOpStreamClient) Send(m *EntryOpArgs) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *pnodeDoEntryOpStreamClient) Recv() (*EntryOpStatus, error) {
+	m := new(EntryOpStatus)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *pnodeClient) LookupMember(ctx context.Context, in *MemberInfoRequest, opts ...grpc.CallOption) (*MemberInfoResponse, error) {
+	out := new(MemberInfoResponse)
+	err := grpc.Invoke(ctx, "/pservice.Pnode/LookupMember", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// Server API for Pservice service
+// Server API for Pnode service
 
-type PserviceServer interface {
-	BeginSession(context.Context, *ClientInfo) (*SessionInfo, error)
-	ReportStatus(context.Context, *StatusQuery) (*StatusReply, error)
-	QueryChannels(context.Context, *ChannelSearchParams) (*PDIChannelList, error)
-	OpenChannelEntryQuery(*ChannelEntryQuery, Pservice_OpenChannelEntryQueryServer) error
-	PublishChannelEntry(context.Context, *PDIEntry) (*PStatus, error)
+type PnodeServer interface {
+	// StartSession() is the first call a client makes to a pnode daemon once a GRPC channel
+	//    connection is established.  It returns an auth/session token that the client must inject into
+	//    channel's metadata as "session_token" in order for all the other rpc calls.
+	StartSession(context.Context, *SessionRequest) (*SessionInfo, error)
+	DoEntryOp(*EntryOpArgs, Pnode_DoEntryOpServer) error
+	DoEntryOpStream(Pnode_DoEntryOpStreamServer) error
+	LookupMember(context.Context, *MemberInfoRequest) (*MemberInfoResponse, error)
 }
 
-func RegisterPserviceServer(s *grpc.Server, srv PserviceServer) {
-	s.RegisterService(&_Pservice_serviceDesc, srv)
+func RegisterPnodeServer(s *grpc.Server, srv PnodeServer) {
+	s.RegisterService(&_Pnode_serviceDesc, srv)
 }
 
-func _Pservice_BeginSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ClientInfo)
+func _Pnode_StartSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PserviceServer).BeginSession(ctx, in)
+		return srv.(PnodeServer).StartSession(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/pservice.Pservice/BeginSession",
+		FullMethod: "/pservice.Pnode/StartSession",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PserviceServer).BeginSession(ctx, req.(*ClientInfo))
+		return srv.(PnodeServer).StartSession(ctx, req.(*SessionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Pservice_ReportStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Pnode_DoEntryOp_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(EntryOpArgs)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(PnodeServer).DoEntryOp(m, &pnodeDoEntryOpServer{stream})
+}
+
+type Pnode_DoEntryOpServer interface {
+	Send(*EntryOpStatus) error
+	grpc.ServerStream
+}
+
+type pnodeDoEntryOpServer struct {
+	grpc.ServerStream
+}
+
+func (x *pnodeDoEntryOpServer) Send(m *EntryOpStatus) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Pnode_DoEntryOpStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(PnodeServer).DoEntryOpStream(&pnodeDoEntryOpStreamServer{stream})
+}
+
+type Pnode_DoEntryOpStreamServer interface {
+	Send(*EntryOpStatus) error
+	Recv() (*EntryOpArgs, error)
+	grpc.ServerStream
+}
+
+type pnodeDoEntryOpStreamServer struct {
+	grpc.ServerStream
+}
+
+func (x *pnodeDoEntryOpStreamServer) Send(m *EntryOpStatus) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *pnodeDoEntryOpStreamServer) Recv() (*EntryOpArgs, error) {
+	m := new(EntryOpArgs)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _Pnode_LookupMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MemberInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PnodeServer).LookupMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pservice.Pnode/LookupMember",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PnodeServer).LookupMember(ctx, req.(*MemberInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+var _Pnode_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "pservice.Pnode",
+	HandlerType: (*PnodeServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "StartSession",
+			Handler:    _Pnode_StartSession_Handler,
+		},
+		{
+			MethodName: "LookupMember",
+			Handler:    _Pnode_LookupMember_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "DoEntryOp",
+			Handler:       _Pnode_DoEntryOp_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "DoEntryOpStream",
+			Handler:       _Pnode_DoEntryOpStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "pservice.proto",
+}
+
+// Client API for Pgateway service
+
+type PgatewayClient interface {
+	StartSession(ctx context.Context, in *SessionRequest, opts ...grpc.CallOption) (*SessionInfo, error)
+	ReportStatus(ctx context.Context, in *StatusQuery, opts ...grpc.CallOption) (*StatusReply, error)
+	// RrE, CrE, CrD
+	StartEntryQuery(ctx context.Context, in *EntryQuery, opts ...grpc.CallOption) (Pgateway_StartEntryQueryClient, error)
+	// CrE
+	ListChannels(ctx context.Context, in *ChannelSearchParams, opts ...grpc.CallOption) (*pdi.ChannelList, error)
+	// RwE, CwD
+	DoEntryOp(ctx context.Context, in *EntryOpArgs, opts ...grpc.CallOption) (Pgateway_DoEntryOpClient, error)
+	DoEntryOpStream(ctx context.Context, opts ...grpc.CallOption) (Pgateway_DoEntryOpStreamClient, error)
+}
+
+type pgatewayClient struct {
+	cc *grpc.ClientConn
+}
+
+func NewPgatewayClient(cc *grpc.ClientConn) PgatewayClient {
+	return &pgatewayClient{cc}
+}
+
+func (c *pgatewayClient) StartSession(ctx context.Context, in *SessionRequest, opts ...grpc.CallOption) (*SessionInfo, error) {
+	out := new(SessionInfo)
+	err := grpc.Invoke(ctx, "/pservice.Pgateway/StartSession", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pgatewayClient) ReportStatus(ctx context.Context, in *StatusQuery, opts ...grpc.CallOption) (*StatusReply, error) {
+	out := new(StatusReply)
+	err := grpc.Invoke(ctx, "/pservice.Pgateway/ReportStatus", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pgatewayClient) StartEntryQuery(ctx context.Context, in *EntryQuery, opts ...grpc.CallOption) (Pgateway_StartEntryQueryClient, error) {
+	stream, err := grpc.NewClientStream(ctx, &_Pgateway_serviceDesc.Streams[0], c.cc, "/pservice.Pgateway/StartEntryQuery", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &pgatewayStartEntryQueryClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Pgateway_StartEntryQueryClient interface {
+	Recv() (*EntryResponse, error)
+	grpc.ClientStream
+}
+
+type pgatewayStartEntryQueryClient struct {
+	grpc.ClientStream
+}
+
+func (x *pgatewayStartEntryQueryClient) Recv() (*EntryResponse, error) {
+	m := new(EntryResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *pgatewayClient) ListChannels(ctx context.Context, in *ChannelSearchParams, opts ...grpc.CallOption) (*pdi.ChannelList, error) {
+	out := new(pdi.ChannelList)
+	err := grpc.Invoke(ctx, "/pservice.Pgateway/ListChannels", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pgatewayClient) DoEntryOp(ctx context.Context, in *EntryOpArgs, opts ...grpc.CallOption) (Pgateway_DoEntryOpClient, error) {
+	stream, err := grpc.NewClientStream(ctx, &_Pgateway_serviceDesc.Streams[1], c.cc, "/pservice.Pgateway/DoEntryOp", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &pgatewayDoEntryOpClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Pgateway_DoEntryOpClient interface {
+	Recv() (*EntryOpStatus, error)
+	grpc.ClientStream
+}
+
+type pgatewayDoEntryOpClient struct {
+	grpc.ClientStream
+}
+
+func (x *pgatewayDoEntryOpClient) Recv() (*EntryOpStatus, error) {
+	m := new(EntryOpStatus)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *pgatewayClient) DoEntryOpStream(ctx context.Context, opts ...grpc.CallOption) (Pgateway_DoEntryOpStreamClient, error) {
+	stream, err := grpc.NewClientStream(ctx, &_Pgateway_serviceDesc.Streams[2], c.cc, "/pservice.Pgateway/DoEntryOpStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &pgatewayDoEntryOpStreamClient{stream}
+	return x, nil
+}
+
+type Pgateway_DoEntryOpStreamClient interface {
+	Send(*EntryOpArgs) error
+	Recv() (*EntryOpStatus, error)
+	grpc.ClientStream
+}
+
+type pgatewayDoEntryOpStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *pgatewayDoEntryOpStreamClient) Send(m *EntryOpArgs) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *pgatewayDoEntryOpStreamClient) Recv() (*EntryOpStatus, error) {
+	m := new(EntryOpStatus)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// Server API for Pgateway service
+
+type PgatewayServer interface {
+	StartSession(context.Context, *SessionRequest) (*SessionInfo, error)
+	ReportStatus(context.Context, *StatusQuery) (*StatusReply, error)
+	// RrE, CrE, CrD
+	StartEntryQuery(*EntryQuery, Pgateway_StartEntryQueryServer) error
+	// CrE
+	ListChannels(context.Context, *ChannelSearchParams) (*pdi.ChannelList, error)
+	// RwE, CwD
+	DoEntryOp(*EntryOpArgs, Pgateway_DoEntryOpServer) error
+	DoEntryOpStream(Pgateway_DoEntryOpStreamServer) error
+}
+
+func RegisterPgatewayServer(s *grpc.Server, srv PgatewayServer) {
+	s.RegisterService(&_Pgateway_serviceDesc, srv)
+}
+
+func _Pgateway_StartSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PgatewayServer).StartSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pservice.Pgateway/StartSession",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PgatewayServer).StartSession(ctx, req.(*SessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Pgateway_ReportStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StatusQuery)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PserviceServer).ReportStatus(ctx, in)
+		return srv.(PgatewayServer).ReportStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/pservice.Pservice/ReportStatus",
+		FullMethod: "/pservice.Pgateway/ReportStatus",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PserviceServer).ReportStatus(ctx, req.(*StatusQuery))
+		return srv.(PgatewayServer).ReportStatus(ctx, req.(*StatusQuery))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Pservice_QueryChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Pgateway_StartEntryQuery_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(EntryQuery)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(PgatewayServer).StartEntryQuery(m, &pgatewayStartEntryQueryServer{stream})
+}
+
+type Pgateway_StartEntryQueryServer interface {
+	Send(*EntryResponse) error
+	grpc.ServerStream
+}
+
+type pgatewayStartEntryQueryServer struct {
+	grpc.ServerStream
+}
+
+func (x *pgatewayStartEntryQueryServer) Send(m *EntryResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Pgateway_ListChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ChannelSearchParams)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PserviceServer).QueryChannels(ctx, in)
+		return srv.(PgatewayServer).ListChannels(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/pservice.Pservice/QueryChannels",
+		FullMethod: "/pservice.Pgateway/ListChannels",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PserviceServer).QueryChannels(ctx, req.(*ChannelSearchParams))
+		return srv.(PgatewayServer).ListChannels(ctx, req.(*ChannelSearchParams))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Pservice_OpenChannelEntryQuery_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(ChannelEntryQuery)
+func _Pgateway_DoEntryOp_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(EntryOpArgs)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(PserviceServer).OpenChannelEntryQuery(m, &pserviceOpenChannelEntryQueryServer{stream})
+	return srv.(PgatewayServer).DoEntryOp(m, &pgatewayDoEntryOpServer{stream})
 }
 
-type Pservice_OpenChannelEntryQueryServer interface {
-	Send(*PDIEntry) error
+type Pgateway_DoEntryOpServer interface {
+	Send(*EntryOpStatus) error
 	grpc.ServerStream
 }
 
-type pserviceOpenChannelEntryQueryServer struct {
+type pgatewayDoEntryOpServer struct {
 	grpc.ServerStream
 }
 
-func (x *pserviceOpenChannelEntryQueryServer) Send(m *PDIEntry) error {
+func (x *pgatewayDoEntryOpServer) Send(m *EntryOpStatus) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _Pservice_PublishChannelEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PDIEntry)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PserviceServer).PublishChannelEntry(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/pservice.Pservice/PublishChannelEntry",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PserviceServer).PublishChannelEntry(ctx, req.(*PDIEntry))
-	}
-	return interceptor(ctx, in, info, handler)
+func _Pgateway_DoEntryOpStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(PgatewayServer).DoEntryOpStream(&pgatewayDoEntryOpStreamServer{stream})
 }
 
-var _Pservice_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "pservice.Pservice",
-	HandlerType: (*PserviceServer)(nil),
+type Pgateway_DoEntryOpStreamServer interface {
+	Send(*EntryOpStatus) error
+	Recv() (*EntryOpArgs, error)
+	grpc.ServerStream
+}
+
+type pgatewayDoEntryOpStreamServer struct {
+	grpc.ServerStream
+}
+
+func (x *pgatewayDoEntryOpStreamServer) Send(m *EntryOpStatus) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *pgatewayDoEntryOpStreamServer) Recv() (*EntryOpArgs, error) {
+	m := new(EntryOpArgs)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+var _Pgateway_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "pservice.Pgateway",
+	HandlerType: (*PgatewayServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "BeginSession",
-			Handler:    _Pservice_BeginSession_Handler,
+			MethodName: "StartSession",
+			Handler:    _Pgateway_StartSession_Handler,
 		},
 		{
 			MethodName: "ReportStatus",
-			Handler:    _Pservice_ReportStatus_Handler,
+			Handler:    _Pgateway_ReportStatus_Handler,
 		},
 		{
-			MethodName: "QueryChannels",
-			Handler:    _Pservice_QueryChannels_Handler,
-		},
-		{
-			MethodName: "PublishChannelEntry",
-			Handler:    _Pservice_PublishChannelEntry_Handler,
+			MethodName: "ListChannels",
+			Handler:    _Pgateway_ListChannels_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "OpenChannelEntryQuery",
-			Handler:       _Pservice_OpenChannelEntryQuery_Handler,
+			StreamName:    "StartEntryQuery",
+			Handler:       _Pgateway_StartEntryQuery_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "DoEntryOp",
+			Handler:       _Pgateway_DoEntryOp_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "DoEntryOpStream",
+			Handler:       _Pgateway_DoEntryOpStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "pservice.proto",
+}
+
+func (m *MemberInfoRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MemberInfoRequest) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.MemberId) > 0 {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.MemberId)))
+		i += copy(dAtA[i:], m.MemberId)
+	}
+	return i, nil
+}
+
+func (m *MemberInfoResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MemberInfoResponse) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.MemberId) > 0 {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.MemberId)))
+		i += copy(dAtA[i:], m.MemberId)
+	}
+	if m.MemberEpoch != nil {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.MemberEpoch.Size()))
+		n1, err := m.MemberEpoch.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n1
+	}
+	return i, nil
+}
+
+func (m *SessionRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SessionRequest) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.SessionToken) > 0 {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.SessionToken)))
+		i += copy(dAtA[i:], m.SessionToken)
+	}
+	if len(m.CommunityId) > 0 {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.CommunityId)))
+		i += copy(dAtA[i:], m.CommunityId)
+	}
+	if len(m.ClientId) > 0 {
+		dAtA[i] = 0x1a
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.ClientId)))
+		i += copy(dAtA[i:], m.ClientId)
+	}
+	if len(m.ServiceScopes) > 0 {
+		dAtA3 := make([]byte, len(m.ServiceScopes)*10)
+		var j2 int
+		for _, num := range m.ServiceScopes {
+			for num >= 1<<7 {
+				dAtA3[j2] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j2++
+			}
+			dAtA3[j2] = uint8(num)
+			j2++
+		}
+		dAtA[i] = 0x22
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(j2))
+		i += copy(dAtA[i:], dAtA3[:j2])
+	}
+	if m.Keys != nil {
+		dAtA[i] = 0x2a
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.Keys.Size()))
+		n4, err := m.Keys.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n4
+	}
+	return i, nil
+}
+
+func (m *SessionInfo) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SessionInfo) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.SessionToken) > 0 {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.SessionToken)))
+		i += copy(dAtA[i:], m.SessionToken)
+	}
+	return i, nil
+}
+
+func (m *EntryQuery) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *EntryQuery) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.QueryOptions != 0 {
+		dAtA[i] = 0x8
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.QueryOptions))
+	}
+	if len(m.ChannelId) > 0 {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.ChannelId)))
+		i += copy(dAtA[i:], m.ChannelId)
+	}
+	if m.TimestampMin != 0 {
+		dAtA[i] = 0x18
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.TimestampMin))
+	}
+	if m.TimestampMax != 0 {
+		dAtA[i] = 0x20
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.TimestampMax))
+	}
+	if len(m.EntryHashnames) > 0 {
+		for _, b := range m.EntryHashnames {
+			dAtA[i] = 0x2a
+			i++
+			i = encodeVarintPservice(dAtA, i, uint64(len(b)))
+			i += copy(dAtA[i:], b)
+		}
+	}
+	return i, nil
+}
+
+func (m *EntryResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *EntryResponse) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.Entries) > 0 {
+		for _, msg := range m.Entries {
+			dAtA[i] = 0xa
+			i++
+			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
+			n, err := msg.MarshalTo(dAtA[i:])
+			if err != nil {
+				return 0, err
+			}
+			i += n
+		}
+	}
+	return i, nil
+}
+
+func (m *EntryOpArgs) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *EntryOpArgs) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Id != 0 {
+		dAtA[i] = 0x8
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.Id))
+	}
+	if m.EntryOp != 0 {
+		dAtA[i] = 0x10
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.EntryOp))
+	}
+	if len(m.OpArgs) > 0 {
+		for k, _ := range m.OpArgs {
+			dAtA[i] = 0x1a
+			i++
+			v := m.OpArgs[k]
+			byteSize := 0
+			if len(v) > 0 {
+				byteSize = 1 + len(v) + sovPservice(uint64(len(v)))
+			}
+			mapSize := 1 + len(k) + sovPservice(uint64(len(k))) + byteSize
+			i = encodeVarintPservice(dAtA, i, uint64(mapSize))
+			dAtA[i] = 0xa
+			i++
+			i = encodeVarintPservice(dAtA, i, uint64(len(k)))
+			i += copy(dAtA[i:], k)
+			if len(v) > 0 {
+				dAtA[i] = 0x12
+				i++
+				i = encodeVarintPservice(dAtA, i, uint64(len(v)))
+				i += copy(dAtA[i:], v)
+			}
+		}
+	}
+	if m.Entry != nil {
+		dAtA[i] = 0x22
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.Entry.Size()))
+		n5, err := m.Entry.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n5
+	}
+	return i, nil
+}
+
+func (m *EntryOpStatus) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *EntryOpStatus) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Id != 0 {
+		dAtA[i] = 0x8
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.Id))
+	}
+	if m.StatusCode != 0 {
+		dAtA[i] = 0x10
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.StatusCode))
+	}
+	if len(m.StatusData) > 0 {
+		for k, _ := range m.StatusData {
+			dAtA[i] = 0x1a
+			i++
+			v := m.StatusData[k]
+			byteSize := 0
+			if len(v) > 0 {
+				byteSize = 1 + len(v) + sovPservice(uint64(len(v)))
+			}
+			mapSize := 1 + len(k) + sovPservice(uint64(len(k))) + byteSize
+			i = encodeVarintPservice(dAtA, i, uint64(mapSize))
+			dAtA[i] = 0xa
+			i++
+			i = encodeVarintPservice(dAtA, i, uint64(len(k)))
+			i += copy(dAtA[i:], k)
+			if len(v) > 0 {
+				dAtA[i] = 0x12
+				i++
+				i = encodeVarintPservice(dAtA, i, uint64(len(v)))
+				i += copy(dAtA[i:], v)
+			}
+		}
+	}
+	return i, nil
+}
+
+func (m *Perror) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *Perror) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Code != 0 {
+		dAtA[i] = 0x8
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(m.Code))
+	}
+	if len(m.Msg) > 0 {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintPservice(dAtA, i, uint64(len(m.Msg)))
+		i += copy(dAtA[i:], m.Msg)
+	}
+	return i, nil
 }
 
 func (m *StatusQuery) Marshal() (dAtA []byte, err error) {
@@ -724,410 +1443,6 @@ func (m *StatusReply) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintPservice(dAtA, i, uint64(len(m.TestReply)))
 		i += copy(dAtA[i:], m.TestReply)
-	}
-	return i, nil
-}
-
-func (m *ClientInfo) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *ClientInfo) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.CommunityId) > 0 {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.CommunityId)))
-		i += copy(dAtA[i:], m.CommunityId)
-	}
-	if len(m.MemberId) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.MemberId)))
-		i += copy(dAtA[i:], m.MemberId)
-	}
-	if len(m.WorkstationId) > 0 {
-		dAtA[i] = 0x1a
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.WorkstationId)))
-		i += copy(dAtA[i:], m.WorkstationId)
-	}
-	return i, nil
-}
-
-func (m *SessionInfo) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *SessionInfo) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.SessionToken) > 0 {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.SessionToken)))
-		i += copy(dAtA[i:], m.SessionToken)
-	}
-	return i, nil
-}
-
-func (m *PStatus) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PStatus) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if m.StatusCode != 0 {
-		dAtA[i] = 0x8
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(m.StatusCode))
-	}
-	if len(m.StatusMsg) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.StatusMsg)))
-		i += copy(dAtA[i:], m.StatusMsg)
-	}
-	return i, nil
-}
-
-func (m *HeaderEntry) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *HeaderEntry) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.FieldName) > 0 {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.FieldName)))
-		i += copy(dAtA[i:], m.FieldName)
-	}
-	if len(m.FieldValue) > 0 {
-		for _, s := range m.FieldValue {
-			dAtA[i] = 0x12
-			i++
-			l = len(s)
-			for l >= 1<<7 {
-				dAtA[i] = uint8(uint64(l)&0x7f | 0x80)
-				l >>= 7
-				i++
-			}
-			dAtA[i] = uint8(l)
-			i++
-			i += copy(dAtA[i:], s)
-		}
-	}
-	return i, nil
-}
-
-func (m *PDIChannelInfo) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PDIChannelInfo) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.ChannelId) > 0 {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.ChannelId)))
-		i += copy(dAtA[i:], m.ChannelId)
-	}
-	if len(m.AccessChannelId) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.AccessChannelId)))
-		i += copy(dAtA[i:], m.AccessChannelId)
-	}
-	if m.AccessChannelRev != 0 {
-		dAtA[i] = 0x18
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(m.AccessChannelRev))
-	}
-	if len(m.Header) > 0 {
-		for _, msg := range m.Header {
-			dAtA[i] = 0x22
-			i++
-			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
-			n, err := msg.MarshalTo(dAtA[i:])
-			if err != nil {
-				return 0, err
-			}
-			i += n
-		}
-	}
-	return i, nil
-}
-
-func (m *PDIChannelList) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PDIChannelList) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.Channels) > 0 {
-		for _, msg := range m.Channels {
-			dAtA[i] = 0xa
-			i++
-			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
-			n, err := msg.MarshalTo(dAtA[i:])
-			if err != nil {
-				return 0, err
-			}
-			i += n
-		}
-	}
-	return i, nil
-}
-
-func (m *PDIChannelProperties) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PDIChannelProperties) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.ChannelName) > 0 {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.ChannelName)))
-		i += copy(dAtA[i:], m.ChannelName)
-	}
-	if len(m.ChannelDesc) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.ChannelDesc)))
-		i += copy(dAtA[i:], m.ChannelDesc)
-	}
-	if len(m.Header) > 0 {
-		for _, msg := range m.Header {
-			dAtA[i] = 0x22
-			i++
-			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
-			n, err := msg.MarshalTo(dAtA[i:])
-			if err != nil {
-				return 0, err
-			}
-			i += n
-		}
-	}
-	return i, nil
-}
-
-func (m *PDIEntry) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PDIEntry) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if m.EntryInfo != 0 {
-		dAtA[i] = 0x8
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(m.EntryInfo))
-	}
-	if len(m.Sig) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.Sig)))
-		i += copy(dAtA[i:], m.Sig)
-	}
-	if len(m.Hash) > 0 {
-		dAtA[i] = 0x1a
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.Hash)))
-		i += copy(dAtA[i:], m.Hash)
-	}
-	if m.EntryHeader != nil {
-		dAtA[i] = 0x22
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(m.EntryHeader.Size()))
-		n1, err := m.EntryHeader.MarshalTo(dAtA[i:])
-		if err != nil {
-			return 0, err
-		}
-		i += n1
-	}
-	if len(m.EntryParts) > 0 {
-		for _, msg := range m.EntryParts {
-			dAtA[i] = 0x2a
-			i++
-			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
-			n, err := msg.MarshalTo(dAtA[i:])
-			if err != nil {
-				return 0, err
-			}
-			i += n
-		}
-	}
-	return i, nil
-}
-
-func (m *PDIEntryHeader) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PDIEntryHeader) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if m.Verb != 0 {
-		dAtA[i] = 0x8
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(m.Verb))
-	}
-	if len(m.ChannelId) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.ChannelId)))
-		i += copy(dAtA[i:], m.ChannelId)
-	}
-	if len(m.AuthorId) > 0 {
-		dAtA[i] = 0x1a
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.AuthorId)))
-		i += copy(dAtA[i:], m.AuthorId)
-	}
-	if len(m.AccessChannelId) > 0 {
-		dAtA[i] = 0x22
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.AccessChannelId)))
-		i += copy(dAtA[i:], m.AccessChannelId)
-	}
-	if m.AccessChannelRev != 0 {
-		dAtA[i] = 0x28
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(m.AccessChannelRev))
-	}
-	if m.Time != 0 {
-		dAtA[i] = 0x31
-		i++
-		binary.LittleEndian.PutUint64(dAtA[i:], uint64(m.Time))
-		i += 8
-	}
-	if len(m.AuxHeader) > 0 {
-		for _, msg := range m.AuxHeader {
-			dAtA[i] = 0x3a
-			i++
-			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
-			n, err := msg.MarshalTo(dAtA[i:])
-			if err != nil {
-				return 0, err
-			}
-			i += n
-		}
-	}
-	return i, nil
-}
-
-func (m *PDIBodyPart) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PDIBodyPart) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if len(m.Header) > 0 {
-		for _, msg := range m.Header {
-			dAtA[i] = 0xa
-			i++
-			i = encodeVarintPservice(dAtA, i, uint64(msg.Size()))
-			n, err := msg.MarshalTo(dAtA[i:])
-			if err != nil {
-				return 0, err
-			}
-			i += n
-		}
-	}
-	if len(m.Content) > 0 {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPservice(dAtA, i, uint64(len(m.Content)))
-		i += copy(dAtA[i:], m.Content)
 	}
 	return i, nil
 }
@@ -1187,39 +1502,54 @@ func encodeVarintPservice(dAtA []byte, offset int, v uint64) int {
 	dAtA[offset] = uint8(v)
 	return offset + 1
 }
-func (m *StatusQuery) Size() (n int) {
+func (m *MemberInfoRequest) Size() (n int) {
 	var l int
 	_ = l
-	l = len(m.TestGreeting)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	return n
-}
-
-func (m *StatusReply) Size() (n int) {
-	var l int
-	_ = l
-	l = len(m.TestReply)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	return n
-}
-
-func (m *ClientInfo) Size() (n int) {
-	var l int
-	_ = l
-	l = len(m.CommunityId)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
 	l = len(m.MemberId)
 	if l > 0 {
 		n += 1 + l + sovPservice(uint64(l))
 	}
-	l = len(m.WorkstationId)
+	return n
+}
+
+func (m *MemberInfoResponse) Size() (n int) {
+	var l int
+	_ = l
+	l = len(m.MemberId)
 	if l > 0 {
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	if m.MemberEpoch != nil {
+		l = m.MemberEpoch.Size()
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	return n
+}
+
+func (m *SessionRequest) Size() (n int) {
+	var l int
+	_ = l
+	l = len(m.SessionToken)
+	if l > 0 {
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	l = len(m.CommunityId)
+	if l > 0 {
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	l = len(m.ClientId)
+	if l > 0 {
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	if len(m.ServiceScopes) > 0 {
+		l = 0
+		for _, e := range m.ServiceScopes {
+			l += sovPservice(uint64(e))
+		}
+		n += 1 + sovPservice(uint64(l)) + l
+	}
+	if m.Keys != nil {
+		l = m.Keys.Size()
 		n += 1 + l + sovPservice(uint64(l))
 	}
 	return n
@@ -1235,160 +1565,122 @@ func (m *SessionInfo) Size() (n int) {
 	return n
 }
 
-func (m *PStatus) Size() (n int) {
+func (m *EntryQuery) Size() (n int) {
 	var l int
 	_ = l
+	if m.QueryOptions != 0 {
+		n += 1 + sovPservice(uint64(m.QueryOptions))
+	}
+	l = len(m.ChannelId)
+	if l > 0 {
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	if m.TimestampMin != 0 {
+		n += 1 + sovPservice(uint64(m.TimestampMin))
+	}
+	if m.TimestampMax != 0 {
+		n += 1 + sovPservice(uint64(m.TimestampMax))
+	}
+	if len(m.EntryHashnames) > 0 {
+		for _, b := range m.EntryHashnames {
+			l = len(b)
+			n += 1 + l + sovPservice(uint64(l))
+		}
+	}
+	return n
+}
+
+func (m *EntryResponse) Size() (n int) {
+	var l int
+	_ = l
+	if len(m.Entries) > 0 {
+		for _, e := range m.Entries {
+			l = e.Size()
+			n += 1 + l + sovPservice(uint64(l))
+		}
+	}
+	return n
+}
+
+func (m *EntryOpArgs) Size() (n int) {
+	var l int
+	_ = l
+	if m.Id != 0 {
+		n += 1 + sovPservice(uint64(m.Id))
+	}
+	if m.EntryOp != 0 {
+		n += 1 + sovPservice(uint64(m.EntryOp))
+	}
+	if len(m.OpArgs) > 0 {
+		for k, v := range m.OpArgs {
+			_ = k
+			_ = v
+			l = 0
+			if len(v) > 0 {
+				l = 1 + len(v) + sovPservice(uint64(len(v)))
+			}
+			mapEntrySize := 1 + len(k) + sovPservice(uint64(len(k))) + l
+			n += mapEntrySize + 1 + sovPservice(uint64(mapEntrySize))
+		}
+	}
+	if m.Entry != nil {
+		l = m.Entry.Size()
+		n += 1 + l + sovPservice(uint64(l))
+	}
+	return n
+}
+
+func (m *EntryOpStatus) Size() (n int) {
+	var l int
+	_ = l
+	if m.Id != 0 {
+		n += 1 + sovPservice(uint64(m.Id))
+	}
 	if m.StatusCode != 0 {
 		n += 1 + sovPservice(uint64(m.StatusCode))
 	}
-	l = len(m.StatusMsg)
+	if len(m.StatusData) > 0 {
+		for k, v := range m.StatusData {
+			_ = k
+			_ = v
+			l = 0
+			if len(v) > 0 {
+				l = 1 + len(v) + sovPservice(uint64(len(v)))
+			}
+			mapEntrySize := 1 + len(k) + sovPservice(uint64(len(k))) + l
+			n += mapEntrySize + 1 + sovPservice(uint64(mapEntrySize))
+		}
+	}
+	return n
+}
+
+func (m *Perror) Size() (n int) {
+	var l int
+	_ = l
+	if m.Code != 0 {
+		n += 1 + sovPservice(uint64(m.Code))
+	}
+	l = len(m.Msg)
 	if l > 0 {
 		n += 1 + l + sovPservice(uint64(l))
 	}
 	return n
 }
 
-func (m *HeaderEntry) Size() (n int) {
+func (m *StatusQuery) Size() (n int) {
 	var l int
 	_ = l
-	l = len(m.FieldName)
+	l = len(m.TestGreeting)
 	if l > 0 {
 		n += 1 + l + sovPservice(uint64(l))
-	}
-	if len(m.FieldValue) > 0 {
-		for _, s := range m.FieldValue {
-			l = len(s)
-			n += 1 + l + sovPservice(uint64(l))
-		}
 	}
 	return n
 }
 
-func (m *PDIChannelInfo) Size() (n int) {
+func (m *StatusReply) Size() (n int) {
 	var l int
 	_ = l
-	l = len(m.ChannelId)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	l = len(m.AccessChannelId)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	if m.AccessChannelRev != 0 {
-		n += 1 + sovPservice(uint64(m.AccessChannelRev))
-	}
-	if len(m.Header) > 0 {
-		for _, e := range m.Header {
-			l = e.Size()
-			n += 1 + l + sovPservice(uint64(l))
-		}
-	}
-	return n
-}
-
-func (m *PDIChannelList) Size() (n int) {
-	var l int
-	_ = l
-	if len(m.Channels) > 0 {
-		for _, e := range m.Channels {
-			l = e.Size()
-			n += 1 + l + sovPservice(uint64(l))
-		}
-	}
-	return n
-}
-
-func (m *PDIChannelProperties) Size() (n int) {
-	var l int
-	_ = l
-	l = len(m.ChannelName)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	l = len(m.ChannelDesc)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	if len(m.Header) > 0 {
-		for _, e := range m.Header {
-			l = e.Size()
-			n += 1 + l + sovPservice(uint64(l))
-		}
-	}
-	return n
-}
-
-func (m *PDIEntry) Size() (n int) {
-	var l int
-	_ = l
-	if m.EntryInfo != 0 {
-		n += 1 + sovPservice(uint64(m.EntryInfo))
-	}
-	l = len(m.Sig)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	l = len(m.Hash)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	if m.EntryHeader != nil {
-		l = m.EntryHeader.Size()
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	if len(m.EntryParts) > 0 {
-		for _, e := range m.EntryParts {
-			l = e.Size()
-			n += 1 + l + sovPservice(uint64(l))
-		}
-	}
-	return n
-}
-
-func (m *PDIEntryHeader) Size() (n int) {
-	var l int
-	_ = l
-	if m.Verb != 0 {
-		n += 1 + sovPservice(uint64(m.Verb))
-	}
-	l = len(m.ChannelId)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	l = len(m.AuthorId)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	l = len(m.AccessChannelId)
-	if l > 0 {
-		n += 1 + l + sovPservice(uint64(l))
-	}
-	if m.AccessChannelRev != 0 {
-		n += 1 + sovPservice(uint64(m.AccessChannelRev))
-	}
-	if m.Time != 0 {
-		n += 9
-	}
-	if len(m.AuxHeader) > 0 {
-		for _, e := range m.AuxHeader {
-			l = e.Size()
-			n += 1 + l + sovPservice(uint64(l))
-		}
-	}
-	return n
-}
-
-func (m *PDIBodyPart) Size() (n int) {
-	var l int
-	_ = l
-	if len(m.Header) > 0 {
-		for _, e := range m.Header {
-			l = e.Size()
-			n += 1 + l + sovPservice(uint64(l))
-		}
-	}
-	l = len(m.Content)
+	l = len(m.TestReply)
 	if l > 0 {
 		n += 1 + l + sovPservice(uint64(l))
 	}
@@ -1425,6 +1717,1311 @@ func sovPservice(x uint64) (n int) {
 }
 func sozPservice(x uint64) (n int) {
 	return sovPservice(uint64((x << 1) ^ uint64((int64(x) >> 63))))
+}
+func (m *MemberInfoRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MemberInfoRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MemberInfoRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemberId", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MemberId = append(m.MemberId[:0], dAtA[iNdEx:postIndex]...)
+			if m.MemberId == nil {
+				m.MemberId = []byte{}
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MemberInfoResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MemberInfoResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MemberInfoResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemberId", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MemberId = append(m.MemberId[:0], dAtA[iNdEx:postIndex]...)
+			if m.MemberId == nil {
+				m.MemberId = []byte{}
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemberEpoch", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.MemberEpoch == nil {
+				m.MemberEpoch = &pdi.MemberEpoch{}
+			}
+			if err := m.MemberEpoch.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SessionRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SessionRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SessionRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionToken", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SessionToken = append(m.SessionToken[:0], dAtA[iNdEx:postIndex]...)
+			if m.SessionToken == nil {
+				m.SessionToken = []byte{}
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CommunityId", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.CommunityId = append(m.CommunityId[:0], dAtA[iNdEx:postIndex]...)
+			if m.CommunityId == nil {
+				m.CommunityId = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ClientId", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ClientId = append(m.ClientId[:0], dAtA[iNdEx:postIndex]...)
+			if m.ClientId == nil {
+				m.ClientId = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType == 0 {
+				var v PserviceScope
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowPservice
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= (PserviceScope(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.ServiceScopes = append(m.ServiceScopes, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowPservice
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= (int(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthPservice
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				for iNdEx < postIndex {
+					var v PserviceScope
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowPservice
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= (PserviceScope(b) & 0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.ServiceScopes = append(m.ServiceScopes, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field ServiceScopes", wireType)
+			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Keys", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Keys == nil {
+				m.Keys = &ski.KeyList{}
+			}
+			if err := m.Keys.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SessionInfo) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SessionInfo: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SessionInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionToken", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SessionToken = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *EntryQuery) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: EntryQuery: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: EntryQuery: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field QueryOptions", wireType)
+			}
+			m.QueryOptions = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.QueryOptions |= (QueryOption(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ChannelId", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ChannelId = append(m.ChannelId[:0], dAtA[iNdEx:postIndex]...)
+			if m.ChannelId == nil {
+				m.ChannelId = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TimestampMin", wireType)
+			}
+			m.TimestampMin = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TimestampMin |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TimestampMax", wireType)
+			}
+			m.TimestampMax = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TimestampMax |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EntryHashnames", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EntryHashnames = append(m.EntryHashnames, make([]byte, postIndex-iNdEx))
+			copy(m.EntryHashnames[len(m.EntryHashnames)-1], dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *EntryResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: EntryResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: EntryResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Entries", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Entries = append(m.Entries, &pdi.Entry{})
+			if err := m.Entries[len(m.Entries)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *EntryOpArgs) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: EntryOpArgs: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: EntryOpArgs: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Id", wireType)
+			}
+			m.Id = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Id |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EntryOp", wireType)
+			}
+			m.EntryOp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EntryOp |= (EntryOp(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field OpArgs", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.OpArgs == nil {
+				m.OpArgs = make(map[string][]byte)
+			}
+			var mapkey string
+			mapvalue := []byte{}
+			for iNdEx < postIndex {
+				entryPreIndex := iNdEx
+				var wire uint64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowPservice
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					wire |= (uint64(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				fieldNum := int32(wire >> 3)
+				if fieldNum == 1 {
+					var stringLenmapkey uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowPservice
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapkey |= (uint64(b) & 0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapkey := int(stringLenmapkey)
+					if intStringLenmapkey < 0 {
+						return ErrInvalidLengthPservice
+					}
+					postStringIndexmapkey := iNdEx + intStringLenmapkey
+					if postStringIndexmapkey > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
+					iNdEx = postStringIndexmapkey
+				} else if fieldNum == 2 {
+					var mapbyteLen uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowPservice
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						mapbyteLen |= (uint64(b) & 0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intMapbyteLen := int(mapbyteLen)
+					if intMapbyteLen < 0 {
+						return ErrInvalidLengthPservice
+					}
+					postbytesIndex := iNdEx + intMapbyteLen
+					if postbytesIndex > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapvalue = make([]byte, mapbyteLen)
+					copy(mapvalue, dAtA[iNdEx:postbytesIndex])
+					iNdEx = postbytesIndex
+				} else {
+					iNdEx = entryPreIndex
+					skippy, err := skipPservice(dAtA[iNdEx:])
+					if err != nil {
+						return err
+					}
+					if skippy < 0 {
+						return ErrInvalidLengthPservice
+					}
+					if (iNdEx + skippy) > postIndex {
+						return io.ErrUnexpectedEOF
+					}
+					iNdEx += skippy
+				}
+			}
+			m.OpArgs[mapkey] = mapvalue
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Entry", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Entry == nil {
+				m.Entry = &pdi.Entry{}
+			}
+			if err := m.Entry.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *EntryOpStatus) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: EntryOpStatus: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: EntryOpStatus: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Id", wireType)
+			}
+			m.Id = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Id |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StatusCode", wireType)
+			}
+			m.StatusCode = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.StatusCode |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StatusData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.StatusData == nil {
+				m.StatusData = make(map[string][]byte)
+			}
+			var mapkey string
+			mapvalue := []byte{}
+			for iNdEx < postIndex {
+				entryPreIndex := iNdEx
+				var wire uint64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowPservice
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					wire |= (uint64(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				fieldNum := int32(wire >> 3)
+				if fieldNum == 1 {
+					var stringLenmapkey uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowPservice
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapkey |= (uint64(b) & 0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapkey := int(stringLenmapkey)
+					if intStringLenmapkey < 0 {
+						return ErrInvalidLengthPservice
+					}
+					postStringIndexmapkey := iNdEx + intStringLenmapkey
+					if postStringIndexmapkey > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
+					iNdEx = postStringIndexmapkey
+				} else if fieldNum == 2 {
+					var mapbyteLen uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowPservice
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						mapbyteLen |= (uint64(b) & 0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intMapbyteLen := int(mapbyteLen)
+					if intMapbyteLen < 0 {
+						return ErrInvalidLengthPservice
+					}
+					postbytesIndex := iNdEx + intMapbyteLen
+					if postbytesIndex > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapvalue = make([]byte, mapbyteLen)
+					copy(mapvalue, dAtA[iNdEx:postbytesIndex])
+					iNdEx = postbytesIndex
+				} else {
+					iNdEx = entryPreIndex
+					skippy, err := skipPservice(dAtA[iNdEx:])
+					if err != nil {
+						return err
+					}
+					if skippy < 0 {
+						return ErrInvalidLengthPservice
+					}
+					if (iNdEx + skippy) > postIndex {
+						return io.ErrUnexpectedEOF
+					}
+					iNdEx += skippy
+				}
+			}
+			m.StatusData[mapkey] = mapvalue
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *Perror) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPservice
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: Perror: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: Perror: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Code", wireType)
+			}
+			m.Code = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Code |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Msg", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPservice
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthPservice
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Msg = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPservice(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPservice
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }
 func (m *StatusQuery) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
@@ -1562,1345 +3159,6 @@ func (m *StatusReply) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.TestReply = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *ClientInfo) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: ClientInfo: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: ClientInfo: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CommunityId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.CommunityId = append(m.CommunityId[:0], dAtA[iNdEx:postIndex]...)
-			if m.CommunityId == nil {
-				m.CommunityId = []byte{}
-			}
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MemberId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.MemberId = append(m.MemberId[:0], dAtA[iNdEx:postIndex]...)
-			if m.MemberId == nil {
-				m.MemberId = []byte{}
-			}
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field WorkstationId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.WorkstationId = append(m.WorkstationId[:0], dAtA[iNdEx:postIndex]...)
-			if m.WorkstationId == nil {
-				m.WorkstationId = []byte{}
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *SessionInfo) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: SessionInfo: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: SessionInfo: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field SessionToken", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= (uint64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.SessionToken = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PStatus) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PStatus: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PStatus: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field StatusCode", wireType)
-			}
-			m.StatusCode = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.StatusCode |= (int32(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field StatusMsg", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= (uint64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.StatusMsg = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *HeaderEntry) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: HeaderEntry: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: HeaderEntry: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field FieldName", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= (uint64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.FieldName = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field FieldValue", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= (uint64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.FieldValue = append(m.FieldValue, string(dAtA[iNdEx:postIndex]))
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PDIChannelInfo) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PDIChannelInfo: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PDIChannelInfo: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ChannelId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ChannelId = append(m.ChannelId[:0], dAtA[iNdEx:postIndex]...)
-			if m.ChannelId == nil {
-				m.ChannelId = []byte{}
-			}
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AccessChannelId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AccessChannelId = append(m.AccessChannelId[:0], dAtA[iNdEx:postIndex]...)
-			if m.AccessChannelId == nil {
-				m.AccessChannelId = []byte{}
-			}
-			iNdEx = postIndex
-		case 3:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AccessChannelRev", wireType)
-			}
-			m.AccessChannelRev = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AccessChannelRev |= (int64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Header", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Header = append(m.Header, &HeaderEntry{})
-			if err := m.Header[len(m.Header)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PDIChannelList) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PDIChannelList: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PDIChannelList: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Channels", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Channels = append(m.Channels, &PDIChannelInfo{})
-			if err := m.Channels[len(m.Channels)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PDIChannelProperties) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PDIChannelProperties: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PDIChannelProperties: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ChannelName", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= (uint64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ChannelName = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ChannelDesc", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= (uint64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ChannelDesc = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Header", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Header = append(m.Header, &HeaderEntry{})
-			if err := m.Header[len(m.Header)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PDIEntry) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PDIEntry: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PDIEntry: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field EntryInfo", wireType)
-			}
-			m.EntryInfo = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.EntryInfo |= (int32(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Sig", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Sig = append(m.Sig[:0], dAtA[iNdEx:postIndex]...)
-			if m.Sig == nil {
-				m.Sig = []byte{}
-			}
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Hash", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Hash = append(m.Hash[:0], dAtA[iNdEx:postIndex]...)
-			if m.Hash == nil {
-				m.Hash = []byte{}
-			}
-			iNdEx = postIndex
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field EntryHeader", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.EntryHeader == nil {
-				m.EntryHeader = &PDIEntryHeader{}
-			}
-			if err := m.EntryHeader.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 5:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field EntryParts", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.EntryParts = append(m.EntryParts, &PDIBodyPart{})
-			if err := m.EntryParts[len(m.EntryParts)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PDIEntryHeader) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PDIEntryHeader: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PDIEntryHeader: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Verb", wireType)
-			}
-			m.Verb = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.Verb |= (int32(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ChannelId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ChannelId = append(m.ChannelId[:0], dAtA[iNdEx:postIndex]...)
-			if m.ChannelId == nil {
-				m.ChannelId = []byte{}
-			}
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AuthorId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AuthorId = append(m.AuthorId[:0], dAtA[iNdEx:postIndex]...)
-			if m.AuthorId == nil {
-				m.AuthorId = []byte{}
-			}
-			iNdEx = postIndex
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AccessChannelId", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AccessChannelId = append(m.AccessChannelId[:0], dAtA[iNdEx:postIndex]...)
-			if m.AccessChannelId == nil {
-				m.AccessChannelId = []byte{}
-			}
-			iNdEx = postIndex
-		case 5:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AccessChannelRev", wireType)
-			}
-			m.AccessChannelRev = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AccessChannelRev |= (int64(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 6:
-			if wireType != 1 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Time", wireType)
-			}
-			m.Time = 0
-			if (iNdEx + 8) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Time = uint64(binary.LittleEndian.Uint64(dAtA[iNdEx:]))
-			iNdEx += 8
-		case 7:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AuxHeader", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AuxHeader = append(m.AuxHeader, &HeaderEntry{})
-			if err := m.AuxHeader[len(m.AuxHeader)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipPservice(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if skippy < 0 {
-				return ErrInvalidLengthPservice
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *PDIBodyPart) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowPservice
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: PDIBodyPart: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: PDIBodyPart: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Header", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + msglen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Header = append(m.Header, &HeaderEntry{})
-			if err := m.Header[len(m.Header)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Content", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowPservice
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthPservice
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Content = append(m.Content[:0], dAtA[iNdEx:postIndex]...)
-			if m.Content == nil {
-				m.Content = []byte{}
-			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -3169,56 +3427,72 @@ var (
 func init() { proto.RegisterFile("pservice.proto", fileDescriptorPservice) }
 
 var fileDescriptorPservice = []byte{
-	// 807 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x94, 0x55, 0xcd, 0x8e, 0xe3, 0x44,
-	0x10, 0xc6, 0xf9, 0x9b, 0xb8, 0x9c, 0x0c, 0x33, 0xbd, 0xb3, 0x92, 0x95, 0xd1, 0x84, 0xe0, 0x15,
-	0x52, 0x80, 0x65, 0x85, 0x86, 0x15, 0x17, 0xf6, 0x34, 0x09, 0xb0, 0x46, 0x2c, 0x18, 0x2f, 0xda,
-	0xab, 0xd5, 0xb1, 0x2b, 0x89, 0xb5, 0xb1, 0x1d, 0x75, 0xb7, 0xc3, 0xe6, 0xce, 0x8d, 0x17, 0xe0,
-	0x51, 0x78, 0x00, 0x0e, 0x1c, 0xb9, 0x72, 0x43, 0xc3, 0x8b, 0xa0, 0xfe, 0x49, 0xec, 0x4d, 0x66,
-	0x11, 0x7b, 0xeb, 0xfa, 0xea, 0xeb, 0xee, 0xfa, 0xbe, 0x2e, 0x97, 0xe1, 0x74, 0xcd, 0x91, 0x6d,
-	0xd2, 0x18, 0x1f, 0xad, 0x59, 0x21, 0x0a, 0xd2, 0xdd, 0xc5, 0xde, 0x35, 0x38, 0xcf, 0x05, 0x15,
-	0x25, 0xff, 0xa1, 0x44, 0xb6, 0x25, 0x0f, 0xa0, 0x2f, 0x90, 0x8b, 0x68, 0xc1, 0x10, 0x45, 0x9a,
-	0x2f, 0x5c, 0x6b, 0x64, 0x8d, 0xed, 0xb0, 0x27, 0xc1, 0xaf, 0x0d, 0xe6, 0x3d, 0xdc, 0xed, 0x09,
-	0x71, 0xbd, 0xda, 0x92, 0x2b, 0x00, 0xb5, 0x87, 0xc9, 0xc8, 0x6c, 0xb0, 0x25, 0xa2, 0xd2, 0x1e,
-	0x07, 0x98, 0xac, 0x52, 0xcc, 0x85, 0x9f, 0xcf, 0x0b, 0xf2, 0x3e, 0xf4, 0xe2, 0x22, 0xcb, 0xca,
-	0x3c, 0x15, 0xdb, 0x28, 0x4d, 0x14, 0xbd, 0x17, 0x3a, 0x7b, 0xcc, 0x4f, 0xc8, 0x25, 0xd8, 0x19,
-	0x66, 0x33, 0x64, 0x32, 0xdf, 0x50, 0xf9, 0xae, 0x06, 0xfc, 0x84, 0x7c, 0x00, 0xa7, 0x3f, 0x15,
-	0xec, 0x25, 0x17, 0x54, 0xa4, 0x45, 0x2e, 0x19, 0x4d, 0xc5, 0xe8, 0xd7, 0x50, 0x3f, 0x51, 0xb2,
-	0x90, 0x73, 0x19, 0xc8, 0x5b, 0x1f, 0x40, 0x9f, 0xeb, 0x30, 0x12, 0xc5, 0x4b, 0xcc, 0x77, 0xb2,
-	0x0c, 0xf8, 0xa3, 0xc4, 0x3c, 0x1f, 0x4e, 0x02, 0xad, 0x8b, 0xbc, 0x07, 0x0e, 0x57, 0xab, 0x28,
-	0x2e, 0x12, 0x54, 0xec, 0x76, 0x08, 0x1a, 0x9a, 0x14, 0x09, 0x4a, 0xcd, 0x86, 0x90, 0xf1, 0x85,
-	0x2a, 0xd2, 0x0e, 0x6d, 0x8d, 0x3c, 0xe3, 0x0b, 0xef, 0x19, 0x38, 0x4f, 0x91, 0x26, 0xc8, 0xbe,
-	0xcc, 0x05, 0x53, 0x0e, 0xcd, 0x53, 0x5c, 0x25, 0x51, 0x4e, 0x33, 0xdc, 0x39, 0xa4, 0x90, 0xef,
-	0x68, 0x86, 0xf2, 0x36, 0x9d, 0xde, 0xd0, 0x55, 0x89, 0x6e, 0x63, 0xd4, 0x1c, 0xdb, 0xa1, 0xde,
-	0xf1, 0x42, 0x22, 0xde, 0x6f, 0x16, 0x9c, 0x06, 0x53, 0x7f, 0xb2, 0xa4, 0x79, 0x8e, 0x2b, 0xa5,
-	0xe8, 0x0a, 0x20, 0xd6, 0x61, 0xe5, 0xa2, 0x6d, 0x10, 0x3f, 0x21, 0x1f, 0xc1, 0x39, 0x8d, 0x63,
-	0xe4, 0x3c, 0xaa, 0xb1, 0xb4, 0x97, 0xef, 0xea, 0xc4, 0x64, 0xcf, 0x7d, 0x08, 0xe4, 0x80, 0xcb,
-	0x70, 0xa3, 0x6c, 0x6d, 0x86, 0x67, 0xaf, 0x91, 0x43, 0xdc, 0x90, 0x4f, 0xa0, 0xb3, 0x54, 0xd2,
-	0xdc, 0xd6, 0xa8, 0x39, 0x76, 0xae, 0xef, 0x3f, 0xda, 0xf7, 0x56, 0x4d, 0x72, 0x68, 0x48, 0xde,
-	0x57, 0xf5, 0xca, 0xbf, 0x4d, 0xb9, 0x20, 0x8f, 0xa1, 0x6b, 0xee, 0xe1, 0xae, 0xa5, 0x8e, 0x70,
-	0xab, 0x23, 0x5e, 0x57, 0x19, 0xee, 0x99, 0xde, 0x2f, 0x16, 0x5c, 0x54, 0xc9, 0x80, 0x15, 0x6b,
-	0x64, 0x22, 0x45, 0xae, 0x1a, 0xca, 0x94, 0x5d, 0x73, 0xd7, 0x31, 0x98, 0xf2, 0xb7, 0x46, 0x49,
-	0x90, 0xc7, 0xe6, 0xb9, 0x76, 0x94, 0x29, 0xf2, 0xf8, 0x6d, 0x55, 0xfd, 0x6e, 0x41, 0x37, 0x98,
-	0xfa, 0xfb, 0xd7, 0x45, 0xb9, 0x88, 0xd2, 0x7c, 0x5e, 0x98, 0x5e, 0xb1, 0x15, 0xa2, 0x5e, 0xea,
-	0x0c, 0x9a, 0x3c, 0x5d, 0x18, 0xf3, 0xe5, 0x92, 0x10, 0x68, 0x2d, 0x29, 0x5f, 0x9a, 0xce, 0x55,
-	0x6b, 0xf2, 0x05, 0xf4, 0xf4, 0x21, 0xfb, 0x32, 0xac, 0x23, 0x67, 0xd4, 0x75, 0xba, 0x9c, 0xd0,
-	0xc1, 0x2a, 0x20, 0x9f, 0x83, 0x0e, 0xa3, 0x35, 0x65, 0x82, 0xbb, 0xed, 0x43, 0x09, 0xc1, 0xd4,
-	0xbf, 0x29, 0x92, 0x6d, 0x40, 0x99, 0x08, 0x75, 0xad, 0x72, 0xc9, 0xbd, 0x9f, 0x1b, 0xea, 0x75,
-	0x6a, 0xe7, 0xca, 0xda, 0x36, 0xc8, 0x66, 0x46, 0x86, 0x5a, 0x1f, 0xf4, 0x5a, 0xe3, 0xb0, 0xd7,
-	0x2e, 0xc1, 0xa6, 0xa5, 0x58, 0x16, 0xac, 0xfa, 0x1a, 0xbb, 0x1a, 0x78, 0x53, 0x23, 0xb6, 0xde,
-	0xa6, 0x11, 0xdb, 0x6f, 0x68, 0x44, 0x02, 0x2d, 0x91, 0x66, 0xe8, 0x76, 0x46, 0xd6, 0xb8, 0x13,
-	0xaa, 0x35, 0x79, 0x0c, 0x40, 0xcb, 0x57, 0x3b, 0x0f, 0x4f, 0xfe, 0xeb, 0x29, 0x6d, 0x5a, 0xbe,
-	0xd2, 0xb1, 0xf7, 0x02, 0x9c, 0x9a, 0x43, 0xb5, 0x5e, 0xb0, 0xfe, 0x47, 0x2f, 0x10, 0x17, 0x4e,
-	0xe2, 0x22, 0x17, 0x98, 0x0b, 0x63, 0xcd, 0x2e, 0xf4, 0x3e, 0x86, 0x7b, 0xa6, 0xde, 0xe7, 0x48,
-	0x59, 0xbc, 0x0c, 0x28, 0xa3, 0x19, 0x27, 0x17, 0xd0, 0x9e, 0xaf, 0xe8, 0x82, 0x1b, 0x8f, 0x75,
-	0xe0, 0x7d, 0x08, 0xe7, 0x86, 0xac, 0x8e, 0xd7, 0xe3, 0xf8, 0x4e, 0xea, 0xf5, 0x5f, 0x0d, 0xe8,
-	0x06, 0xa6, 0x24, 0xd9, 0x38, 0x37, 0xb8, 0x48, 0x73, 0x33, 0xee, 0xc8, 0x45, 0x55, 0x6d, 0x35,
-	0x76, 0x07, 0x35, 0x0d, 0xf5, 0xb9, 0xf8, 0x04, 0x7a, 0x21, 0xae, 0x0b, 0x26, 0xcc, 0xdc, 0xab,
-	0xd3, 0xaa, 0xbf, 0xc2, 0xe0, 0x08, 0xd6, 0x83, 0xff, 0x29, 0xf4, 0x55, 0xde, 0xd4, 0xcd, 0xc9,
-	0x55, 0xed, 0xee, 0x63, 0xe1, 0x83, 0x3b, 0xbf, 0x73, 0x35, 0x13, 0xbe, 0x81, 0xfb, 0xdf, 0xaf,
-	0x31, 0x3f, 0x36, 0xe0, 0xf2, 0xe8, 0xc4, 0x2a, 0x39, 0x20, 0xc7, 0x5f, 0xc7, 0xa7, 0x16, 0x79,
-	0x02, 0xf7, 0x82, 0x72, 0xb6, 0x4a, 0xf9, 0xb2, 0xbe, 0x83, 0xdc, 0x41, 0x1e, 0x9c, 0xd7, 0x30,
-	0x2d, 0xec, 0xe6, 0xec, 0x8f, 0xdb, 0xa1, 0xf5, 0xe7, 0xed, 0xd0, 0xfa, 0xfb, 0x76, 0x68, 0xfd,
-	0xfa, 0xcf, 0xf0, 0x9d, 0x59, 0x47, 0xfd, 0x32, 0x3f, 0xfb, 0x37, 0x00, 0x00, 0xff, 0xff, 0xee,
-	0xa5, 0x6a, 0x32, 0x44, 0x07, 0x00, 0x00,
+	// 1059 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x56, 0xdd, 0x6e, 0x1b, 0x45,
+	0x14, 0xee, 0xfa, 0x27, 0x89, 0x8f, 0xd7, 0x8e, 0x33, 0x6d, 0xa8, 0xe5, 0xb6, 0x21, 0x5d, 0x90,
+	0x6a, 0xd2, 0xd6, 0x89, 0x5c, 0x21, 0x41, 0xa0, 0xa0, 0x24, 0x5e, 0x35, 0x2b, 0x92, 0xd8, 0x8c,
+	0x5d, 0xa1, 0x5c, 0xad, 0x26, 0xf6, 0xc4, 0x5e, 0xc5, 0xbb, 0xb3, 0xd9, 0x19, 0x97, 0xfa, 0x15,
+	0xb8, 0xe6, 0x02, 0xde, 0x08, 0xee, 0xb8, 0x43, 0xe2, 0x0a, 0x05, 0x1e, 0x04, 0xcd, 0x8f, 0x7f,
+	0x12, 0x07, 0x50, 0xc5, 0x0d, 0x17, 0xd6, 0xce, 0x7c, 0xe7, 0x3b, 0x33, 0xe7, 0x3b, 0x73, 0xce,
+	0x8c, 0xa1, 0x18, 0x73, 0x9a, 0xbc, 0x09, 0xba, 0xb4, 0x16, 0x27, 0x4c, 0x30, 0xb4, 0x32, 0x99,
+	0x57, 0x9e, 0xf6, 0x03, 0x31, 0x18, 0x9d, 0xd5, 0xba, 0x2c, 0xdc, 0x8e, 0x87, 0x24, 0x7a, 0x2e,
+	0x18, 0x1b, 0xf2, 0xed, 0x3e, 0x7b, 0x2e, 0x67, 0xdb, 0x71, 0x2f, 0x90, 0x3f, 0xed, 0xf6, 0x6f,
+	0x64, 0x7e, 0x11, 0xc8, 0x9f, 0x26, 0x3b, 0x3b, 0xb0, 0x76, 0x4c, 0xc3, 0x33, 0x9a, 0x78, 0xd1,
+	0x39, 0xc3, 0xf4, 0x72, 0x44, 0xb9, 0x40, 0x0f, 0x20, 0x17, 0x2a, 0xd0, 0x0f, 0x7a, 0x65, 0x6b,
+	0xd3, 0xaa, 0xda, 0x78, 0x45, 0x03, 0x5e, 0xcf, 0x39, 0x07, 0x34, 0xef, 0xc1, 0x63, 0x16, 0x71,
+	0xfa, 0x8f, 0x2e, 0xe8, 0x05, 0xd8, 0xc6, 0x48, 0x63, 0xd6, 0x1d, 0x94, 0x53, 0x9b, 0x56, 0x35,
+	0x5f, 0x2f, 0xd5, 0x64, 0xcc, 0x7a, 0x2d, 0x57, 0xe2, 0x38, 0x1f, 0xce, 0x26, 0xce, 0xaf, 0x16,
+	0x14, 0xdb, 0x94, 0xf3, 0x80, 0x45, 0x93, 0xb8, 0x3e, 0x80, 0x02, 0xd7, 0x88, 0x2f, 0xd8, 0x05,
+	0x8d, 0xcc, 0x46, 0xb6, 0x01, 0x3b, 0x12, 0x43, 0x8f, 0xc1, 0xee, 0xb2, 0x30, 0x1c, 0x45, 0x81,
+	0x18, 0xcb, 0x60, 0x52, 0x8a, 0x93, 0x9f, 0x62, 0x5e, 0x4f, 0x06, 0xdb, 0x1d, 0x06, 0x34, 0x12,
+	0xd2, 0x9e, 0xd6, 0xc1, 0x6a, 0xc0, 0xeb, 0xa1, 0x2f, 0xa0, 0x68, 0xd2, 0xee, 0xf3, 0x2e, 0x8b,
+	0x29, 0x2f, 0x67, 0x36, 0xd3, 0xd5, 0x62, 0xfd, 0x7e, 0x6d, 0x7a, 0x3c, 0x2d, 0x33, 0x68, 0x4b,
+	0x3b, 0x2e, 0xcc, 0xcf, 0x38, 0xda, 0x84, 0xcc, 0x05, 0x1d, 0xf3, 0x72, 0x56, 0x89, 0xb4, 0x6b,
+	0x32, 0xd7, 0x5f, 0xd1, 0xf1, 0x51, 0xc0, 0x05, 0x56, 0x16, 0xa7, 0x0e, 0x79, 0x23, 0x4c, 0xa6,
+	0xf0, 0x76, 0x55, 0xb9, 0xeb, 0xaa, 0x9c, 0xdf, 0x2c, 0x00, 0x37, 0x12, 0xc9, 0xf8, 0xeb, 0x11,
+	0x4d, 0xc6, 0x68, 0x17, 0x0a, 0x97, 0x72, 0xe0, 0xb3, 0x58, 0x04, 0x2c, 0xe2, 0xca, 0xa7, 0x58,
+	0x5f, 0x9f, 0xc5, 0xa8, 0x78, 0x4d, 0x65, 0xc5, 0xf6, 0xe5, 0x6c, 0xc2, 0xd1, 0x23, 0x80, 0xee,
+	0x80, 0x44, 0x11, 0x1d, 0xce, 0xd2, 0x93, 0x33, 0x88, 0xd7, 0x93, 0xe1, 0x88, 0x20, 0xa4, 0x5c,
+	0x90, 0x30, 0xf6, 0xc3, 0x20, 0x52, 0x09, 0xca, 0x60, 0x7b, 0x0a, 0x1e, 0x07, 0xd1, 0x0d, 0x12,
+	0x79, 0x5b, 0xce, 0xdc, 0x24, 0x91, 0xb7, 0xe8, 0x09, 0xac, 0x52, 0x19, 0xb2, 0x3f, 0x20, 0x7c,
+	0x10, 0x91, 0x90, 0xca, 0xa4, 0xa4, 0xab, 0x36, 0x2e, 0x2a, 0xf8, 0x70, 0x82, 0x3a, 0x1f, 0x43,
+	0x41, 0x69, 0x9b, 0x56, 0xd3, 0x87, 0xb0, 0x2c, 0x29, 0x01, 0x95, 0xc2, 0xd2, 0xd5, 0x7c, 0x1d,
+	0x54, 0xad, 0x68, 0xd2, 0xc4, 0xe4, 0xfc, 0x69, 0x41, 0x5e, 0x41, 0xcd, 0x78, 0x2f, 0xe9, 0x73,
+	0x54, 0x84, 0x94, 0x29, 0xbe, 0x2c, 0x4e, 0x05, 0x3d, 0xf4, 0x0c, 0x56, 0xf4, 0xfe, 0x2c, 0x56,
+	0x32, 0x8b, 0xf5, 0xb5, 0x59, 0x7e, 0x8c, 0xa3, 0x5e, 0x6d, 0xdc, 0x8c, 0xd1, 0x2e, 0x2c, 0xb3,
+	0xd8, 0x27, 0x49, 0x9f, 0x97, 0xd3, 0x6a, 0xcf, 0xc7, 0x0b, 0x64, 0xb9, 0x4b, 0x4d, 0x7f, 0x74,
+	0x28, 0x4b, 0x4c, 0xef, 0xbc, 0x09, 0x59, 0xb5, 0x8c, 0x4a, 0xc3, 0xf5, 0x68, 0xb5, 0xa1, 0xf2,
+	0x29, 0xe4, 0xe7, 0x1c, 0x51, 0x09, 0xd2, 0x17, 0x74, 0x6c, 0x4e, 0x5a, 0x0e, 0xd1, 0x3d, 0xc8,
+	0xbe, 0x21, 0xc3, 0x11, 0x35, 0x07, 0xa2, 0x27, 0xbb, 0xa9, 0x4f, 0x2c, 0xe7, 0x67, 0xcb, 0xa4,
+	0xa7, 0x19, 0xb7, 0x05, 0x11, 0xa3, 0x45, 0xa1, 0xef, 0x43, 0x9e, 0x2b, 0x8b, 0xdf, 0x65, 0x3d,
+	0xbd, 0x42, 0x16, 0x83, 0x86, 0x0e, 0x58, 0x8f, 0xa2, 0xc3, 0x29, 0xa1, 0x47, 0x04, 0x31, 0xfa,
+	0x9e, 0x2c, 0xe8, 0xd3, 0xcb, 0xd7, 0xf4, 0xa7, 0x41, 0x04, 0xd1, 0x12, 0xcc, 0x4a, 0x12, 0xa8,
+	0xbc, 0x84, 0xd5, 0x1b, 0xe6, 0x77, 0xd2, 0x52, 0x83, 0xa5, 0x16, 0x4d, 0x12, 0x96, 0x20, 0x04,
+	0x19, 0x15, 0xac, 0x56, 0xa1, 0xc6, 0x72, 0xa5, 0x90, 0xf7, 0x95, 0x57, 0x0e, 0xcb, 0xa1, 0x6a,
+	0x15, 0xb5, 0x9d, 0x2e, 0x7b, 0x59, 0x76, 0x94, 0x0b, 0xbf, 0x9f, 0x50, 0x2a, 0x82, 0xa8, 0x3f,
+	0x69, 0x15, 0x09, 0xbe, 0x32, 0x98, 0xf3, 0x6c, 0xe2, 0x83, 0x69, 0x3c, 0x1c, 0xcb, 0x72, 0x57,
+	0x3e, 0x89, 0x9c, 0x19, 0x87, 0x9c, 0x44, 0x94, 0xd9, 0x79, 0x0a, 0x77, 0x0f, 0x74, 0xed, 0xb7,
+	0x29, 0x49, 0xba, 0x83, 0x16, 0x49, 0x48, 0xc8, 0xa5, 0x84, 0xf3, 0x21, 0xe9, 0x73, 0x13, 0x9f,
+	0x9e, 0x38, 0x1f, 0xc1, 0x9a, 0x21, 0xcf, 0xf5, 0xe2, 0xad, 0xd4, 0xad, 0x87, 0xb0, 0x6c, 0xb2,
+	0x8a, 0xd6, 0xa0, 0xd0, 0x7a, 0xbd, 0x7f, 0xe4, 0xb5, 0x0f, 0x7d, 0xf7, 0xa4, 0x83, 0x4f, 0x4b,
+	0x77, 0xb6, 0xbe, 0xb3, 0xa0, 0x70, 0xed, 0x16, 0x41, 0x77, 0x61, 0x15, 0xbb, 0xad, 0x23, 0xef,
+	0x60, 0xaf, 0xe3, 0x35, 0x4f, 0xfc, 0x57, 0x6e, 0xa7, 0x74, 0x07, 0xdd, 0x83, 0xd2, 0x3c, 0xd8,
+	0x6a, 0xb6, 0x3b, 0x25, 0x0b, 0x21, 0x28, 0x1e, 0x34, 0x8f, 0x8f, 0x5f, 0x9f, 0x78, 0x9d, 0x53,
+	0x1f, 0xbb, 0x7b, 0x8d, 0x52, 0x4a, 0xba, 0xcf, 0xb0, 0x6f, 0xb0, 0xd7, 0x71, 0x4b, 0x69, 0xb5,
+	0xb1, 0x8b, 0xdb, 0xcd, 0x93, 0xbd, 0x23, 0xcd, 0xcb, 0x48, 0xdf, 0x29, 0xa4, 0x69, 0xd9, 0xad,
+	0xcf, 0x20, 0x3f, 0x77, 0x5b, 0xa0, 0xf7, 0x00, 0x35, 0xdc, 0x03, 0x7c, 0xda, 0xea, 0xf8, 0xad,
+	0x86, 0xe7, 0x1f, 0xba, 0x7b, 0x0d, 0x17, 0xeb, 0x60, 0xe6, 0xf1, 0xfd, 0x66, 0xe3, 0xb4, 0x64,
+	0xd5, 0x7f, 0x4c, 0x41, 0xb6, 0x15, 0xc9, 0xd3, 0xfb, 0x12, 0xec, 0xb6, 0x20, 0x89, 0x30, 0x77,
+	0x1b, 0x2a, 0xcf, 0xea, 0xeb, 0xfa, 0x3d, 0x5e, 0x59, 0x5f, 0xb0, 0xa8, 0x8b, 0xf0, 0x25, 0xe4,
+	0x1a, 0x6c, 0x92, 0xb4, 0xf5, 0x5b, 0xbb, 0xaf, 0x72, 0xff, 0x6f, 0x8a, 0x76, 0xc7, 0x42, 0x2e,
+	0xac, 0x4e, 0xdd, 0xdb, 0x22, 0xa1, 0x24, 0x7c, 0xd7, 0x45, 0xaa, 0xd6, 0x8e, 0x85, 0x3c, 0xb0,
+	0x8f, 0x18, 0xbb, 0x18, 0xc5, 0xfa, 0x65, 0x42, 0x0f, 0x66, 0xe4, 0x85, 0x97, 0xb2, 0xf2, 0xf0,
+	0x76, 0xa3, 0xbe, 0xc6, 0xea, 0xdf, 0xa7, 0x61, 0xa5, 0xd5, 0x27, 0x82, 0x7e, 0x4b, 0xc6, 0xff,
+	0x3d, 0x3d, 0x9f, 0x83, 0x8d, 0x69, 0xcc, 0x12, 0x61, 0x6e, 0x81, 0x79, 0xda, 0xac, 0x47, 0x2a,
+	0x0b, 0xb0, 0x6e, 0x83, 0x7d, 0xd5, 0xb8, 0x89, 0x98, 0x2f, 0xdc, 0x1b, 0x69, 0xd0, 0xfe, 0x37,
+	0x93, 0x33, 0x51, 0xb3, 0x63, 0x49, 0x09, 0xf2, 0x19, 0x33, 0x2d, 0xc0, 0xd1, 0xa3, 0x19, 0xf5,
+	0x96, 0x1e, 0xaa, 0xe8, 0x07, 0xde, 0x58, 0xa4, 0xe3, 0xff, 0xe3, 0x84, 0xf7, 0x4b, 0x3f, 0x5d,
+	0x6d, 0x58, 0xbf, 0x5c, 0x6d, 0x58, 0xbf, 0x5f, 0x6d, 0x58, 0x3f, 0xfc, 0xb1, 0x71, 0xe7, 0x6c,
+	0x49, 0xfd, 0x19, 0x7a, 0xf1, 0x57, 0x00, 0x00, 0x00, 0xff, 0xff, 0xc1, 0x6f, 0x24, 0xfb, 0x82,
+	0x09, 0x00, 0x00,
 }
