@@ -8,11 +8,11 @@ import (
     "path"
     "math"
     "math/rand"
-    "log"
-    "fmt"
+    //"fmt"
 	"encoding/hex"
     "time"
     "bytes"
+    "log"
 
     "github.com/plan-tools/go-plan/plan"
     "github.com/plan-tools/go-plan/pdi"
@@ -31,7 +31,7 @@ type testPB struct {
     reqIDs          []pdi.RequestID
     numCommitted    int
     numToCommit     int
-    storageMsgCh    chan pdi.StorageMsg
+    storageMsgCh    <-chan pdi.StorageMsg
     session         pdi.StorageSession
 }
 
@@ -42,41 +42,40 @@ func Test1(t *testing.T) {
 
     gTesting = t
 
-    usr, err := user.Current()
-    if err != nil {
-        log.Fatal( err )
-    }
-    fmt.Println( usr.HomeDir )
+    seed := plan.Now().UnixSecs
+    log.Printf("Using seed: %d", seed)
+    rand.Seed( seed )
+
 
     provider := bolt.NewBoltProvider( 
         getTmpDir(),
         os.FileMode(0775),
     )
 
+    var err error
     var communityID plan.CommunityID
     _, err = rand.Read(communityID[:])
     if err != nil {
         log.Fatal( err )
     }
 
-    N := 1 //+ rand.Int31n(50)
-    msgChSz := rand.Int31n(4)
+    N := int(40 + rand.Int31n(50))
 
     pb := &testPB{
         numToCommit: N,
         reqIDs: make([]pdi.RequestID, N),
         numCommitted: 0,
-        storageMsgCh: make(chan pdi.StorageMsg, msgChSz),
     }
 
 
     pb.session, err = provider.StartSession(
         communityID[:],
-        pb.storageMsgCh,
     )
     if err != nil {
         log.Fatal( err )
     }
+
+    pb.storageMsgCh = pb.session.GetMsgChan()
 
     /*****************************************************
     ** Wait for the session to be ready
@@ -102,6 +101,7 @@ func Test1(t *testing.T) {
 
     waitForTest := make(chan bool)
 
+    pb.session.RequestFromBookmark(nil)
 
 
     go func() {
@@ -110,9 +110,9 @@ func Test1(t *testing.T) {
         ** Process and verify committed txns
         **/
 
-        testPass := false
+        sessionEnded := false
 
-        for pb.session.IsReady() {
+        for ! sessionEnded {
             
             msg, ok := <-pb.storageMsgCh
             if ok {
@@ -121,34 +121,35 @@ func Test1(t *testing.T) {
                     case msg.AlertCode == 0:
                         switch msg.StorageOp {
                             
-                            case pdi.OpRequestTxns:
-                            case pdi.OpTxnReport:
+                            case pdi.OpTxnReport, pdi.OpRequestTxns:
                                 for _, txn := range msg.Txns {
                                     verifyRandoBody(*txn.Body)
                                 }
                                 
                                 // If we verified the last txn, close the session, ending the test
                                 if pb.numToCommit == pb.numCommitted && msg.StorageOp == pdi.OpRequestTxns {
-                                    pb.session.EndSession("I'm Pickle Rick!")
-                                    testPass = true
+                                    pb.session.EndSession("Basic test complete!")
                                 }
 
                             case pdi.OpCommitTxns: {
-                                for _, txn := range msg.Txns {
-                                    pb.session.RequestTxns( []pdi.TxnRequest{
-                                        pdi.TxnRequest{
-                                            TxnName: txn.TxnName,
-                                            TimeCommitted: txn.TimeCommitted,
-                                            IncludeBody: true,
-                                        },
-                                    })
-                                }
+                                go func() {
+                                    for _, txn := range msg.Txns {
+                                        pb.session.RequestTxns( []pdi.TxnRequest{
+                                            pdi.TxnRequest{
+                                                TxnName: txn.TxnName,
+                                                TimeCommitted: txn.TimeCommitted,
+                                                IncludeBody: true,
+                                            },
+                                        })
+                                    }
+                                }()
                             
                             }
                         }
 
                     case ( msg.AlertCode & pdi.SessionEndedAlertMask ) != 0:
                         log.Printf("Session ended (%v): %v", msg.AlertCode, msg.AlertMsg)
+                        sessionEnded = true
                         break
 
                     default:
@@ -159,7 +160,7 @@ func Test1(t *testing.T) {
 
         }
 
-        waitForTest <-testPass
+        waitForTest <-true
     }()
 
 
@@ -172,17 +173,17 @@ func Test1(t *testing.T) {
         for i := 0; i < pb.numToCommit; i++ {
 
             var err error
-            body := makeRandoBody(i)
+            body := makeRandoBody(i+1)
             pb.reqIDs[i], err = pb.session.CommitTxn(body)
             if err != nil {
                 log.Fatal(err)
             }
-            log.Printf("Commit %d of %d sent\n", pb.numCommitted, pb.numToCommit)
+            log.Printf("Committed %d (of %d)\n", pb.numCommitted + 1, pb.numToCommit)
 
             pb.numCommitted++
             {
-                sleepMSf := rand.NormFloat64() * 200 + 200
-                sleepMS:= math.Max( math.Min(0, sleepMSf), 800 )
+                sleepMSf := rand.NormFloat64() * 200 + 50
+                sleepMS:= math.Min( math.Max(0, sleepMSf), 800 )
                 time.Sleep(time.Millisecond * time.Duration(sleepMS))
             }
         }
@@ -219,7 +220,6 @@ func makeRandoBody(idx int) *plan.Block {
 
 
     blobLen := int(rand.Int31n( 1 + rand.Int31n(100) ) * rand.Int31n(100) + 1)
-    log.Printf("Making txn body blobLen: %d\n", blobLen)
 
     blob := blobBuf[:blobLen]
     rand.Read(blob)
@@ -233,6 +233,8 @@ func makeRandoBody(idx int) *plan.Block {
         CodecCode: uint32(idx),
         Content: make([]byte, contentSz),
     }
+
+    log.Printf("Making txn (#%d) body blobLen: %d, contentSz: %d\n", idx, blobLen, contentSz)
 
     pos := 0
     for j := 0; j < numCopies; j++ {
@@ -272,5 +274,8 @@ func verifyRandoBody(body plan.Block) {
         }
         pos += blobLen
     }
+
+    log.Printf("Verified txn (#%d)\n", idx)
+
 }
 

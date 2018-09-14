@@ -22,6 +22,11 @@ var (
 	storageTxnBucketName = []byte("/plan/protobuf/StorageTxn")
 )
 
+const (
+    boltStorageCodec  = "/plan/Storage/bolt/1"
+    boltBookmarkCodec = boltStorageCodec + "/bookmark/1"
+)
+
 
 // provider implements pdi.StorageProvider.
 // Specifically, it manages one or more bolt databases in a given local directory.
@@ -52,7 +57,6 @@ func NewBoltProvider(
 // StartSession implements StorageProvider.StartSession
 func (provider *boltProvider) StartSession(
 	inDatabaseID []byte,
-    inMsgChannel chan<- pdi.StorageMsg,
 ) (pdi.StorageSession, error) {
 
 	if len(inDatabaseID) < 2 || len(inDatabaseID) > 64 {
@@ -69,8 +73,8 @@ func (provider *boltProvider) StartSession(
 
 	session := &boltSession{
 		parentProvider:           provider,
-		msgsOut:                  inMsgChannel,
-        txnBatchInbox:            make(chan *txnBatch, 8),
+		msgsOut:                  make(chan pdi.StorageMsg, 10),
+        txnBatchInbox:            make(chan *txnBatch, 10),
 		dbPathname:               path.Join(provider.dbsPathname, string(dbName)+".bolt"),
 		maxTxnReportsBeforePause: 10,
 		maxTxnBytesBeforePause:   1000000,
@@ -98,9 +102,11 @@ func (provider *boltProvider) StartSession(
 
 	provider.sessions = append(provider.sessions, session)
 
+    go session.readerWriter()
+
     session.status = pdi.SessionIsReady
 
-    inMsgChannel <- pdi.StorageMsg{
+    session.msgsOut <- pdi.StorageMsg{
         AlertCode: pdi.SessionIsReady,
     }
 
@@ -126,10 +132,19 @@ func (provider *boltProvider) endSession(inSession *boltSession, msg pdi.Storage
     // TODO: concurrency safety analysis
 	for i, session := range provider.sessions {
 		if session == inSession {
+
+            // Update the sesison status
+            inSession.status = msg.AlertCode
+
+            // Remove this session ptr from the session list
 			n := len(provider.sessions) - 1
 			provider.sessions[i] = provider.sessions[n]
 			provider.sessions = provider.sessions[:n]
             inSession.msgsOut <- msg
+
+            // Cause readerWriter() loop to fire
+            session.txnBatchInbox <- nil;
+
 			return nil
 		}
 	}
@@ -140,6 +155,7 @@ func (provider *boltProvider) endSession(inSession *boltSession, msg pdi.Storage
 
 
 type txnBatch struct {
+    next            *txnBatch
 	requestID     pdi.RequestID
 	txnsRequested []pdi.TxnRequest
 
@@ -152,8 +168,9 @@ type boltSession struct {
 
     status           pdi.AlertCode
 	parentProvider   *boltProvider
-	msgsOut       chan<- pdi.StorageMsg
+	msgsOut       chan pdi.StorageMsg
 
+    commitScrap     []byte
 	dbPathname string
 	db         *bolt.DB
 
@@ -162,12 +179,13 @@ type boltSession struct {
 
     txnBatchPool    sync.Pool
 
-	txnBatchInbox    chan *txnBatch
+    txnBatchInbox  chan *txnBatch
+
     nextRequestID  uint32
 
     readheadPos  timeSortableKey
     readerReqID  pdi.RequestID
-	readerEvent    chan int32
+    readerIsActive  bool
 
 
 	//txnBatchQueue txnBatchQueue
@@ -175,7 +193,7 @@ type boltSession struct {
 
 
 
-
+// TODO shutdown readerWriter
 func (session *boltSession) readerWriter() {
 
     session.txnBatchPool = sync.Pool{
@@ -184,48 +202,45 @@ func (session *boltSession) readerWriter() {
         },
     }
 
-    for {
-        //var batch *txnBatch
+    readerTimer := time.NewTicker(time.Millisecond * 25)
+    wakeTimer := readerTimer.C
+
+    for session.IsReady() {
+       
+        // When the session is catching up on reads, set wakeTimer to non-nil
+        if session.readerIsActive {
+            wakeTimer = readerTimer.C
+        } else {
+            wakeTimer = nil
+        }
 
         // FIRST, choose requests made via RequestTxns() and CommitTxns(), THEN make incremental progress frorm the read head.
         select {
             case batch := <- session.txnBatchInbox:
 
                 // Sending a nil batch means we're shutting down
-                if batch == nil {
-                    return
+                if batch != nil {
+
+                    session.doTxn(batch)
+
+                    // We're done with this item, so make it available for reuse
+                    session.txnBatchPool.Put(batch)
+
                 }
 
-                session.doTxn(batch)
-
-                // We're done with this item, so make it available for reuse
-                session.txnBatchPool.Put(batch)
-
-            default:
-
-                // When the readhead is catchin up to the current membnt
-                sleepMS := <-session.readerEvent
-
-                if ( sleepMS >= 0 ) {
-                    time.Sleep(time.Millisecond * time.Duration(sleepMS))
-                }
-
+            case <-wakeTimer:
                 session.doTxn(nil)
         }
 
-        
-
-        // If nil is sent, it means it's time to exit
-    
-
     }
 
+    
 }
 
 
 
 
-func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.StorageTxn {
+func (session *boltSession) readerStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.StorageTxn {
 
     txns := make([]pdi.StorageTxn, session.maxTxnReportsBeforePause)
         
@@ -235,7 +250,12 @@ func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.Sto
     var err error
     count := 0
 
-    for curKey, txnBuf := c.Seek(session.readheadPos[:]); curKey != nil && count < len(txns); curKey, txnBuf = c.Next() {
+    for curKey, txnBuf := c.Seek(session.readheadPos[:]); count < len(txns); curKey, txnBuf = c.Next() {
+
+        if curKey == nil {
+            session.readerIsActive = false
+            break
+        }
 
         bytesProcessed += len(txnBuf)
 
@@ -245,16 +265,16 @@ func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.Sto
         if err != nil {
             err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
         } else {
-            session.readheadPos = formTimeSortableKey(txn.TimeCommitted, txn.TxnName)
             if bytes.Compare(session.readheadPos[:], curKey) != 0 {
                 err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
             }
         }
 
         if err != nil {
-            // TODO send an alert
+    // TODO send an alert
         }
 
+        copy(session.readheadPos[:], curKey)
         session.readheadPos.Increment()
 
         count++
@@ -262,6 +282,7 @@ func (session *boltSession) readStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.Sto
             break;
         }
     }
+
 
     return txns[:count]
 }
@@ -340,7 +361,7 @@ func (session *boltSession) commitTxns(tx *bolt.Tx, bucket *bolt.Bucket, txns []
         }
 
         timeKey := formTimeSortableKeyWithID(txn.TimeCommitted, commitID)
-        txn.TxnName = timeKey[:]
+        txn.TxnName = timeKey[8:]
 
         txnBuf, err = txn.MarshalForOptionalBody(txnBuf)
 
@@ -368,14 +389,16 @@ func (session *boltSession) doTxn(
     txnOp *txnBatch,
     ) {
 
-    msg := pdi.StorageMsg{
-        RequestID: txnOp.requestID,
-    }
+    msg := pdi.StorageMsg{}
 
+    isWriteOp := false
 
     if txnOp == nil {
         msg.StorageOp = pdi.OpTxnReport
+        msg.RequestID = session.readerReqID
     } else {
+        msg.RequestID = txnOp.requestID
+
         txnsToCommit  := len(txnOp.txnsToCommit)
         txnsRequested := len(txnOp.txnsRequested)
         plan.Assert(txnsToCommit == 0 || txnsRequested == 0, "txnBatch assert failed")
@@ -383,12 +406,13 @@ func (session *boltSession) doTxn(
         if txnsToCommit > 0 {
             msg.Txns = txnOp.txnsToCommit
             msg.StorageOp = pdi.OpCommitTxns
+            isWriteOp = true
         } else if txnsRequested > 0 {
             msg.StorageOp = pdi.OpRequestTxns
         }
     }
 
-    tx, dbErr := session.db.Begin(msg.StorageOp == pdi.OpCommitTxns)
+    tx, dbErr := session.db.Begin(isWriteOp)
     var bucket *bolt.Bucket
     if dbErr == nil {
 		bucket = tx.Bucket(storageTxnBucketName)
@@ -404,31 +428,26 @@ func (session *boltSession) doTxn(
             case pdi.OpRequestTxns:
                 msg.Txns = session.readTxns(tx, bucket,txnOp.txnsRequested)
             case pdi.OpTxnReport:
-                msg.Txns = session.readStep(tx, bucket)
+                msg.Txns = session.readerStep(tx, bucket)
 
         }
 
         // If we encountered an error, rollback the db (commit none) -- otherwise, commit.
-        if dbErr != nil {
+        if dbErr != nil || ! isWriteOp {
             tx.Rollback()
-        } else {
+        } else if (msg.StorageOp == pdi.OpCommitTxns) {
             dbErr = tx.Commit()
             
             if dbErr != nil {
                 dbErr = plan.Error(dbErr, plan.FailedToCommitTxn, "bolt.Tx.Commit() failed")
 
                 // If the commmit failed, update the status only for commit msgs
-                if dbErr != nil {
-                    switch msg.StorageOp {
-                        case pdi.OpCommitTxns:
-                            msg.AlertCode = pdi.CommitFailed
+                msg.AlertCode = pdi.CommitFailed
 
-                            // If we get an error for any of the sub txns, fail them all
-                            for _, txn := range msg.Txns {
-                                txn.Body = nil
-                                txn.TxnStatus = pdi.TxnStatus_FAILED_TO_COMMIT
-                            }
-                    }
+                // If we get an error for any of the sub txns, fail them all
+                for _, txn := range msg.Txns {
+                    txn.Body = nil
+                    txn.TxnStatus = pdi.TxnStatus_FAILED_TO_COMMIT
                 }
             }
         }
@@ -766,6 +785,10 @@ func (session *boltSession) IsReady() bool {
     return session != nil && session.status == pdi.SessionIsReady
 }
 
+func (session *boltSession) GetMsgChan() <-chan pdi.StorageMsg {
+    return session.msgsOut
+}
+
 
 
 func (session *boltSession) RequestTxns(
@@ -785,6 +808,46 @@ func (session *boltSession) RequestTxns(
 }
 
 
+func (session *boltSession) RequestFromBookmark(
+    inFromBookmark *plan.Block,
+    ) (pdi.RequestID, error) {
+
+    if ! session.IsReady() {
+        return 0, plan.Error(nil, plan.SessionNotReady, "storage session not ready for RequestFromBookmark()")
+    }
+
+    var readheadPos timeSortableKey
+    if inFromBookmark != nil {
+        bookmark := inFromBookmark.GetContentWithCodec(boltBookmarkCodec, 0)
+        if bookmark == nil || len(bookmark) != timeSortableKeySz {
+            return 0, plan.Errorf(nil, plan.FailedToUnmarshal, "Error unmarshalling inFromBookmark")
+        }
+        copy(readheadPos[:], bookmark)
+    } else {
+        readheadPos = formTimeSortableKeyWithID(0, 0)
+    }
+
+    session.readerIsActive = true
+
+    // This will cause the readerWriter loop to fire and use the wake timer
+    session.txnBatchInbox <- nil
+
+    session.readerReqID = pdi.RequestID(atomic.AddUint32(&session.nextRequestID, 1))
+
+    return session.readerReqID, nil
+
+}
+
+func (session *boltSession) GetBookmark() (*plan.Block, error) {
+
+    bookmark := &plan.Block{
+        Codec: boltBookmarkCodec,
+        Content: session.readheadPos[:],
+    }
+
+    return bookmark, nil
+
+}
 
 
 func (session *boltSession) CommitTxn(
@@ -808,6 +871,21 @@ func (session *boltSession) CommitTxn(
 
 }
 
+
+
+
+func (session *boltSession) EndSession(inReason string) {
+
+    if session.db != nil {
+        session.db.Close()
+        session.db = nil
+    }
+
+    session.parentProvider.endSession(session, pdi.StorageMsg{
+        AlertCode: pdi.SessionEndedByClient,
+        AlertMsg: inReason,
+    })
+}
 
 
 
@@ -1004,19 +1082,6 @@ func (session *boltSession) CommitTxns(
 
 }
 
-
-
-func (session *boltSession) EndSession(inReason string) {
-
-    if session.db != nil {
-        session.db.Close()
-    }
-
-    session.parentProvider.endSession(session, pdi.StorageAlert{
-                AlertCode: pdi.SessionEnded,
-                Info: inReason,
-            })
-}
 
 
 
