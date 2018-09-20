@@ -7,6 +7,7 @@ import (
     "encoding/base64"
     "encoding/binary"
     "os"
+    "log"
     "path"
     "time"
     "sync"
@@ -186,9 +187,6 @@ type boltSession struct {
     readheadPos  timeSortableKey
     readerReqID  pdi.RequestID
     readerIsActive  bool
-
-
-	//txnBatchQueue txnBatchQueue
 }
 
 
@@ -256,6 +254,7 @@ func (session *boltSession) readerStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.S
             session.readerIsActive = false
             break
         }
+        copy(session.readheadPos[:], curKey)
 
         bytesProcessed += len(txnBuf)
 
@@ -265,16 +264,17 @@ func (session *boltSession) readerStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.S
         if err != nil {
             err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
         } else {
-            if bytes.Compare(session.readheadPos[:], curKey) != 0 {
-                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
+            if ! session.readheadPos.Equals(txn.TimeCommitted, txn.TxnName) {
+                err = plan.Errorf(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed for txn %v (expected %v)", txn.TxnName, session.readheadPos[:])
             }
         }
 
         if err != nil {
-    // TODO send an alert
+
+            // TODO: log to pnode error channel instead
+            log.Fatal(err)
         }
 
-        copy(session.readheadPos[:], curKey)
         session.readheadPos.Increment()
 
         count++
@@ -919,6 +919,7 @@ func formTimeSortableKey(inTime int64, inTxnName []byte) timeSortableKey {
 	return k
 }
 
+
 func formTimeSortableKeyWithID(inTime int64, inTxnName uint64) timeSortableKey {
 	var k timeSortableKey
 
@@ -926,6 +927,17 @@ func formTimeSortableKeyWithID(inTime int64, inTxnName uint64) timeSortableKey {
 	binary.BigEndian.PutUint64(k[8:16], inTxnName)
 
 	return k
+}
+
+func (tk *timeSortableKey) Equals(inTime int64, inTxnName []byte) bool {
+    if binary.BigEndian.Uint64(tk[0:8]) != uint64(inTime) {
+        return false
+    }
+    if bytes.Compare(tk[8:16], inTxnName) != 0 {
+        return false
+    }
+
+    return true
 }
 
 
