@@ -54,12 +54,11 @@ func Test1(t *testing.T) {
 
     var err error
     var communityID plan.CommunityID
-    _, err = rand.Read(communityID[:])
-    if err != nil {
-        log.Fatal( err )
+    for i := 0; i < len(communityID); i++ {
+        communityID[i] = 1
     }
 
-    N := int(40 + rand.Int31n(50))
+    N := 100 //int(40 + rand.Int31n(50))
 
     pb := &testPB{
         numToCommit: N,
