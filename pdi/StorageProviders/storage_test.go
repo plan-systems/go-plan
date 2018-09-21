@@ -31,6 +31,7 @@ type testPB struct {
     reqIDs          []pdi.RequestID
     numCommitted    int
     numToCommit     int
+    lastTxnName     []byte
     storageMsgCh    <-chan pdi.StorageMsg
     session         pdi.StorageSession
 }
@@ -58,7 +59,7 @@ func Test1(t *testing.T) {
         communityID[i] = 1
     }
 
-    N := 100 //int(40 + rand.Int31n(50))
+    N := 10 //int(40 + rand.Int31n(50))
 
     pb := &testPB{
         numToCommit: N,
@@ -100,7 +101,7 @@ func Test1(t *testing.T) {
 
     waitForTest := make(chan bool)
 
-    pb.session.RequestFromBookmark(nil)
+    pb.session.ReportFromBookmark(nil)
 
 
     go func() {
@@ -109,57 +110,84 @@ func Test1(t *testing.T) {
         ** Process and verify committed txns
         **/
 
+        tickChan := time.NewTicker(time.Millisecond * 500).C
+
+        //var ok bool
+        gotLastTxn := false
+        gotActivity := 2
         sessionEnded := false
 
         for ! sessionEnded {
-            
-            msg, ok := <-pb.storageMsgCh
-            if ok {
-                switch {
+            select {
 
-                    case msg.AlertCode == 0:
-                        switch msg.StorageOp {
-                            
-                            case pdi.OpTxnReport, pdi.OpRequestTxns:
-                                for _, txn := range msg.Txns {
-                                    verifyRandoBody(*txn.Body)
-                                }
-                                
-                                // If we verified the last txn, close the session, ending the test
-                                if pb.numToCommit == pb.numCommitted && msg.StorageOp == pdi.OpRequestTxns {
-                                    pb.session.EndSession("Basic test complete!")
-                                }
+                case <- tickChan:
+                    gotActivity--
+                    log.Println("Got tick!")
+                    if gotLastTxn && gotActivity == 0 && pb.session.IsReady() {
+                        log.Println("pb.session.EndSession()")
+                        pb.session.EndSession("Basic test complete!")
+                    }
 
-                            case pdi.OpCommitTxns: {
-                                go func() {
-                                    for _, txn := range msg.Txns {
-                                        pb.session.RequestTxns( []pdi.TxnRequest{
-                                            pdi.TxnRequest{
-                                                TxnName: txn.TxnName,
-                                                TimeCommitted: txn.TimeCommitted,
-                                                IncludeBody: true,
-                                            },
-                                        })
+                case msg, ok := <- pb.storageMsgCh:
+                    if ok {
+                        gotActivity = 2
+                        switch {
+
+                            case msg.AlertCode == 0:
+                                switch msg.StorageOp {
+                                    
+                                    case pdi.OpTxnReport, pdi.OpRequestTxns:
+                                        for _, txn := range msg.Txns {
+                                            verifyRandoBody(*txn.Body)
+                                        }
+                                        
+                                        // If we verified the last txn, close the session, ending the test
+                                        if len(pb.lastTxnName) > 0 {
+                                            for _, txn := range msg.Txns {
+                                                if bytes.Compare(pb.lastTxnName, txn.TxnName) == 0 {
+                                                    gotLastTxn = true
+                                                }
+                                            }
+                                        }
+
+                                    case pdi.OpCommitTxn: {
+                                        if pb.numToCommit == pb.numCommitted {
+                                            if pb.reqIDs[pb.numCommitted-1] == msg.RequestID {
+                                                pb.lastTxnName = msg.Txns[0].TxnName
+                                            }
+                                        }
+
+                                        go func() {
+                                            for _, txn := range msg.Txns {
+                                                pb.session.RequestTxns( []pdi.TxnRequest{
+                                                    pdi.TxnRequest{
+                                                        TxnName: txn.TxnName,
+                                                        TimeCommitted: txn.TimeCommitted,
+                                                        IncludeBody: true,
+                                                    },
+                                                })
+                                            }
+                                        }()
                                     }
-                                }()
-                            
-                            }
+                                }
+
+                            case ( msg.AlertCode & pdi.SessionEndedAlertMask ) != 0:
+                                log.Printf("Session ended (%v): %v", msg.AlertCode, msg.AlertMsg)
+                                sessionEnded = true
+                                break
+
+                            default:
+                                gTesting.Fatalf("Got alert code: %v", msg.AlertCode)
+                                
                         }
+                    }
 
-                    case ( msg.AlertCode & pdi.SessionEndedAlertMask ) != 0:
-                        log.Printf("Session ended (%v): %v", msg.AlertCode, msg.AlertMsg)
-                        sessionEnded = true
-                        break
-
-                    default:
-                        gTesting.Fatalf("Got alert code: %v", msg.AlertCode)
-                        
-                }
             }
 
         }
 
-        waitForTest <-true
+        waitForTest <- sessionEnded
+
     }()
 
 
