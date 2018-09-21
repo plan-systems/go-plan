@@ -183,6 +183,7 @@ type boltSession struct {
     txnBatchInbox  chan *txnBatch
 
     nextRequestID  uint32
+    dbMutex sync.Mutex
 
     readheadPos  timeSortableKey
     readerReqID  pdi.RequestID
@@ -405,12 +406,14 @@ func (session *boltSession) doTxn(
         
         if txnsToCommit > 0 {
             msg.Txns = txnOp.txnsToCommit
-            msg.StorageOp = pdi.OpCommitTxns
+            msg.StorageOp = pdi.OpCommitTxn
             isWriteOp = true
         } else if txnsRequested > 0 {
             msg.StorageOp = pdi.OpRequestTxns
         }
     }
+
+    session.dbMutex.Lock()
 
     tx, dbErr := session.db.Begin(isWriteOp)
     var bucket *bolt.Bucket
@@ -423,7 +426,7 @@ func (session *boltSession) doTxn(
 
     if dbErr == nil {
         switch msg.StorageOp {
-            case pdi.OpCommitTxns:
+            case pdi.OpCommitTxn:
                 dbErr = session.commitTxns(tx, bucket, txnOp.txnsToCommit)
             case pdi.OpRequestTxns:
                 msg.Txns = session.readTxns(tx, bucket,txnOp.txnsRequested)
@@ -435,7 +438,7 @@ func (session *boltSession) doTxn(
         // If we encountered an error, rollback the db (commit none) -- otherwise, commit.
         if dbErr != nil || ! isWriteOp {
             tx.Rollback()
-        } else if (msg.StorageOp == pdi.OpCommitTxns) {
+        } else if (msg.StorageOp == pdi.OpCommitTxn) {
             dbErr = tx.Commit()
             
             if dbErr != nil {
@@ -453,6 +456,7 @@ func (session *boltSession) doTxn(
         }
     }
 
+    session.dbMutex.Unlock()
 
     if dbErr != nil {
         if msg.AlertCode == 0 {
@@ -808,12 +812,12 @@ func (session *boltSession) RequestTxns(
 }
 
 
-func (session *boltSession) RequestFromBookmark(
+func (session *boltSession) ReportFromBookmark(
     inFromBookmark *plan.Block,
     ) (pdi.RequestID, error) {
 
     if ! session.IsReady() {
-        return 0, plan.Error(nil, plan.SessionNotReady, "storage session not ready for RequestFromBookmark()")
+        return 0, plan.Error(nil, plan.SessionNotReady, "storage session not ready for ReportFromBookmark()")
     }
 
     var readheadPos timeSortableKey
@@ -876,15 +880,20 @@ func (session *boltSession) CommitTxn(
 
 func (session *boltSession) EndSession(inReason string) {
 
-    if session.db != nil {
-        session.db.Close()
-        session.db = nil
-    }
+    session.dbMutex.Lock()
+    {
+        if session.db != nil {
+            session.db.Close()
+            session.db = nil
+        }
 
-    session.parentProvider.endSession(session, pdi.StorageMsg{
-        AlertCode: pdi.SessionEndedByClient,
-        AlertMsg: inReason,
-    })
+        session.parentProvider.endSession(session, pdi.StorageMsg{
+            AlertCode: pdi.SessionEndedByClient,
+            AlertMsg: inReason,
+        })
+    }
+    session.dbMutex.Unlock()
+
 }
 
 
