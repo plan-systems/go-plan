@@ -39,8 +39,8 @@ type StorageSession interface {
 	// RequestTxns requests that the given txn names to be added to the msg stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
 	RequestTxns(inTxnRequests []TxnRequest) (RequestID, error)
 
-	// RequestFromBookmark sets the session's "read head position" based on state information returned via GetBookmark() from this or a previous session.
-	RequestFromBookmark(inFromBookmark *plan.Block) (RequestID, error)
+	// ReportFromBookmark sets the session's "read head position" based on state information returned via GetBookmark() from this or a previous session.
+	ReportFromBookmark(inFromBookmark *plan.Block) (RequestID, error)
 
 	// GetBookmark returns an opaque, StorageProvider-specific blob of state information that a client uses for StartReporting().
 	GetBookmark() (*plan.Block, error)
@@ -86,13 +86,13 @@ type StorageOp int32
 
 const (
 
-	// OpCommitTxns means the given txn are/were to be committed (and this StorageMsg is reporting status)
-	OpCommitTxns = 1 + iota
+	// OpCommitTxn means the given txn are/were to be committed (and this StorageMsg is reporting status)
+	OpCommitTxn = 1 + iota
 
 	// OpRequestTxns means the given txns are/were requested
 	OpRequestTxns
 
-	// OpTxnReport means this the given txns have been updated or are the next batch of txns resulting from RequestFromBookmark()
+	// OpTxnReport means this the given txns have been updated or are the next batch of txns resulting from ReportFromBookmark()
 	OpTxnReport
 )
 
@@ -118,6 +118,8 @@ const (
 	// SessionWillEnd means this StorageSession will end soon, described in StorageMsg.AlertMsg
 	SessionWillEnd
 
+    // TxnReportsUpToDate means the txn readhead is now up to date and any new txn will show up as 
+    TxnReportsUpToDate
 
 
 	/*****************************************************
