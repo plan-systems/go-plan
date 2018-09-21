@@ -16,7 +16,7 @@ import (
 
     "github.com/plan-tools/go-plan/plan"
     "github.com/plan-tools/go-plan/pdi"
-    "github.com/plan-tools/go-plan/pnode/StorageProviders/bolt"
+    "github.com/plan-tools/go-plan/pdi/StorageProviders/bolt"
 
 
 )
@@ -74,7 +74,7 @@ func Test1(t *testing.T) {
         log.Fatal( err )
     }
 
-    pb.storageMsgCh = pb.session.GetMsgChan()
+    pb.storageMsgCh = pb.session.GetOutgoingChan()
 
     /*****************************************************
     ** Wait for the session to be ready

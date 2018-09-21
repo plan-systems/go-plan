@@ -74,7 +74,7 @@ func (provider *boltProvider) StartSession(
 
 	session := &boltSession{
 		parentProvider:           provider,
-		msgsOut:                  make(chan pdi.StorageMsg, 10),
+		outgoingChan:             make(chan pdi.StorageMsg, 10),
         txnBatchInbox:            make(chan *txnBatch, 10),
 		dbPathname:               path.Join(provider.dbsPathname, string(dbName)+".bolt"),
 		maxTxnReportsBeforePause: 10,
@@ -107,7 +107,7 @@ func (provider *boltProvider) StartSession(
 
     session.status = pdi.SessionIsReady
 
-    session.msgsOut <- pdi.StorageMsg{
+    session.outgoingChan <- pdi.StorageMsg{
         AlertCode: pdi.SessionIsReady,
     }
 
@@ -141,7 +141,7 @@ func (provider *boltProvider) endSession(inSession *boltSession, msg pdi.Storage
 			n := len(provider.sessions) - 1
 			provider.sessions[i] = provider.sessions[n]
 			provider.sessions = provider.sessions[:n]
-            inSession.msgsOut <- msg
+            inSession.outgoingChan <- msg
 
             // Cause readerWriter() loop to fire
             session.txnBatchInbox <- nil;
@@ -169,7 +169,7 @@ type boltSession struct {
 
     status           pdi.AlertCode
 	parentProvider   *boltProvider
-	msgsOut       chan pdi.StorageMsg
+	outgoingChan       chan pdi.StorageMsg
 
     commitScrap     []byte
 	dbPathname string
@@ -463,7 +463,7 @@ func (session *boltSession) doTxn(
         }
     }
 
-    session.msgsOut <- msg
+    session.outgoingChan <- msg
 }
 
 /*
@@ -534,7 +534,7 @@ func (session *boltSession) readBurst() {
     }
 
     // Send the result message back to the client session
-    session.msgsOut <- msg
+    session.outgoingChan <- msg
 
 
 }
@@ -763,7 +763,7 @@ func (session *boltSession) readBatch(inBatch *txnBatch) {
     }
 
     // Send the result message back to the client session
-    session.msgsOut <- msg
+    session.outgoingChan <- msg
 }
 
 
@@ -785,8 +785,8 @@ func (session *boltSession) IsReady() bool {
     return session != nil && session.status == pdi.SessionIsReady
 }
 
-func (session *boltSession) GetMsgChan() <-chan pdi.StorageMsg {
-    return session.msgsOut
+func (session *boltSession) GetOutgoingChan() <-chan pdi.StorageMsg {
+    return session.outgoingChan
 }
 
 

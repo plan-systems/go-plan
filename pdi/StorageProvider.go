@@ -33,8 +33,8 @@ type StorageSession interface {
 	// IsReady reports if this session is open and ready to receive requests
 	IsReady() bool
 
-    // GetMsgChan returns the chan all outgoing StorageMsgs appear on.
-    GetMsgChan() <-chan StorageMsg
+    // GetOutgoingChan returns the chan all outgoing StorageMsgs appear on.
+    GetOutgoingChan() <-chan StorageMsg
 
 	// RequestTxns requests that the given txn names to be added to the msg stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
 	RequestTxns(inTxnRequests []TxnRequest) (RequestID, error)
