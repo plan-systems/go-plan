@@ -44,31 +44,31 @@ func (block *Block) GetBlocksWithLabel(inLabel string) []*Block {
 func (block *Block) GetBlocksWithCodec(inCodec string, inCodecCode uint32) []*Block {
 	var matches []*Block
 
-    if len(inCodec) > 0 {
-            
-        if (inCodecCode != 0 && inCodecCode == block.CodecCode) || inCodec == block.Codec {
-            matches = append(matches, block)
-        }
+	if len(inCodec) > 0 {
 
-        for _, sub := range block.Subs {
-            if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || sub.Codec == inCodec {
-                matches = append(matches, sub)
-            }
-        }
+		if (inCodecCode != 0 && inCodecCode == block.CodecCode) || inCodec == block.Codec {
+			matches = append(matches, block)
+		}
 
-    } else {
+		for _, sub := range block.Subs {
+			if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || sub.Codec == inCodec {
+				matches = append(matches, sub)
+			}
+		}
 
-        if (inCodecCode != 0 && inCodecCode == block.CodecCode) {
-            matches = append(matches, block)
-        }
+	} else {
 
-        for _, sub := range block.Subs {
-            if (inCodecCode != 0 && inCodecCode == sub.CodecCode) {
-                matches = append(matches, sub)
-            }
-        }
-        
-    }
+		if inCodecCode != 0 && inCodecCode == block.CodecCode {
+			matches = append(matches, block)
+		}
+
+		for _, sub := range block.Subs {
+			if inCodecCode != 0 && inCodecCode == sub.CodecCode {
+				matches = append(matches, sub)
+			}
+		}
+
+	}
 
 	return matches
 }
@@ -92,31 +92,31 @@ func (block *Block) GetBlockWithLabel(inLabel string) *Block {
 // GetBlockWithCodec returns the first-appearing Block with a matching codec string
 func (block *Block) GetBlockWithCodec(inCodec string, inCodecCode uint32) *Block {
 
-    if len(inCodec) > 0 {
-            
-        if (inCodecCode != 0 && inCodecCode == block.CodecCode) || inCodec == block.Codec {
-            return block
-        }
+	if len(inCodec) > 0 {
 
-        for _, sub := range block.Subs {
-            if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || sub.Codec == inCodec {
-                return sub
-            }
-        }
+		if (inCodecCode != 0 && inCodecCode == block.CodecCode) || inCodec == block.Codec {
+			return block
+		}
 
-    } else {
+		for _, sub := range block.Subs {
+			if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || sub.Codec == inCodec {
+				return sub
+			}
+		}
 
-        if (inCodecCode != 0 && inCodecCode == block.CodecCode) {
-            return block
-        }
+	} else {
 
-        for _, sub := range block.Subs {
-            if (inCodecCode != 0 && inCodecCode == sub.CodecCode) {
-                return sub
-            }
-        }
-        
-    }
+		if inCodecCode != 0 && inCodecCode == block.CodecCode {
+			return block
+		}
+
+		for _, sub := range block.Subs {
+			if inCodecCode != 0 && inCodecCode == sub.CodecCode {
+				return sub
+			}
+		}
+
+	}
 
 	return nil
 }
