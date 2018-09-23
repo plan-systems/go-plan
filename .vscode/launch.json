@@ -12,10 +12,10 @@
             "remotePath": "",
             "port": 2345,
             "host": "127.0.0.1",
-            "program": "${workspaceFolder}/pnode",
+            "program": "${workspaceFolder}/cmd/pnode",
             "env": {},
             //"args": [],
-              "args": [ "-datadir", "${env:HOME}/_pnode-datadir/" ],
+              "args": [ "-datadir", "${env:HOME}/PLAN/pnode_test/" ],
             //"args": [ "-datadir", "${env:HOME}/_pnode-datadir/", "-init", ],
             "showLog": true
         }
