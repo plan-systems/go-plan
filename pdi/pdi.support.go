@@ -3,6 +3,8 @@
 package pdi
 
 import (
+    "sync"
+
 	"github.com/plan-tools/go-plan/plan"
 
 	"github.com/ethereum/go-ethereum/crypto/sha3"
@@ -41,6 +43,22 @@ func (entry *EntryCrypt) ComputeHash() []byte {
 
 	return hw.Sum(nil)
 
+}
+
+// MarshalToBlock marshals this EntryCrypt into a generic plan.Block
+func (entry *EntryCrypt) MarshalToBlock() *plan.Block {
+
+    block := &plan.Block{
+        CodecCode: plan.CodecCodeForEntryCrypt,
+    }
+
+    var err error
+    block.Content, err = entry.Marshal()
+    if err != nil {
+        panic(err)
+    }
+
+    return block
 }
 
 /*****************************************************
@@ -108,6 +126,109 @@ func (txn *StorageTxn) UnmarshalWithOptionalBody(dAtA []byte, inUnmarshalBody bo
 	return err
 
 }
+
+
+
+// UnmarshalEntries unmarshals txn.Body (created via MarshalEntries) into the EntryCrypts contained within it 
+func (txn *StorageTxn) UnmarshalEntries(ioBatch []*EntryCrypt) ([]*EntryCrypt, error) {
+
+    var err error
+
+    N := len(txn.Body.Subs)
+
+    for i := -1; i < N && err != nil ; i++ {
+
+        var block *plan.Block
+        if i == -1 {
+            block = txn.Body
+        } else {
+            block = txn.Body.Subs[i]
+        }
+        if block.CodecCode == plan.CodecCodeForEntryCrypt {
+            entry := &EntryCrypt{}
+            err = entry.Unmarshal(block.Content)
+            if err != nil {
+                break
+            }
+            ioBatch = append(ioBatch, entry)
+        }
+    }
+
+    return ioBatch, err
+}
+
+
+// MarshalEntries marshals the given batch of entries into a single plan.Block
+func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {
+    N := len(inBatch)
+
+    var head *plan.Block
+
+    if N == 1 {
+        head = inBatch[0].MarshalToBlock()
+    } else if N > 1 {
+        
+        head := &plan.Block{
+            Subs: make([]*plan.Block, N),
+        }
+        for i := range inBatch {
+            head.Subs[i] = inBatch[i].MarshalToBlock()
+        }
+    }
+
+    return head
+}
+
+
+
+
+/*****************************************************
+** Support
+**/
+
+var storageMsgPool = sync.Pool{
+    New: func() interface{} {
+        return new(StorageMsg)
+    },
+}
+
+// RecycleStorageMsg effectively deallocates the item and makes it available for reuse
+func RecycleStorageMsg(inMsg *StorageMsg) {
+    for _, txn := range inMsg.Txns {
+        txn.Body = nil  // TODO: recycle plan.Blocks too
+    }
+    storageMsgPool.Put(inMsg)
+}
+
+// NewStorageMsg allocates a new StorageMsg
+func NewStorageMsg() *StorageMsg {
+
+    msg := storageMsgPool.Get().(*StorageMsg)
+    if msg == nil {
+        msg = &StorageMsg{}
+    } else {
+        msg.Txns = msg.Txns[:0]
+        msg.AlertCode = 0
+        msg.AlertMsg = ""
+    }
+
+    return msg
+}
+
+// NewStorageAlert creates a new storage msg with the given alert params
+func NewStorageAlert(
+    inAlertCode AlertCode, 
+    inAlertMsg string,
+    ) *StorageMsg {
+
+    msg := NewStorageMsg()
+    msg.AlertCode = inAlertCode
+    msg.AlertMsg = inAlertMsg
+
+    return msg 
+
+}
+
 
 /*
 // SegmentIntoTxnsForMaxSize is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
