@@ -40,8 +40,8 @@ type boltProvider struct {
 }
 
 
-// NewBoltProvider creates a bolt-based StorageProvider with the given params
-func NewBoltProvider(
+// NewProvider creates a bolt-based StorageProvider with the given params
+func NewProvider(
 	inDBsPathname string,
 	inFileMode os.FileMode,
 ) pdi.StorageProvider {
@@ -74,7 +74,7 @@ func (provider *boltProvider) StartSession(
 
 	session := &boltSession{
 		parentProvider:           provider,
-		outgoingChan:             make(chan pdi.StorageMsg, 10),
+		outgoingChan:             make(chan *pdi.StorageMsg, 10),
         txnBatchInbox:            make(chan *txnBatch, 10),
 		dbPathname:               path.Join(provider.dbsPathname, string(dbName)+".bolt"),
 		maxTxnReportsBeforePause: 10,
@@ -107,9 +107,7 @@ func (provider *boltProvider) StartSession(
 
     session.status = pdi.SessionIsReady
 
-    session.outgoingChan <- pdi.StorageMsg{
-        AlertCode: pdi.SessionIsReady,
-    }
+    session.outgoingChan <- pdi.NewStorageAlert(pdi.SessionIsReady, "")
 
 	return session, nil
 }
@@ -124,7 +122,10 @@ func (storage *BoltStorage) SegmentIntoTxnsForCommit(
 	return pdi.SegmentIntoTxnsForMaxSize(inData, inDataDesc, storage.maxSegSize)
 }
 */
-func (provider *boltProvider) endSession(inSession *boltSession, msg pdi.StorageMsg) *plan.Perror {
+func (provider *boltProvider) endSession(
+    inSession *boltSession,
+    msg *pdi.StorageMsg
+    ) *plan.Perror {
 
     if inSession.status != pdi.SessionIsReady {
         return nil
@@ -169,7 +170,7 @@ type boltSession struct {
 
     status           pdi.AlertCode
 	parentProvider   *boltProvider
-	outgoingChan       chan pdi.StorageMsg
+	outgoingChan       chan *pdi.StorageMsg
 
     commitScrap     []byte
 	dbPathname string
@@ -390,7 +391,7 @@ func (session *boltSession) doTxn(
     txnOp *txnBatch,
     ) {
 
-    msg := pdi.StorageMsg{}
+    msg := pdi.NewStorageMsg()
 
     isWriteOp := false
 
@@ -789,7 +790,7 @@ func (session *boltSession) IsReady() bool {
     return session != nil && session.status == pdi.SessionIsReady
 }
 
-func (session *boltSession) GetOutgoingChan() <-chan pdi.StorageMsg {
+func (session *boltSession) GetOutgoingChan() <-chan *pdi.StorageMsg {
     return session.outgoingChan
 }
 
@@ -887,10 +888,7 @@ func (session *boltSession) EndSession(inReason string) {
             session.db = nil
         }
 
-        session.parentProvider.endSession(session, pdi.StorageMsg{
-            AlertCode: pdi.SessionEndedByClient,
-            AlertMsg: inReason,
-        })
+        session.parentProvider.endSession(session, pdi.NewStorageAlert(pdi.SessionEndedByClient, inReason)) 
     }
     session.dbMutex.Unlock()
 

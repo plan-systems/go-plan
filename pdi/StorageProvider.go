@@ -19,7 +19,6 @@ type StorageProvider interface {
 	StartSession(
 		inDatabaseID []byte,
 	) (StorageSession, error)
-
 }
 
 /*****************************************************
@@ -33,8 +32,8 @@ type StorageSession interface {
 	// IsReady reports if this session is open and ready to receive requests
 	IsReady() bool
 
-    // GetOutgoingChan returns the chan all outgoing StorageMsgs appear on.
-    GetOutgoingChan() <-chan StorageMsg
+	// GetOutgoingChan returns the chan all outgoing StorageMsgs appear on.
+	GetOutgoingChan() <-chan *StorageMsg
 
 	// RequestTxns requests that the given txn names to be added to the msg stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
 	RequestTxns(inTxnRequests []TxnRequest) (RequestID, error)
@@ -118,9 +117,8 @@ const (
 	// SessionWillEnd means this StorageSession will end soon, described in StorageMsg.AlertMsg
 	SessionWillEnd
 
-    // TxnReportsUpToDate means the txn readhead is now up to date and any new txn will show up as 
-    TxnReportsUpToDate
-
+	// TxnReportsUpToDate means the txn readhead is now up to date and any new txn will show up as
+	TxnReportsUpToDate
 
 	/*****************************************************
 	** SessionFailureAlerts
