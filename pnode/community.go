@@ -18,6 +18,8 @@ import (
 
     //"github.com/tidwall/redcon"
 
+    "github.com/plan-tools/go-plan/pdi/StorageProviders/bolt"
+
     "github.com/plan-tools/go-plan/pdi"
     "github.com/plan-tools/go-plan/plan"
     "github.com/plan-tools/go-plan/ski"
@@ -49,7 +51,6 @@ type CommunityRepoInfo struct {
     CommunityName           string                  `json:"community_name"`
     CommunityID             hexutil.Bytes           `json:"community_id"`
     RepoPath                string                  `json:"repo_path"`
-    ChannelPath             string                  `json:"channel_path"`
     TimeCreated             plan.Time               `json:"time_created"`  
 
     // Max number of seconds that any two community peers could have different clock readings
@@ -61,6 +62,8 @@ type CommunityRepoInfo struct {
 type CommunityRepo struct {
     Info                    *CommunityRepoInfo
 
+    AbsRepoPath             string
+
     // This will move and is just a hack for now
     //activeSession           ClientSession
 
@@ -69,13 +72,15 @@ type CommunityRepo struct {
 
     storage                 pdi.StorageSession
     storageProvider         pdi.StorageProvider
-    storageMsgInbox         chan pdi.StorageMsg
+    storageMsgs             <-chan *pdi.StorageMsg
+
+    txnsToProcess          chan txnInProcess
 
     ParentPnode             *Pnode
 
     // Newly authored entries from active sessions on this pnode that are using this CommunityRepo.
     // These entries are first validated/processed as if they came off the wire, merged with the local db, and commited to the active storage sessions.
-    authoredInbox           chan pdi.EntryCrypt
+    authoredInbox           chan *pdi.EntryCrypt
 
     // deamonSKIs makes it possible for community public encrypted data to be decrypted, even when there are NO
     //     client sessions open.  Or, a community repo may have its security settings such that the community keyring
@@ -138,16 +143,26 @@ const (
 
 
 
-func NewCommunityRepo( inInfo *CommunityRepoInfo, inParent *Pnode ) *CommunityRepo {
+func NewCommunityRepo(
+    inInfo *CommunityRepoInfo,
+    inParent *Pnode,
+    ) *CommunityRepo {
 
     CR := &CommunityRepo{
         ParentPnode: inParent,
         Info: inInfo,
         DirEncoding: base64.RawURLEncoding,
-        DefaultFileMode: inParent.config.DefaultFileMode,
-        storageMsgInbox: make(chan pdi.StorageMsg, 8),   // should this be buffered!?
+        DefaultFileMode: inParent.Config.DefaultFileMode,
+        txnsToProcess: make(chan txnInProcess),
     }
   
+
+    if path.IsAbs(CR.Info.RepoPath) {
+        CR.AbsRepoPath = CR.Info.RepoPath
+    } else {
+        CR.AbsRepoPath = path.Join(inParent.Params.BasePath, CR.Info.RepoPath)
+    }
+
     return CR
 }
 
@@ -226,7 +241,7 @@ func (CR *CommunityRepo) LoadChannelStore(
 
     CS.Lock()
 
-    CS.channelDir = CR.Info.ChannelPath + CR.DirEncoding.EncodeToString( CS.ChannelID[:] ) + "/"
+    CS.channelDir = path.Join(CR.AbsRepoPath, "ch", CR.DirEncoding.EncodeToString(CS.ChannelID[:]))
 
     if inCreateNew {
 
@@ -310,93 +325,138 @@ If one entry (max) per StorageTxn
     + An EntryCrypt's hash could be used as the txn hashname
 */
 
-func (CR *CommunityRepo) StartService() {
+func (CR *CommunityRepo) StartService() error {
 
-    CR.storageProvider = NewBoltStorage(
-        path.Join(CR.Info.RepoPath, "bolt"),
+
+    CR.storageProvider = bolt.NewProvider(
+        path.Join(CR.AbsRepoPath, "Layer I"),
         CR.DefaultFileMode,
     )
 
-    CR.storage = CR.storageProvider.StartSession(
+    var err error
+    CR.storage, err = CR.storageProvider.StartSession(
         CR.Info.CommunityID,
-        CR.storageMsgInbox,
-
-
     )
+    if err != nil {
+        return err 
+    }
 
- 
-
-
-
-
+    CR.storageMsgs = CR.storage.GetOutgoingChan()
 
 
     go func() {
-        var ws entryWorkspace
-        ws.CR = CR
 
-        doNextEntry := make(chan bool)
+        var entryBatch []*pdi.EntryCrypt
 
         for {
                
             var authoredEntry *pdi.EntryCrypt
             var storageMsg *pdi.StorageMsg
 
-            // First, draw from the newly authored entry inbox (from currently connection community member sessions).
+            // First, try drawing from the newly authored entry inbox (from currently connection community member sessions).
             select {
-                case authoredEntry = <-CR.authoredInbox:
+                case authoredEntry = <- CR.authoredInbox:
+                    entryBatch = append(entryBatch, authoredEntry)
+                    doneWithBatch := false
+                    for ! doneWithBatch {
+                        select {
+                            case authoredEntry = <- CR.authoredInbox:
+                                entryBatch = append(entryBatch, authoredEntry)
+                            default:
+                                doneWithBatch = true
+                        }
+                    }
+                    CR.txnsToProcess <- txnInProcess{
+                        entryBatch: entryBatch,
+                    }
+                    entryBatch = entryBatch[:0]
+
 
                 // If no newly authored entries await processing, see if there's any incoming from the storage session.
-                default:
-                    
-                    select {
-
-                        case authoredEntry = <-CR.authoredInbox:
-
-                        case storageMsg = <-CR.storageMsgInbox:
+                case storageMsg = <-CR.storageMsgs:
+                    switch storageMsg.StorageOp {
+                        
+                        case pdi.OpRequestTxns:
+                        case pdi.OpTxnReport:
+                            for _, txn := range storageMsg.Txns {
+                                entryBatch, err = txn.UnmarshalEntries(entryBatch)
+                                if err != nil {
+                                    // TODO: handle err better
+                                    panic(err)
+                                }
+                                CR.txnsToProcess <- txnInProcess{
+                                    entryBatch: entryBatch,
+                                    parentTxnName: txn.TxnName,
+                                }
+                                entryBatch = entryBatch[:0]
+                            }
                     }
-
             }
-
-            if authoredEntry != nil {
-                ws.entry = authoredEntry
-                ws.storageTxn = pdi.StorageTxn{
-                    TxnStatus: TxnStatus_AWAITING_COMMIT
-                }
-            } else {
-                extract
-
-            }
-
-            // Attempt to deserialize StorageTxn.Body into a EntryCrypt
-One entry per StorageTxn, or one StorageTxn per StorageMSg?
-Likeing the idea of singylar storage Txns, containing one or more entries.  problem is that entries won't have unique names
-- solution: have sorted txn hashnames, where each hashname has a row for each contained entry (the entry's hashname relies on the sig)
-
-            ws.entry = entry
-
-            ws.processAndMergeEntry(func (inErr *plan.Perror) {
-                if inErr != nil {
-                    ws.failedEntries = append(ws.failedEntries, failedEntry{inErr, ws.entry})
-                    log.Printf("failed to process entry: %s", inErr)
-                }
-
-                doNextEntry <-true;
-            })
-
-            // Block until the current entry finishes processing
-            <- doNextEntry
-            
         }
     }()
-        
+
+
+    go func() {
+
+        doNextEntry := make(chan bool)
+
+ 
+        for {
+
+            var eip entryInProcess
+            eip.CR = CR
+
+            tip, ok := <-CR.txnsToProcess
+            if ! ok {
+                break
+            }
+
+            for i, entry := range tip.entryBatch {
+                eip.entry = entry
+                eip.entryTxnIndex = i
+                eip.parentTxnName = tip.parentTxnName
+
+                eip.processAndMergeEntry(func (inErr *plan.Perror) {
+                    if inErr != nil {
+                        
+                        eip.failedEntries = append(eip.failedEntries, failedEntry{
+                            err: inErr, 
+                            entry: eip.entry,
+                            entryTxnIndex: eip.entryTxnIndex,
+                            parentTxnName: eip.parentTxnName,
+                            })
+                        log.Printf("failed to process entry: %s", inErr)
+                    }
+
+                    doNextEntry <-true
+                })
+
+                // Block until the current entry finishes processing
+                <- doNextEntry
+            }
+
+            // If there's no parent txn name, that's a signal the batch of entries needs to be committed to the community repo
+            if len(tip.parentTxnName) == 0 {
+                body := pdi.MarshalEntries(tip.entryBatch)
+                _, err := CR.storage.CommitTxn(body)
+                if err == nil {
+                    // TODO: how do we handle this error.  make a local repo for failed txns to be retried?
+                    panic(err)
+                }
+            }
+
+        }
+
+    }()
+
+    return nil    
 }
 
 
 
 func (CR *CommunityRepo) PublishEntry( inEntry *pdi.EntryCrypt ) {
 
-    CR.entryInbox <- inEntry
+    //CR.entryInbox <- inEntry
 }
 
 
@@ -415,35 +475,40 @@ func (CR *CommunityRepo) RevokeEntry( inHashnames []byte ) {
 
 
 
+
+
 type failedEntry struct {
     err                     *plan.Perror
     entry                   *pdi.EntryCrypt
+    entryTxnIndex           int
+    parentTxnName           []byte
 }
 
 
 
-type txnWorkspace {
-    CR              *CommunityRepo    
 
-    entryIndex      int               // This is the index currently being processed
-    entryBatch      []*pdi.EntryCrypt // All the entries contained (or to be contained) in .txn
-    txn             pdi.StorageTxn    // Host/Container of each entry in .entryBatch[:] 
-
+type txnInProcess struct {
+    entryBatch      []*pdi.EntryCrypt
+    parentTxnName   []byte
 }
 
 
 
-// entryWorkspace is a workspace used to pass around
-type entryWorkspace struct {
+
+
+type entryInProcess struct {
     CR              *CommunityRepo    
 
     timeStart       plan.Time
 
     entry           *pdi.EntryCrypt
-
+    entryTxnIndex   int
+    parentTxnName   []byte
+/*
+    txnWS           []txnWorkspace
     entryBatch      []*pdi.EntryCrypt // 
     entryIndex      int               // This is the index number into entryBatch that is currently being processed
-    entryTxn        pdi.StorageTxn
+    entryTxn        pdi.StorageTxn */
 
     entryHash       []byte
     entryHeader     pdi.EntryHeader
@@ -470,13 +535,13 @@ type entryWorkspace struct {
 
 // internal: unpackHeader
 //   decrypts and deserializes a pdi header
-func (ws *entryWorkspace) unpackHeader(
+func (eip *entryInProcess) unpackHeader(
     inOnCompletion func(*plan.Perror),
     ) {
 
-    ws.timeStart = plan.Now()
+    eip.timeStart = plan.Now()
 
-    switch vers := ws.entry.GetEntryVersion(); vers {
+    switch vers := eip.entry.GetEntryVersion(); vers {
         case pdi.EntryVersion_V0:
             //ws.skiVersion = ski.CryptSKIVersion
         default:
@@ -485,12 +550,12 @@ func (ws *entryWorkspace) unpackHeader(
     }
 
     // The entry header is encrypted using one of the community keys.
-    ws.skiSession.DispatchOp( 
+    eip.skiSession.DispatchOp( 
 
         &ski.OpArgs {
             OpName: ski.OpDecryptFromCommunity,
-            CryptoKeyID: plan.GetKeyID(ws.entry.CommunityKeyId),
-            Msg: ws.entry.HeaderCrypt,
+            CryptoKeyID: plan.GetKeyID(eip.entry.CommunityKeyId),
+            Msg: eip.entry.HeaderCrypt,
         }, 
 
         func(inRespose *plan.Block, inErr *plan.Perror) {
@@ -499,7 +564,7 @@ func (ws *entryWorkspace) unpackHeader(
                 return
             }
 
-            err := ws.entryHeader.Unmarshal(inRespose.Content)
+            err := eip.entryHeader.Unmarshal(inRespose.Content)
             if err != nil {
                 inOnCompletion(plan.Error(err, plan.FailedToProcessPDIHeader, "failed to unmarshal PDI header"))
                 return
@@ -520,26 +585,26 @@ func (ws *entryWorkspace) unpackHeader(
 //   note that because permissions are immutable at a point in time, it doesn't matter
 //   when we check permissions if they're changed later -- they'll
 //   always be the same for an entry at a specific point in time.
-func (ws *entryWorkspace) validateEntry() *plan.Perror {
+func (eip *entryInProcess) validateEntry() *plan.Perror {
 
-    if ws.entryHeader.TimeAuthored < ws.CR.Info.TimeCreated.UnixSecs {
+    if eip.entryHeader.TimeAuthored < eip.CR.Info.TimeCreated.UnixSecs {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp earlier than community creation timestamp")
     }
-    if ws.timeStart.UnixSecs - ws.entryHeader.TimeAuthored + ws.CR.Info.MaxPeerClockDelta < 0 {
+    if eip.timeStart.UnixSecs - eip.entryHeader.TimeAuthored + eip.CR.Info.MaxPeerClockDelta < 0 {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future")
     }
 
-    perr := ws.CR.LookupMember(ws.entryHeader.AuthorMemberId, plan.MemberEpoch(ws.entryHeader.AuthorMemberEpoch), &ws.authorEpoch)
+    perr := eip.CR.LookupMember(eip.entryHeader.AuthorMemberId, plan.MemberEpoch(eip.entryHeader.AuthorMemberEpoch), &eip.authorEpoch)
     if perr != nil {
         return perr
     }
 
-    ws.entryHash = ws.entry.ComputeHash()
+    eip.entryHash = eip.entry.ComputeHash()
 
-    perr = ws.skiProvider.VerifySignature( 
-        ws.entry.Sig,
-        ws.entryHash,
-        ws.authorEpoch.PubSigningKey,
+    perr = eip.skiProvider.VerifySignature( 
+        eip.entry.Sig,
+        eip.entryHash,
+        eip.authorEpoch.PubSigningKey,
     )
 
     if perr != nil {
@@ -547,7 +612,7 @@ func (ws *entryWorkspace) validateEntry() *plan.Perror {
     }
 
 
-    err := ws.prepChannelAccess()
+    err := eip.prepChannelAccess()
 
     // At this point, the PDI entry's signature has been verified
     return err
@@ -572,33 +637,33 @@ type entryAccessReqs struct {
 }
 
 
-func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
+func (eip *entryInProcess) prepChannelAccess() *plan.Perror {
 
-    plan.Assert( ws.targetChFlags == 0 &&  ws.accessChFlags == 0, "channel store lock flags not reset" )
+    plan.Assert( eip.targetChFlags == 0 &&  eip.accessChFlags == 0, "channel store lock flags not reset" )
 
     targetChFlags := LockForWriteAccess
     accessChFlags := LockForReadAccess | CitedAsAccessChannel
 
-    switch ws.entryHeader.EntryOp {
+    switch eip.entryHeader.EntryOp {
         case pdi.EntryOp_EDIT_ACCESS_GRANTS:
             targetChFlags |= CitedAsAccessChannel
     }
 
     // First lock the target channel
     var perr *plan.Perror
-    ws.targetCh, perr = ws.CR.LockChannelStore(ws.entryHeader.ChannelId, targetChFlags)
+    eip.targetCh, perr = eip.CR.LockChannelStore(eip.entryHeader.ChannelId, targetChFlags)
     if perr != nil {
         return perr
     }
 
     // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
-    ws.targetChFlags = targetChFlags
+    eip.targetChFlags = targetChFlags
 
 
     // Step from newest to oldest epoch.
     var epochMatch *pdi.ChannelEpoch
-    for i, epoch := range ws.targetCh.ChannelEpochs {
-        if epoch.EpochId == ws.entryHeader.ChannelEpochId {
+    for i, epoch := range eip.targetCh.ChannelEpochs {
+        if epoch.EpochId == eip.entryHeader.ChannelEpochId {
             if i > 0 {
                 // TODO: ws.targetChannel.ChannelEpoch[i-1].EpochTransitionPeriod
                 {
@@ -609,17 +674,17 @@ func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
         }
     }
     if epochMatch == nil {
-        return plan.Errorf(nil, plan.TargetChannelEpochNotFound, "epoch 0x%x for target channel 0x%x not found", ws.entryHeader.ChannelEpochId, ws.entryHeader.ChannelId)
+        return plan.Errorf(nil, plan.TargetChannelEpochNotFound, "epoch 0x%x for target channel 0x%x not found", eip.entryHeader.ChannelEpochId, eip.entryHeader.ChannelId)
     }
 
     // Lookup the latest 
-    ws.accessCh, perr = ws.CR.LockChannelStore(epochMatch.AccessChannelId, accessChFlags)
+    eip.accessCh, perr = eip.CR.LockChannelStore(epochMatch.AccessChannelId, accessChFlags)
     if perr != nil {
         return perr
     }
 
     // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
-    ws.accessChFlags = accessChFlags
+    eip.accessChFlags = accessChFlags
 
 /*
     // Ops such as REMOVE_ENTRIES and SUPERCEDE_ENTRY
@@ -691,7 +756,7 @@ func (ws *entryWorkspace) prepChannelAccess() *plan.Perror {
 
 
 
-func (ws *entryWorkspace) mergeEntry(
+func (eip *entryInProcess) mergeEntry(
     inOnCompletion func(*plan.Perror),
     ) {
 
@@ -703,27 +768,27 @@ func (ws *entryWorkspace) mergeEntry(
 
 
 
-func (ws *entryWorkspace) processAndMergeEntry( 
+func (eip *entryInProcess) processAndMergeEntry( 
     inOnCompletion func(*plan.Perror),
     ) {
 
-    ws.unpackHeader( func(inErr *plan.Perror) {
+    eip.unpackHeader( func(inErr *plan.Perror) {
         if inErr != nil {
             inOnCompletion(inErr)
         }
 
-        perr := ws.validateEntry()
+        perr := eip.validateEntry()
         if perr != nil {
             inOnCompletion(perr)
         }
 
 
-        perr = ws.prepChannelAccess()
+        perr = eip.prepChannelAccess()
         if perr != nil {
             inOnCompletion(perr)
         }
 
-        ws.mergeEntry(inOnCompletion)
+        eip.mergeEntry(inOnCompletion)
     })
    
 

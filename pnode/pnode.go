@@ -5,15 +5,14 @@ package pnode
 import (
 
     //"fmt"
-    "flag"
-    //"log"
+    "log"
     "os"
     //"io"
     "io/ioutil"
     "strings"
     //"sync"
     //"time"
-    //"sort"
+    "net"
     "encoding/hex"
     "encoding/json"
     //"encoding/base64"
@@ -31,10 +30,15 @@ import (
 
     //"github.com/stretchr/testify/assert"
 
-    //"github.com/ethereum/go-ethereum/rlp"
-    "github.com/ethereum/go-ethereum/common/hexutil"
 
     "github.com/plan-tools/go-plan/pservice"
+
+    //"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+
+    //"github.com/ethereum/go-ethereum/rlp"
+    "github.com/ethereum/go-ethereum/common/hexutil"
 
     "golang.org/x/net/context"
 
@@ -86,11 +90,11 @@ community-public permissions.  This is fine since only PLAN clients with a
 type Pnode struct {
     CRbyID                      map[plan.CommunityID]*CommunityRepo
 
-    config                      PnodeConfig
+    Config                      PnodeConfig
 
     ActiveSessions              SessionGroup
 
-    BasePath                    string
+    Params                      PnodeParams
 
 }
 
@@ -133,6 +137,9 @@ type PnodeConfig struct {
 }
 
 
+type PnodeParams struct {
+    BasePath string
+}
 
 
 
@@ -159,43 +166,34 @@ func init() {
 
 
 
-func NewPnode() *Pnode {
+func NewPnode(inParams PnodeParams) *Pnode {
     pn := &Pnode{}
 
-    pn.config.DefaultFileMode = os.FileMode(0775)
-    pn.config.GrpcNetworkName = DefaultGrpcNetworkName
-    pn.config.GrpcNetworkAddr = DefaultGrpcNetworkAddr
+    pn.Config.DefaultFileMode = os.FileMode(0775)
+    pn.Config.GrpcNetworkName = DefaultGrpcNetworkName
+    pn.Config.GrpcNetworkAddr = DefaultGrpcNetworkAddr
 
-    pn.config.RuntimeSettings.MaxOpenChannels          = 50
-    pn.config.RuntimeSettings.ChannelAutoCloseTimer    = 60 * 60
-    pn.config.RuntimeSettings.ChannelAutoFlushTimer    = 10
-    pn.config.RuntimeSettings.MaxAuthTokenInactivity   = 60 * 60 * 24
+    pn.Config.RuntimeSettings.MaxOpenChannels          = 50
+    pn.Config.RuntimeSettings.ChannelAutoCloseTimer    = 60 * 60
+    pn.Config.RuntimeSettings.ChannelAutoFlushTimer    = 10
+    pn.Config.RuntimeSettings.MaxAuthTokenInactivity   = 60 * 60 * 24
 
     pn.CRbyID                   =  map[plan.CommunityID]*CommunityRepo{}
     pn.ActiveSessions.table     =  map[string]*ClientSession{}  
+
+    pn.Params = inParams
 
     return pn;
 }
 
 
 
-
-func (pn *Pnode) Init() error {
-
-    basePath    := flag.String( "datadir",      "",         "Directory for config files, keystore, and community repos" )
-    init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh pnode" )
-
-    flag.Parse()
-
-    if basePath != nil {
-        pn.BasePath = *basePath
-    } else {
-        pn.BasePath = os.Getenv("HOME") + "/PLAN/pnode/"
-    }
+// Startup does basic loading from disk etc
+func (pn *Pnode) Startup(inFullInit bool) error {
 
     var err error
 
-    if ( *init ) {
+    if inFullInit {
         err = pn.InitOnDisk()
         if err != nil {
             return err
@@ -209,6 +207,39 @@ func (pn *Pnode) Init() error {
 
     return nil
 }
+
+
+
+// Run is used like main()
+func (pn *Pnode) Run() {
+
+
+    // For each community repo a pnode is hosting, start service for that community repo.
+    // By "start service" we mean that each PDI layer that repo is configured with starts up (e.g. Ethereum private distro) such that:
+    //     (a) new PDI entries *from* that layer are handed over process processing
+    //     (b) newly authored entried from the PLAN client are handed over to the PDI layer to be replicated to other pnodes 
+    //         also carrying that community.
+    for _, CR := range pn.CRbyID {
+        CR.StartService()
+    }
+
+    {
+        lis, err := net.Listen(pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
+        if err != nil {
+            log.Fatalf( "failed to listen: %v", err )
+        }
+        grpcServer := grpc.NewServer()
+        pservice.RegisterPnodeServer(grpcServer, pn)
+        
+        // Register reflection service on gRPC server.
+        reflection.Register( grpcServer )
+        if err := grpcServer.Serve( lis ); err != nil {
+            log.Fatalf( "failed to serve: %v", err )
+        }
+    }
+}
+
+
 
 
 
@@ -237,8 +268,8 @@ func (pnID PnodeID) UnmarshalJSON( inText []byte ) error {
 
 func (pn *Pnode) InitOnDisk() error {
 
-    pn.config.PnodeID = make( []byte, plan.CommunityIDSz )
-    rand.Read( pn.config.PnodeID )
+    pn.Config.PnodeID = make([]byte, plan.CommunityIDSz)
+    rand.Read(pn.Config.PnodeID)
 
     return pn.WriteConfigOut()
 }
@@ -247,15 +278,15 @@ func (pn *Pnode) InitOnDisk() error {
 
 func (pn *Pnode) LoadConfigIn() error {
 
-    buf, err := ioutil.ReadFile( pn.BasePath + PnodeConfigFilename )
+    buf, err := ioutil.ReadFile( pn.Params.BasePath + PnodeConfigFilename )
     if err == nil {
-        err = json.Unmarshal( buf, &pn.config )
+        err = json.Unmarshal(buf, &pn.Config)
     }
 
-    for i := range pn.config.RepoList {
-        CRInfo := &pn.config.RepoList[i]
+    for i := range pn.Config.RepoList {
+        CRInfo := &pn.Config.RepoList[i]
         
-        CR := NewCommunityRepo( CRInfo, pn )
+        CR := NewCommunityRepo(CRInfo, pn)
 
         pn.RegisterCommunityRepo( CR )
     }
@@ -268,7 +299,7 @@ func (pn *Pnode) LoadConfigIn() error {
 func (pn *Pnode) RegisterCommunityRepo( CR *CommunityRepo ) {
 
     var communityID plan.CommunityID
-    copy( communityID[:], CR.Info.CommunityID )
+    copy(communityID[:], CR.Info.CommunityID)
 
     pn.CRbyID[communityID] = CR
 
@@ -278,14 +309,14 @@ func (pn *Pnode) RegisterCommunityRepo( CR *CommunityRepo ) {
 
 func (pn *Pnode) WriteConfigOut() error {
 
-    os.MkdirAll( pn.BasePath, pn.config.DefaultFileMode )
+    os.MkdirAll( pn.Params.BasePath, pn.Config.DefaultFileMode )
 
-    buf, err := json.MarshalIndent( &pn.config, "", "\t" )
+    buf, err := json.MarshalIndent( &pn.Config, "", "\t" )
     if err != nil {
         return err
     }
 
-    err = ioutil.WriteFile( pn.BasePath + PnodeConfigFilename, buf, pn.config.DefaultFileMode )
+    err = ioutil.WriteFile( pn.Params.BasePath + PnodeConfigFilename, buf, pn.Config.DefaultFileMode )
 
     return err
 
@@ -298,14 +329,14 @@ func (pn *Pnode) WriteConfigOut() error {
 
 func (pn *Pnode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
 
-    pn.config.RepoList = append( pn.config.RepoList, CommunityRepoInfo{} )
+    pn.Config.RepoList = append(pn.Config.RepoList, CommunityRepoInfo{})
 
-    info := &pn.config.RepoList[len(pn.config.RepoList)-1]
+    info := &pn.Config.RepoList[len(pn.Config.RepoList)-1]
     
     {
         info.CommunityName = inCommunityName
-        info.CommunityID = make( []byte, plan.CommunityIDSz )
-        rand.Read( info.CommunityID )
+        info.CommunityID = make([]byte, plan.CommunityIDSz)
+        rand.Read(info.CommunityID)
 
         {
             var b strings.Builder
@@ -330,16 +361,15 @@ func (pn *Pnode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
     
     
             info.RepoPath = b.String() + "-" + hex.EncodeToString( info.CommunityID[:4] ) + "/"
-            info.ChannelPath = info.RepoPath + "ch/"
             info.TimeCreated = plan.Now()
             info.MaxPeerClockDelta = 60 * 25
         }
 
     }
 
-    CR := NewCommunityRepo( info, pn )
+    CR := NewCommunityRepo(info, pn)
 
-    pn.RegisterCommunityRepo( CR )
+    pn.RegisterCommunityRepo(CR)
 
     pn.WriteConfigOut()
 
@@ -362,9 +392,8 @@ func NewClientSession(in *pservice.SessionRequest) *ClientSession {
 }
 
 
-
-// BeginSession implements pservice.PserviceServer
-func (pn *Pnode) BeginSession(
+// StartSession implements pservice.PserviceServer
+func (pn *Pnode) StartSession(
     ctx context.Context,
     in *pservice.SessionRequest,
     ) (*pservice.SessionInfo, error) {
@@ -373,7 +402,7 @@ func (pn *Pnode) BeginSession(
 
     CR := pn.CRbyID[communityID]
     if CR == nil {
-        return nil, plan.Errorf(nil, plan.CommunityNotFound, "community ID not found {ID:%v}", in.CommunityId)
+        return nil, plan.Errorf(nil, plan.CommunityNotFound, "communityID not found {ID:%v}", in.CommunityId)
     }
 
     session := NewClientSession(in)
@@ -390,7 +419,11 @@ func (pn *Pnode) BeginSession(
 
 
 // ReportStatus implements pservice.PserviceServer
-func (pn *Pnode) ReportStatus( ctx context.Context, in *pservice.StatusQuery ) ( *pservice.StatusReply, error ) {
+func (pn *Pnode) ReportStatus(
+    ctx context.Context, 
+    in *pservice.StatusQuery,
+    ) (*pservice.StatusReply, error) {
+
     session, err := pn.ActiveSessions.FetchSession(ctx)
     if err != nil {
         return nil, err
