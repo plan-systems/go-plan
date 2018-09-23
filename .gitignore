@@ -21,3 +21,6 @@ Thumbs.db
 # glide cruft #
 ###############
 vendor/
+
+# debug binaries
+*debug
