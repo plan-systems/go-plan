@@ -1,9 +1,10 @@
-package ski // import "github.com/plan-tools/go-plan/ski"
+package nacl
 
 import (
 	crypto_rand "crypto/rand"
     "sync"
-    "bytes"
+
+	"github.com/plan-tools/go-plan/ski"
 
 	plan "github.com/plan-tools/go-plan/plan"
 	box "golang.org/x/crypto/nacl/box"
@@ -19,7 +20,7 @@ type Keyring struct {
     
     Label           string
     KeysCodec       string
-    keysByID        map[plan.KeyID]*KeyEntry
+    keysByID        map[plan.KeyID]*ski.KeyEntry
 }
 
 // NewKeyring creates and empty keyring with the given label/name.
@@ -27,8 +28,8 @@ func NewKeyring(inLabel string) *Keyring {
 
     return &Keyring{
         Label: inLabel,
-        KeysCodec: NaClKeysCodec,
-        keysByID: map[plan.KeyID]*KeyEntry{},
+        KeysCodec: KeysCodec,
+        keysByID: map[plan.KeyID]*ski.KeyEntry{},
     }
 }
 
@@ -53,7 +54,7 @@ func (kr *Keyring) NewSymmetricKey() plan.KeyID {
 }
 
 // NewKeyEntry generates a new KeyEntry of the given type 
-func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *KeyEntry {
+func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *ski.KeyEntry {
 
     for {
         keyEntry := generateKeyEntry(inKeyInfo)
@@ -82,7 +83,7 @@ func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *KeyEntry {
 // ExportKeys exports the given list of keys into a buffer t
 func (kr *Keyring) ExportKeys(
     inKeyIDs []plan.KeyID,
-    ioKeyList *KeyList,
+    ioKeyList *ski.KeyList,
     ) []plan.KeyID {
 
     var keysNotFound []plan.KeyID
@@ -109,10 +110,10 @@ func (kr *Keyring) ExportKeys(
 
 // MergeKeys adds a key to the keychain (ignoring collitions if the key entry is identical)
 func (kr *Keyring) MergeKeys(
-    inKeyList KeyList,
+    inKeyList ski.KeyList,
     ) *plan.Perror {
 
-    var collisions []*KeyEntry
+    var collisions []*ski.KeyEntry
     var keyID plan.KeyID
     
     kr.Lock()
@@ -214,8 +215,8 @@ func (kr *Keyring) GetSymmetricKey(inKeyID plan.KeyID) (
 
 
 
-func generateKeyEntry(inKeyInfo uint32) *KeyEntry {
-    entry := &KeyEntry{
+func generateKeyEntry(inKeyInfo uint32) *ski.KeyEntry {
+    entry := &ski.KeyEntry{
         KeyInfo: inKeyInfo,
         TimeCreated: plan.Now().UnixSecs,
     }
@@ -258,27 +259,6 @@ func generateKeyEntry(inKeyInfo uint32) *KeyEntry {
     return entry
 
 }
-
-
-
-
-
-
-
-// EqualTo compares if two key entries are identical/interchangable 
-func (entry *KeyEntry) EqualTo(other *KeyEntry) bool {
-    return entry.KeyInfo != other.KeyInfo ||
-        entry.TimeCreated != other.TimeCreated ||
-        bytes.Equal(entry.PrivKey, other.PrivKey) == false ||
-        bytes.Equal(entry.PubKey, other.PubKey) == false
-
-}
-
-// GetKeyID is a convenience function that returns this key's fixed ID (determined by the key's public key)
-func (entry *KeyEntry) GetKeyID() plan.KeyID {
-    return plan.GetKeyID(entry.PubKey)
-}
-
 
 
 

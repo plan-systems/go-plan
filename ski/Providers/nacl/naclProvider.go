@@ -1,12 +1,13 @@
 
-package main
+package nacl
 
 import (
     //"encoding/json"
     //"net/http"
     //"log"
-
+	"github.com/plan-tools/go-plan/ski"
 	"github.com/plan-tools/go-plan/plan"
+    
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
     sign "golang.org/x/crypto/nacl/sign"
@@ -17,11 +18,11 @@ import (
 
 const (
 
-    // NaClKeysCodec is used to express the format in each KeyEntry
+    // KeysCodec is used to express the format in each KeyEntry
     KeysCodec = "/plan/ski/KeyEntry/NaCl/1"
 
-    // NaClProviderName should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
-    ProviderName = "/plan/ski/Provider/NaCl/1"
+    // ProviderInvocation should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
+    naclInvocation = "/plan/ski/Provider/NaCl/1"
 
 
     // KeyEntry.KeyType
@@ -40,7 +41,7 @@ const (
 
 var (
 
-    // NaclProvider is the primary "entry" point for a NaCl "provider"
+    // Provider is the primary "entry" point for a NaCl "provider"
     Provider = newNaclProvider()
 
 
@@ -82,8 +83,8 @@ func newNaclProvider() *naclProvider {
 func (provider *naclProvider) NewSession() *naclSession {
 	session := &naclSession{
         provider,
-        NewKeyring(CommunityKeyring),
-        NewKeyring(PersonalKeyring),
+        NewKeyring(ski.CommunityKeyring),
+        NewKeyring(ski.PersonalKeyring),
         map[string]bool{},
         nil,
     }
@@ -91,12 +92,17 @@ func (provider *naclProvider) NewSession() *naclSession {
 }
 
 
+func (provider *naclProvider) InvocationStr() string {
+    return naclInvocation
+}
+
+
 // StartSession starts a new SKI session
 func (provider *naclProvider) StartSession(
 	inInvocation     plan.Block,
-    inOpsAllowed     AccessScopes,
+    inOpsAllowed     ski.AccessScopes,
     inOnSessionEnded func(inReason string),
-) (Session, *plan.Perror) {
+) (ski.Session, *plan.Perror) {
 
     session := provider.NewSession()
     session.onSessionEnded = inOnSessionEnded
@@ -111,6 +117,17 @@ func (provider *naclProvider) StartSession(
 
     return session, nil
 }
+
+// RegisterForInvocation is how outside packages make this SKI implementation available to be invoked
+func RegisterForInvocation() {
+    ski.RegisterProvider(Provider)
+}
+
+
+
+/*****************************************************
+** ski.InvokeProvider()
+**/
 
 
 func (provider *naclProvider) EndSession(inSession *naclSession, inReason string) *plan.Perror {
@@ -182,7 +199,7 @@ func (session *naclSession) EndSession(inReason string, inOnCompletion plan.Acti
 
 
 
-func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompletionHandler) {
+func (session *naclSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
 
     if ! session.allowedOps[inArgs.OpName] {
         err := plan.Errorf(nil, plan.InsufficientSKIAccess, "insufficient SKI permissions for op %s", inArgs.OpName)
@@ -201,7 +218,7 @@ func (session *naclSession) DispatchOp(inArgs *OpArgs, inOnCompletion OpCompleti
 
 
 
-func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
+func (session *naclSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
 
     outResults := &plan.Block{}
 
@@ -213,7 +230,7 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
     {
         switch opArgs.OpName {
 
-            case OpSendCommunityKeys: {
+            case ski.OpSendCommunityKeys: {
                 opArgs.Msg, err = session.encodeSendKeysMsg(&opArgs)
             }
         }
@@ -238,21 +255,21 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
         switch opArgs.OpName {
 
             case 
-            OpEncryptForCommunity,
-            OpDecryptFromCommunity:
+            ski.OpEncryptForCommunity,
+            ski.OpDecryptFromCommunity:
             keyBuf, err = session.communityKeyring.GetSymmetricKey(opArgs.CryptoKeyID)
             privKeySz = 32
 
             case
-            OpEncryptFor,
-            OpDecryptFrom,
-            OpSendCommunityKeys,
-            OpAcceptCommunityKeys:
+            ski.OpEncryptFor,
+            ski.OpDecryptFrom,
+            ski.OpSendCommunityKeys,
+            ski.OpAcceptCommunityKeys:
             keyBuf, err = session.personalKeyring.GetEncryptKey(opArgs.CryptoKeyID)
             privKeySz = 32
 
             case
-            OpSignMsg:
+            ski.OpSignMsg:
             keyBuf, err = session.personalKeyring.GetSigningKey(opArgs.CryptoKeyID)
             privKeySz = 64
         }
@@ -278,18 +295,18 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
     {
         switch opArgs.OpName{
 
-            case OpSignMsg:{
+            case ski.OpSignMsg:{
                 sig := sign.Sign(nil, opArgs.Msg, &privKey64)
                 msg = sig[:sign.Overhead]
             }
 
-            case OpEncryptForCommunity:{
+            case ski.OpEncryptForCommunity:{
                 var salt [24]byte
                 crypto_rand.Read(salt[:])
                 msg = secretbox.Seal(salt[:], opArgs.Msg, &salt, &privKey32)
             }
 
-            case OpDecryptFromCommunity:{
+            case ski.OpDecryptFromCommunity:{
                 var salt [24]byte
                 copy(salt[:], opArgs.Msg[:24])
                 
@@ -300,13 +317,17 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
                 }
             }
 
-            case OpEncryptFor, OpSendCommunityKeys:{
+            case 
+            ski.OpEncryptFor, 
+            ski.OpSendCommunityKeys:{
                 var salt [24]byte
                 crypto_rand.Read(salt[:])
                 msg = box.Seal(salt[:], opArgs.Msg, &salt, &peerPubKey, &privKey32)
             }
 
-            case OpDecryptFrom, OpAcceptCommunityKeys:{
+            case 
+            ski.OpDecryptFrom,
+            ski.OpAcceptCommunityKeys:{
                 var salt [24]byte
                 copy(salt[:], opArgs.Msg[:24])
                 
@@ -317,13 +338,13 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
                 }
             }
 
-            case OpNewIdentityRev:{
+            case ski.OpNewIdentityRev:{
                 signKey, encrKey := session.personalKeyring.NewIdentity()
-                outResults.AddContentWithLabel(signKey, PubSigningKeyName)
-                outResults.AddContentWithLabel(encrKey, PubCryptoKeyName)
+                outResults.AddContentWithLabel(signKey, ski.PubSigningKeyName)
+                outResults.AddContentWithLabel(encrKey, ski.PubCryptoKeyName)
             }
 
-            case OpCreateCommunityKey:{
+            case ski. OpCreateCommunityKey:{
                 keyID := session.communityKeyring.NewSymmetricKey()
                 msg = keyID[:]          
             }
@@ -347,7 +368,7 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
     // 5) POST OP
     if err == nil {
         switch opArgs.OpName {
-            case OpAcceptCommunityKeys:
+            case ski.OpAcceptCommunityKeys:
                 err = session.decodeAcceptKeysMsg(msg)
                 msg = nil
         }
@@ -369,15 +390,15 @@ func (session *naclSession) doOp(opArgs OpArgs) (*plan.Block, *plan.Perror) {
 
 
 
-func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Perror){
+func (session *naclSession) encodeSendKeysMsg(opArgs *ski.OpArgs) ([]byte, *plan.Perror){
 
 
     var keyListBuf []byte
     {
-        keyList := KeyList{
+        keyList := ski.KeyList{
             Label: session.communityKeyring.Label,
             KeysCodec: session.communityKeyring.KeysCodec,
-            Keys: make([]*KeyEntry, 0, len(opArgs.OpKeyIDs)),
+            Keys: make([]*ski.KeyEntry, 0, len(opArgs.OpKeyIDs)),
         }
 
         //var perr *plan.Perror
@@ -395,7 +416,7 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *OpArgs) ([]byte, *plan.Per
     }
 
     block := plan.Block {
-        Codec: KeyListProtobufCodec,
+        Codec: ski.KeyListProtobufCodec,
         Content: keyListBuf,
     }
 
@@ -418,12 +439,12 @@ func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
     }
 
 
-    keyListBuf := block.GetContentWithCodec(KeyListProtobufCodec, 0)
+    keyListBuf := block.GetContentWithCodec(ski.KeyListProtobufCodec, 0)
     if keyListBuf == nil {
-		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", KeyListProtobufCodec)
+		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", ski.KeyListProtobufCodec)
     }
 
-    keyList := KeyList{}
+    keyList := ski.KeyList{}
     
     err = keyList.Unmarshal(keyListBuf)
 	if err != nil {
