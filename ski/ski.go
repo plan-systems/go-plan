@@ -12,6 +12,9 @@ import (
 // All calls in this interface are threadsafe.
 type Session interface {
 
+	// VerifySignature verifies that inSig is in fact the signature of inMsg signed by an owner of inSignerPubKey
+	VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) bool
+
 	// DispatchOp implements a complete set of SKI operations
 	DispatchOp(inOpArgs *OpArgs, inOnCompletion OpCompletionHandler)
 
@@ -27,16 +30,53 @@ type Session interface {
 // Provider wraps how an SKI connection is implemented.  Perhaps it's locally implemented, or perhaps the it uses a network connection.
 type Provider interface {
 
+	// InvocationStr returns a string that identifies this provider type
+	InvocationStr() string
+
 	// StartSession starts a new session SKI.session.  In general, you should only start one session
 	StartSession(
-		inInvocation string,
+		inInvocation plan.Block,
 		inAccessScopes AccessScopes,
-		inOnSessionStarted func(inSession Session, inErr error),
 		inOnSessionEnded func(inReason string),
-	) *plan.Perror
+	) (Session, *plan.Perror)
+}
 
-	// VerifySignature verifies that inSig is in fact the signature of inMsg signed by an owner of inSignerPubKey
-	VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) *plan.Perror
+/*****************************************************
+** ski.InvokeProvider()
+**/
+
+// ProviderRegistry maps provider names to implementations
+var providerRegistry = map[string]Provider{}
+
+// RegisterProvider registers the given provider so it can be invoked via ski.StartSession()
+func RegisterProvider(inProvider Provider) error {
+	istr := inProvider.InvocationStr()
+	if providerRegistry[istr] != nil {
+		return plan.Errorf(nil, plan.InvocationAlreadyExists, "the ski invocation %s already exists", istr)
+	}
+	providerRegistry[istr] = inProvider
+	return nil
+}
+
+// StartSession returns a provider implementation given an invocation block
+func StartSession(
+	inInvocation plan.Block,
+	inAccessScopes AccessScopes,
+	inOnSessionEnded func(inReason string),
+) (Session, *plan.Perror) {
+
+	provider := providerRegistry[inInvocation.Label]
+	if provider == nil {
+		return nil, plan.Errorf(nil, plan.InvocationNotAvailable, "ski.StartSession() failed to find provider for invocation %s", inInvocation.Label)
+	}
+
+	session, err := provider.StartSession(
+		inInvocation,
+		inAccessScopes,
+		inOnSessionEnded,
+	)
+
+	return session, err
 }
 
 /*****************************************************
