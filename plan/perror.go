@@ -147,6 +147,9 @@ const (
 	// InvocationNotAvailable means an SKI session was started with an unrecognized invocation string
 	InvocationNotAvailable
 
+	// InvocationAlreadyExists means an ski.Provider has already been registered with the given invocation string
+	InvocationAlreadyExists
+
 	// KeyringNotSpecified means no keyring scope name was given for the SKI operation
 	KeyringNotSpecified
 
