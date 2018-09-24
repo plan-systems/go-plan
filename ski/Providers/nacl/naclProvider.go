@@ -1,5 +1,5 @@
-// Package ski is a reference implementation of the SKI plugin
-package ski // import "github.com/plan-tools/go-plan/ski"
+
+package main
 
 import (
     //"encoding/json"
@@ -18,10 +18,10 @@ import (
 const (
 
     // NaClKeysCodec is used to express the format in each KeyEntry
-    NaClKeysCodec = "/plan/ski/KeyEntry/NaCl/1"
+    KeysCodec = "/plan/ski/KeyEntry/NaCl/1"
 
     // NaClProviderName should be passed for inInvocation when calling SKI.NaclProvider.StartSession()
-    NaClProviderName = "/plan/ski/Provider/NaCl/1"
+    ProviderName = "/plan/ski/Provider/NaCl/1"
 
 
     // KeyEntry.KeyType
@@ -41,7 +41,7 @@ const (
 var (
 
     // NaclProvider is the primary "entry" point for a NaCl "provider"
-    NaclProvider = newNaclProvider()
+    Provider = newNaclProvider()
 
 
 
@@ -93,15 +93,10 @@ func (provider *naclProvider) NewSession() *naclSession {
 
 // StartSession starts a new SKI session
 func (provider *naclProvider) StartSession(
-    inInvocation        string,
-    inOpsAllowed        []string,
-    inOnCompletion      func(inSession Session, inErr *plan.Perror),
-    inOnSessionEnded    func(inReason string),
-) *plan.Perror {
-
-    if inInvocation != NaClProviderName {
-        return plan.Error(nil, plan.InvocationNotAvailable, "SKI invocation not found or otherwise available")
-    }
+	inInvocation     plan.Block,
+    inOpsAllowed     AccessScopes,
+    inOnSessionEnded func(inReason string),
+) (Session, *plan.Perror) {
 
     session := provider.NewSession()
     session.onSessionEnded = inOnSessionEnded
@@ -114,9 +109,7 @@ func (provider *naclProvider) StartSession(
 
     provider.sessions = append(provider.sessions, session)
 
-    inOnCompletion(session, nil)
-
-    return nil
+    return session, nil
 }
 
 
@@ -139,8 +132,23 @@ func (provider *naclProvider) EndSession(inSession *naclSession, inReason string
 
 
 
+
+// naclSession represents a local implementation of the SKI
+type naclSession struct {
+
+    // TODO: put in mutex!?
+    parentProvider      *naclProvider
+    communityKeyring    *Keyring
+    personalKeyring     *Keyring
+    allowedOps          map[string]bool
+    onSessionEnded      func(inReason string)
+}
+
+
+
+
 // VerifySignature accepts a signature and verifies it against the public key of the signer. 
-func (provider *naclProvider) VerifySignature(
+func (session *naclSession) VerifySignature(
 	inSig []byte,
 	inMsg []byte,
 	inSignerPubKey []byte,
@@ -161,19 +169,6 @@ func (provider *naclProvider) VerifySignature(
 	return ok
 }
 
-
-
-
-// naclSession represents a local implementation of the SKI
-type naclSession struct {
-
-    // TODO: put in mutex!?
-    parentProvider      *naclProvider
-    communityKeyring    *Keyring
-    personalKeyring     *Keyring
-    allowedOps          map[string]bool
-    onSessionEnded      func(inReason string)
-}
 
 
 
