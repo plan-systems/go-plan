@@ -5,11 +5,6 @@
          L ogistics
          A rchitecture
 P  L  A  N etwork
-
-Welcome to PLAN!
-
-PLAN is a secure, visual communications and logistics planning tool for individuals and organizations.
-It is intended to be an instrument of productivity, organization, and self-reliance.
 ```
 
 `go-plan` is the benchmark implementation of PLAN's p2p client-serving node.
