@@ -1,0 +1,216 @@
+
+
+
+package nacl
+
+import (
+    //"encoding/json"
+    //"net/http"
+    //"log"
+    "io"
+	"github.com/plan-tools/go-plan/ski"
+	"github.com/plan-tools/go-plan/plan"
+    
+	box "golang.org/x/crypto/nacl/box"
+	secretbox "golang.org/x/crypto/nacl/secretbox"
+    sign "golang.org/x/crypto/nacl/sign"
+
+)
+
+
+
+var (
+
+    // An Alan Watts invocation....
+    // Convenience for having zero data around
+    zero64 = [64]byte{
+        +0,+0,+0,+0,-0,-0,-0,-0,
+        +0,-0,-0,+0,-0,-0,-0,-0,
+        +0,-0,-0,+0,-0,-0,-0,-0,
+        +0,+0,+0,+0,-0,-0,-0,-0,
+        +0,+0,+0,+0,-0,-0,-0,-0,
+        +0,+0,+0,+0,-0,+0,+0,-0,
+        +0,+0,+0,+0,-0,+0,+0,-0,
+        +0,+0,+0,+0,-0,-0,-0,-0,
+    }
+
+    
+)
+
+
+
+
+
+// CryptoPkg is used with ski.RegisterCryptoPkg() so it is freely available.
+var CryptoPkg = ski.CryptoPkg{
+
+    CryptoPkgID: ski.CryptoPkgID_NaCl,
+
+	/*****************************************************
+	** Symmetric encryption
+	**/
+
+    Encrypt: func(
+        inRand io.Reader, 
+        inMsg []byte,
+        inKey []byte,
+    ) ([]byte, error) {
+
+        if len(inKey) != 32 {
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", 32, len(inKey))
+        }
+
+        var salt [24]byte
+        inRand.Read(salt[:])
+
+        var privKey [32]byte
+        copy(privKey[:], inKey[:32])
+        
+        msg := secretbox.Seal(salt[:], inMsg, &salt, &privKey)
+
+        // Don't leave any private key bytes in memory
+        copy(privKey[:], zero64[:32])
+
+        return msg, nil
+    },
+
+
+    Decrypt: func(
+        inMsg []byte,
+        inKey []byte,
+    ) ([]byte, error) {
+
+        var salt [24]byte
+        copy(salt[:], inMsg[:24])
+        
+        var privKey [32]byte
+        copy(privKey[:], inKey[:32])
+
+        var err *plan.Perror
+        msg, ok := secretbox.Open(nil, inMsg[24:], &salt, &privKey)
+        if ! ok {
+            err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt data")
+        }
+
+        // Don't leave any private key bytes in memory
+        copy(privKey[:], zero64[:32])
+
+
+        return msg, err
+    },
+
+	/*****************************************************
+	** Asymmetric encryption
+	**/
+
+    EncryptFor: func(
+        inRand io.Reader, 
+        inMsg []byte,
+        inPeerPubKey []byte,
+        inPrivKey []byte,
+    ) ([]byte, error) {
+
+        if len(inPeerPubKey) != 32 {
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected peer pub key length, want %d, got %s", 32, len(inPeerPubKey))
+        }
+
+        if len(inPrivKey) != 32 {
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected private key length, want %d, got %s", 32, len(inPrivKey))
+        }
+
+        var salt [24]byte
+        inRand.Read(salt[:])
+
+        var privKey, peerPubKey [32]byte
+        copy(peerPubKey[:], inPeerPubKey[:32])
+        copy(privKey[:], inPrivKey[:32])
+
+        msg := box.Seal(salt[:], inMsg, &salt, &peerPubKey, &privKey)
+
+        // Don't leave any private key bytes in memory
+        copy(privKey[:], zero64[:32])
+
+        return msg, nil
+    },
+
+
+    DecryptFrom: func(
+        inMsg []byte,
+        inKey []byte,
+        inPeerPubKey []byte,
+        inPrivKey []byte,
+    ) ([]byte, error) {
+
+        var salt [24]byte
+        copy(salt[:], inMsg[:24])
+        
+        var privKey, peerPubKey [32]byte
+        copy(peerPubKey[:], inPeerPubKey[:32])
+        copy(privKey[:], inPrivKey[:32])
+
+        var err *plan.Perror
+        msg, ok := box.Open(nil, inMsg[24:], &salt, &peerPubKey, &privKey)
+        if ! ok {
+            err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt for peer %v", inPeerPubKey)
+        }
+
+        // Don't leave any private key bytes in memory
+        copy(privKey[:], zero64[:32])
+
+        return msg, err
+    },
+
+	/*****************************************************
+	** Signing & Verification
+	**/
+
+    Sign: func(
+        inDigest []byte,
+        inSignerPrivKey []byte,
+    ) ([]byte, error) {
+
+        if len(inSignerPrivKey) != 64 {
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", 64, len(inSignerPrivKey))
+        }
+
+        var privKey [64]byte
+        copy(privKey[:], inSignerPrivKey[:64])
+
+        sig := sign.Sign(nil, inDigest, &privKey)
+
+        // Don't leave any private key bytes in memory
+        copy(privKey[:], zero64[:64])
+
+        return sig[:sign.Overhead], nil
+    },
+
+
+    VerifySignature: func(
+        inSig []byte,
+        inDigest []byte,
+        inSignerPubKey []byte,
+    ) error {
+
+        // need to re-combine the sig and hash to produce the
+        // signed message that Open expects
+        signedMsg := make([]byte, 0, len(inSig) + len(inDigest))
+        signedMsg = append(signedMsg, inSig...)
+        signedMsg = append(signedMsg, inDigest...)
+        
+        var pubKey [32]byte
+        copy(pubKey[:], inSignerPubKey[:32])
+
+        _, ok := sign.Open(nil, signedMsg, &pubKey)
+
+        if !ok {
+            return plan.Error(nil, plan.VerifySignatureFailed, "nacl sig verification failed")
+        }
+                
+        return nil
+        
+    },
+
+}
+
+
+ 
