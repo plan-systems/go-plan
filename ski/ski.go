@@ -1,6 +1,8 @@
 package ski
 
 import (
+    "io"
+
 	"github.com/plan-tools/go-plan/plan"
 )
 
@@ -223,3 +225,80 @@ const (
 	// KeyListProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
 	KeyListProtobufCodec = "/plan/ski/KeyList/1"
 )
+
+
+// CryptoPkg is a generic pluggable interface that any crypto package can implement.  
+// It can even be  partially implemented (just return an err for functions that are not implemented).
+// All calls are assumed to be reentrant and threadsafe compatible.
+type CryptoPkg struct {
+
+    CryptoPkgID CryptoPkgID
+
+    CryptoPkgName string
+
+	/*****************************************************
+	** Symmetric encryption
+	**/
+
+    Encrypt func(
+        inRand io.Reader, 
+        inMsg []byte,
+        inKey []byte,
+    ) ([]byte, error)
+
+    Decrypt func(
+        inMsg []byte,
+        inKey []byte,
+    ) ([]byte, error)
+
+	/*****************************************************
+	** Asymmetric encryption
+	**/
+
+    EncryptFor func(
+        inRand io.Reader, 
+        inMsg []byte,
+        inPeerPubKey []byte,
+        inPrivKey []byte,
+    ) ([]byte, error)
+
+    DecryptFrom func(
+        inMsg []byte,
+        inKey []byte,
+        inPeerPubKey []byte,
+        inPrivKey []byte,
+    ) ([]byte, error)
+
+	/*****************************************************
+	** Signing & Verification
+	**/
+
+    Sign func(
+        inDigest []byte,
+        inSignerPrivKey []byte,
+    ) ([]byte, error)
+
+    VerifySignature func(
+        inSig []byte,
+        inDigest []byte,
+        inSignerPubKey []byte,
+    ) error
+
+}
+
+
+// CryptoPkgRegistry maps a CryptoPkgID to an implementation
+var CryptoPkgRegistry = map[CryptoPkgID]*CryptoPkg{}
+
+// RegisterCryptoPkg registers the given provider so it can be invoked via ski.StartSession()
+func RegisterCryptoPkg(inPkg *CryptoPkg) error {
+
+	pkg := CryptoPkgRegistry[inPkg.CryptoPkgID]
+    if pkg != nil && pkg != inPkg {
+		return plan.Errorf(nil, plan.CryptoPkgIDAlreadyRegistered, "the CryptoPkgID %d (%s) is already registered", inPkg.CryptoPkgID, inPkg.CryptoPkgName)
+	}
+
+	CryptoPkgRegistry[inPkg.CryptoPkgID] = inPkg
+
+	return nil
+}
