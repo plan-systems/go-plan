@@ -161,6 +161,22 @@ func (kr *Keyring) GetKeyEntry(
 */
 
 
+// GetKey fetches the key from the keychain,
+// or an error if the key doesn't exist.
+func (kr *Keyring) GetKey(inKeyID plan.KeyID) (
+	*ski.KeyEntry, *plan.Perror) {
+    
+	kr.RLock()
+    entry, ok := kr.keysByID[inKeyID]
+    kr.RUnlock()
+
+	if !ok {
+		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "key not found {keyID:%v}", inKeyID)
+	}
+	return entry, nil
+}
+
+
 
 // GetSigningKey fetches the d's private signing key from the keychain for a
 // specific public key, or an error if the key doesn't exist.

@@ -56,7 +56,7 @@ func doCoreTests(A, B *testSession) {
 
     // 1) make a new community key
 	opResults, err := A.doOp(ski.OpArgs{
-        OpName: ski.OpCreateCommunityKey,
+        OpName: ski.OpCreateSymmetricKey,
     })
 	if err != nil {
 		gTesting.Fatal(err)
@@ -68,7 +68,7 @@ func doCoreTests(A, B *testSession) {
 
     // 2) generate a xfer community key msg from A
     opResults, err = A.doOp(ski.OpArgs{
-        OpName: ski.OpSendCommunityKeys,
+        OpName: ski.OpSendKeys,
         OpKeyIDs: []plan.KeyID{communityKeyID},
         PeerPubKey: B.encryptPubKey,
         CryptoKeyID: A.encryptPubKeyID,
@@ -79,7 +79,7 @@ func doCoreTests(A, B *testSession) {
     
     // 3) insert the new community key into B
     opResults, err = B.doOp(ski.OpArgs{
-        OpName: ski.OpAcceptCommunityKeys,
+        OpName: ski.OpAcceptKeys,
         Msg: opResults.Content,
         PeerPubKey: A.encryptPubKey,
         CryptoKeyID: B.encryptPubKeyID,
@@ -92,7 +92,7 @@ func doCoreTests(A, B *testSession) {
 
     // Encrypt a new community msg on A
 	opResults, err = A.doOp(ski.OpArgs{
-        OpName: ski.OpEncryptForCommunity,
+        OpName: ski.OpEncrypt,
         CryptoKeyID: communityKeyID,
         Msg: clearMsg,
     })
@@ -104,7 +104,7 @@ func doCoreTests(A, B *testSession) {
 
     // Send the encrypted community message to B
 	opResults, err = B.doOp(ski.OpArgs{
-        OpName: ski.OpDecryptFromCommunity,
+        OpName: ski.OpDecrypt,
         CryptoKeyID: communityKeyID,
         Msg: encryptedMsg,
     })
@@ -128,7 +128,7 @@ func doCoreTests(A, B *testSession) {
         badMsg[rndPos] += rndAdj
 
         _, err = B.doOp(ski.OpArgs{
-            OpName: ski.OpDecryptFromCommunity,
+            OpName: ski.OpDecrypt,
             CryptoKeyID: communityKeyID,
             Msg: badMsg,
         })

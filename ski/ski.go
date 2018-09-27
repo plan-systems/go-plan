@@ -13,7 +13,7 @@ import (
 type Session interface {
 
 	// VerifySignature verifies that inSig is in fact the signature of inMsg signed by an owner of inSignerPubKey
-	VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) bool
+	VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) *plan.Perror
 
 	// DispatchOp implements a complete set of SKI operations
 	DispatchOp(inOpArgs *OpArgs, inOnCompletion OpCompletionHandler)
@@ -66,7 +66,7 @@ func StartSession(
 ) (Session, *plan.Perror) {
 
 	provider := providerRegistry[inInvocation.Label]
-	if provider == nil {
+	if provider == nil || provider.InvocationStr() != inInvocation.Label {
 		return nil, plan.Errorf(nil, plan.InvocationNotAvailable, "ski.StartSession() failed to find provider for invocation %s", inInvocation.Label)
 	}
 
@@ -91,23 +91,23 @@ var (
 
 	// PnodeAccess is for a pnode, where it only needs to decrypt the community's PDI entry headers.
 	PnodeAccess AccessScopes = []string{
-		OpDecryptFromCommunity,
+		OpDecrypt,
 	}
 
 	// GatewayROAccess is for a pgateway that only offers read-only community access (where new PDI entries CAN'T be authored)
 	GatewayROAccess = append(PnodeAccess,
-		OpAcceptCommunityKeys,
+		OpAcceptKeys,
 		OpDecryptFrom,
 	)
 
 	// GatewayRWAccess is for a pgateway that only offers normal community member access (where new PDI entries can be authored)
 	GatewayRWAccess = append(GatewayROAccess,
-		OpEncryptForCommunity,
+		OpEncrypt,
 		OpEncryptFor,
 		OpSignMsg,
-		OpSendCommunityKeys,
+		OpSendKeys,
 
-		OpCreateCommunityKey,
+		OpCreateSymmetricKey,
 		OpNewIdentityRev,
 	)
 )
@@ -131,8 +131,8 @@ type OpArgs struct {
 	// Sender/Recipient publicly available key -- a public address in the community key space
 	PeerPubKey []byte
 
+    // Input/Output buffer
 	Msg []byte
-	Sig []byte
 }
 
 // OpCompletionHandler handles the result of a SKI operation
@@ -151,21 +151,21 @@ const (
 const (
 
 	/*****************************************************
-	** Uses community keyring
-	**/
+	 ** Symmetric crypto support
+	 **/
 
-	// OpEncryptCommunityData encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
-	OpEncryptForCommunity = "c_encrypt_for"
+	// OpEncrypt encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
+	OpEncrypt = "encrypt_sym"
 
-	// OpDecryptCommunityData decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
-	OpDecryptFromCommunity = "c_decrypt_from"
+	// OpDecrypt decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
+	OpDecrypt = "decrypt_sym"
 
-	// OpCreateCommunityKey creates a new community key and returns the associated plan.KeyID
-	OpCreateCommunityKey = "create_community_key"
+	// OpCreateSymmetricKey creates a new symmetric key and returns the associated plan.KeyID
+	OpCreateSymmetricKey = "create_sym_key"
 
 	/*****************************************************
-	** Uses personal keyring
-	**/
+	 ** Asymmetric crypto support
+	 **/
 
 	// OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
 	OpEncryptFor = "encrypt_for"
@@ -177,23 +177,23 @@ const (
 	// Returns: len(inResults.Parts) == 0
 	OpSignMsg = "sign_msg"
 
-	// OpNewIdentityRev issues a new personal identity revision and returns public information for that new rev.
+	/*****************************************************
+	 ** Key generation & transport
+	 **/
+
+	// OpNewIdentityRev issues a new identity revision and returns public information for that new rev.
 	// Recall that the plan.KeyID for each pub key is the right-most <plan.KeyIDSz> bytes.
 	// Returns:
 	//     inResults.GetContentWithLabel(PubSigningKeyName): newly issued signing public key
 	//     inResults.GetContentWithLabel(PubCryptoKeyName): newly issued encryption public key
 	OpNewIdentityRev = "new_identity_rev"
 
-	/*****************************************************
-	** Uses personal AND community keyrings
-	**/
+	// OpSendKeys securely "sends" the keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,
+	//    encrypting the resulting transport buffer using the asymmetric key indexed by OpArgs.CryptoKeyID.
+	OpSendKeys = "send_keys"
 
-	// OpSendCommunityKeys securely "sends" the community keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,
-	//    encrypting the resulting buffer using the asymmetric key indexed by OpArgs.CryptoKeyID.
-	OpSendCommunityKeys = "send_keys"
-
-	// OpAcceptCommunityKeys adds the keys contained in OpArgs.Msg to its community keyring, decrypting using the key indexed by OpArgs.CryptoKeyID.
-	OpAcceptCommunityKeys = "accept_keys"
+	// OpAcceptKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.CryptoKeyID.
+	OpAcceptKeys = "accept_keys"
 )
 
 /*****************************************************
@@ -204,7 +204,7 @@ const (
 
 	/*****************************************************
 	** PLAN keyring codec names
-	**/
+	*
 
 	// CommunityKeyring is the keyring all members of a given PLAN community have
 	CommunityKeyring = "/plan/keyring/community/1"
@@ -214,6 +214,7 @@ const (
 
 	// StorageKeyring contains keys needed to access or commit txns on a pdi.StorageProvider
 	StorageKeyring = "/plan/keyring/storage/1"
+    */
 
 	/*****************************************************
 	** PLAN SKI serialization codec names

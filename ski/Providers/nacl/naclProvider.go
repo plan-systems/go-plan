@@ -83,8 +83,7 @@ func newNaclProvider() *naclProvider {
 func (provider *naclProvider) NewSession() *naclSession {
 	session := &naclSession{
         provider,
-        NewKeyring(ski.CommunityKeyring),
-        NewKeyring(ski.PersonalKeyring),
+        NewKeyring(""),
         map[string]bool{},
         nil,
     }
@@ -103,6 +102,10 @@ func (provider *naclProvider) StartSession(
     inOpsAllowed     ski.AccessScopes,
     inOnSessionEnded func(inReason string),
 ) (ski.Session, *plan.Perror) {
+
+    if inInvocation.Label != provider.InvocationStr() {
+        panic("ski invocation does not match")
+    }
 
     session := provider.NewSession()
     session.onSessionEnded = inOnSessionEnded
@@ -155,8 +158,7 @@ type naclSession struct {
 
     // TODO: put in mutex!?
     parentProvider      *naclProvider
-    communityKeyring    *Keyring
-    personalKeyring     *Keyring
+    keyring             *Keyring
     allowedOps          map[string]bool
     onSessionEnded      func(inReason string)
 }
@@ -169,7 +171,7 @@ func (session *naclSession) VerifySignature(
 	inSig []byte,
 	inMsg []byte,
 	inSignerPubKey []byte,
-) bool {
+) *plan.Perror {
 
 	// need to re-combine the sig and hash to produce the
 	// signed message that Open expects
@@ -183,7 +185,12 @@ func (session *naclSession) VerifySignature(
     // TODO: do we need the other returned buffer for any reason?
     _, ok := sign.Open(nil, signedMsg, &pubKey)
 
-	return ok
+	if !ok {
+        return plan.Error(nil, plan.VerifySignatureFailed, "nacl sig verification failed")
+    }
+            
+    return nil
+
 }
 
 
@@ -230,7 +237,7 @@ func (session *naclSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     {
         switch opArgs.OpName {
 
-            case ski.OpSendCommunityKeys: {
+            case ski.OpSendKeys: {
                 opArgs.Msg, err = session.encodeSendKeysMsg(&opArgs)
             }
         }
@@ -255,24 +262,25 @@ func (session *naclSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
         switch opArgs.OpName {
 
             case 
-            ski.OpEncryptForCommunity,
-            ski.OpDecryptFromCommunity:
-            keyBuf, err = session.communityKeyring.GetSymmetricKey(opArgs.CryptoKeyID)
+            ski.OpEncrypt,
+            ski.OpDecrypt:
+            keyBuf, err = session.keyring.GetSymmetricKey(opArgs.CryptoKeyID)
             privKeySz = 32
 
             case
             ski.OpEncryptFor,
             ski.OpDecryptFrom,
-            ski.OpSendCommunityKeys,
-            ski.OpAcceptCommunityKeys:
-            keyBuf, err = session.personalKeyring.GetEncryptKey(opArgs.CryptoKeyID)
+            ski.OpSendKeys,
+            ski.OpAcceptKeys:
+            keyBuf, err = session.keyring.GetEncryptKey(opArgs.CryptoKeyID)
             privKeySz = 32
 
             case
             ski.OpSignMsg:
-            keyBuf, err = session.personalKeyring.GetSigningKey(opArgs.CryptoKeyID)
+            keyBuf, err = session.keyring.GetSigningKey(opArgs.CryptoKeyID)
             privKeySz = 64
         }
+    fix send and accept keys for both sym and asym types!
 
         if err != nil {
             return nil, err
@@ -300,26 +308,26 @@ func (session *naclSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
                 msg = sig[:sign.Overhead]
             }
 
-            case ski.OpEncryptForCommunity:{
+            case ski.OpEncrypt:{
                 var salt [24]byte
                 crypto_rand.Read(salt[:])
                 msg = secretbox.Seal(salt[:], opArgs.Msg, &salt, &privKey32)
             }
 
-            case ski.OpDecryptFromCommunity:{
+            case ski.OpDecrypt:{
                 var salt [24]byte
                 copy(salt[:], opArgs.Msg[:24])
                 
                 var ok bool
                 msg, ok = secretbox.Open(nil, opArgs.Msg[24:], &salt, &privKey32)
                 if ! ok {
-                    err = plan.Errorf(nil, plan.FailedToDecryptCommunityData, "secretbox.Open failed to decrypt community data")
+                    err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt data")
                 }
             }
 
             case 
             ski.OpEncryptFor, 
-            ski.OpSendCommunityKeys:{
+            ski.OpSendKeys:{
                 var salt [24]byte
                 crypto_rand.Read(salt[:])
                 msg = box.Seal(salt[:], opArgs.Msg, &salt, &peerPubKey, &privKey32)
@@ -327,25 +335,25 @@ func (session *naclSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
 
             case 
             ski.OpDecryptFrom,
-            ski.OpAcceptCommunityKeys:{
+            ski.OpAcceptKeys:{
                 var salt [24]byte
                 copy(salt[:], opArgs.Msg[:24])
                 
                 var ok bool
                 msg, ok = box.Open(nil, opArgs.Msg[24:], &salt, &peerPubKey, &privKey32)
                 if ! ok {
-                    err = plan.Errorf(nil, plan.FailedToDecryptPersonalData, "secretbox.Open failed to decrypt for %s", opArgs.OpName)
+                    err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt for %s", opArgs.OpName)
                 }
             }
 
             case ski.OpNewIdentityRev:{
-                signKey, encrKey := session.personalKeyring.NewIdentity()
+                signKey, encrKey := session.keyring.NewIdentity()
                 outResults.AddContentWithLabel(signKey, ski.PubSigningKeyName)
                 outResults.AddContentWithLabel(encrKey, ski.PubCryptoKeyName)
             }
 
-            case ski. OpCreateCommunityKey:{
-                keyID := session.communityKeyring.NewSymmetricKey()
+            case ski. OpCreateSymmetricKey:{
+                keyID := session.keyring.NewSymmetricKey()
                 msg = keyID[:]          
             }
 
@@ -368,7 +376,7 @@ func (session *naclSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     // 5) POST OP
     if err == nil {
         switch opArgs.OpName {
-            case ski.OpAcceptCommunityKeys:
+            case ski.OpAcceptKeys:
                 err = session.decodeAcceptKeysMsg(msg)
                 msg = nil
         }
@@ -396,14 +404,14 @@ func (session *naclSession) encodeSendKeysMsg(opArgs *ski.OpArgs) ([]byte, *plan
     var keyListBuf []byte
     {
         keyList := ski.KeyList{
-            Label: session.communityKeyring.Label,
-            KeysCodec: session.communityKeyring.KeysCodec,
+            Label: session.keyring.Label,
+            KeysCodec: session.keyring.KeysCodec,
             Keys: make([]*ski.KeyEntry, 0, len(opArgs.OpKeyIDs)),
         }
 
         //var perr *plan.Perror
 
-        keysNotFound := session.communityKeyring.ExportKeys(opArgs.OpKeyIDs, &keyList)
+        keysNotFound := session.keyring.ExportKeys(opArgs.OpKeyIDs, &keyList)
         if len(keysNotFound) > 0 {
             return nil, plan.Errorf(nil, plan.FailedToMarshalAccessGrant, "failed to marshal %d keys", len(keysNotFound))
         }
@@ -451,7 +459,7 @@ func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
 		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant content failed to unmarshal")
     }
 
-    perr := session.communityKeyring.MergeKeys(keyList)
+    perr := session.keyring.MergeKeys(keyList)
 	if perr != nil {
 		return perr
     }
