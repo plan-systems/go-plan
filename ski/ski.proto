@@ -5,10 +5,33 @@ syntax = "proto3";
 package ski;
 
 
+enum KeyType {
+    INVALID_KEY_TYPE    = 0;
+
+    SYMMETRIC_KEY       = 1;
+    ASYMMETRIC_KEY      = 2;
+    SIGNING_KEY         = 3;
+}
+
+enum  CryptoPkgID {
+    INVALID_PKG_ID      = 0;
+
+    NaCl                = 1;
+}
+
+
 message KeyEntry {
+    
+    // key_info := (CryptoPkgID << 3) |  KeyType
                 uint32          key_info                = 1;
+
+    // Unix timestamp when this key was created
                 int64           time_created            = 2;
+
+    // Private part of the key -- should be used and copied carefully.
                 bytes           priv_key                = 3;
+
+    // Public part of the key; how this key is also referenced publicly.
                 bytes           pub_key                 = 4;
 }
 
@@ -25,6 +48,48 @@ message KeyList {
                 string          keys_codec              = 2;
 
     repeated    KeyEntry        keys                    = 3;
+}
+
+
+
+
+enum KeyDomain {
+
+    // Keyring shared with all community members
+    COMMUNITY_KEYRING           = 0;
+
+    // Personal keyring for private channels
+    PRIVATE_CHANNEL_KEYRING     = 1;
+
+    // Personal keyring
+    PERSONAL_KEYRING            = 2;
+
+}
+
+
+message KeyRef {
+
+    // The community in question
+                bytes           community_id            = 1;
+
+    // The key domain in question
+                KeyDomain       key_domain              = 2;
+
+    // The key's public name (for asysmmetric keys, the public key)
+                bytes           pub_key                 = 3;
+
+
+}
+
+
+
+message KeyRepo {
+
+                bytes           community_id            = 1;
+
+   // repeated    map<string, 
+     //               bytes>      op_args                 = 3;
+
 }
 
 

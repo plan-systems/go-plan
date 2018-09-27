@@ -474,8 +474,7 @@ func (session *naclSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
 // CryptoPkg is used with ski.RegisterCryptoPkg() so it is freely available.
 var CryptoPkg = ski.CryptoPkg{
 
-    CryptoPkgID: ski.CryptoPkgID_NACL,
-    CryptoPkgName: "NaCl",
+    CryptoPkgID: ski.CryptoPkgID_NaCl,
 
 	/*****************************************************
 	** Symmetric encryption

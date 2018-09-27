@@ -335,9 +335,36 @@ message StorageTxn {
                 TxnStatus       txn_status                  = 4;
 
     // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
-                plan.Block      body                        = 5;     
+                plan.Block      body                        = 5;
+
+    // Set to 0 if n/a or no alert set
+                uint64          alert_code                  = 6;
+
+    // Human-readable amplifying information for AlertCode.
+                string          alert_msg                   = 7; 
 }
 
 
 
+
+
+
+
+
+message TxnRequest {
+
+    // Unix timestamp of the commit time of txn(s) to be read
+                uint64          time_committed              = 1;
+
+   // If set, this is the txn name to be fetched.  
+   // If omitted, all txns with the matching time committed. 
+                bytes           txn_name                    = 2;
+
+    // If true, StorageTxn.Body will be set/sent for each txn returned.
+    // If fasle, StorageTxn.Body == nil for each txn returned.
+                bool            include_body                = 3;
+
+    // If > 0, this caps the the number of txns returned until the requested is considered complete.
+                uint64          max_txns                   = 4;
+}
 

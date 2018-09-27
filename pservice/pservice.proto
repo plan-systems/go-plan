@@ -7,7 +7,8 @@ syntax = "proto3";
 package pservice;
 
 import "github.com/plan-tools/go-plan/pdi/pdi.proto";
-import "github.com/plan-tools/go-plan/ski/ski.proto";
+//import "github.com/plan-tools/go-plan/ski/ski.proto";
+import "github.com/plan-tools/go-plan/plan/plan.proto";
 
 
 
@@ -120,6 +121,36 @@ message MemberInfoResponse {
 }
 
 
+service StorageProvider {
+
+    // Session start:
+    //    0) On StorageProvider node initial setup, it hold a pub/private key pair.  
+    //    1) When a client connects, it encrypts the member's storage txn signing key with the StorageProvider's pub key.
+    //    2) The node decrypts the challenge using its private key, and now has the abilty to sign new txns.
+    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
+
+    // Requests a sequence of txns starting with the specified time or txn name.
+    rpc         RequestTxns(pdi.TxnRequest)                     returns (stream pdi.StorageTxn);
+
+    // Commits the given txn body to this storage, using the signing key obtained from step (2) of StartSession().
+    rpc         CommitTxn(CommitRequest)                        returns (stream pdi.StorageTxn);
+}
+
+
+
+message CommitRequest {
+
+    // This will become the txn body
+                plan.Block          body                    = 1;
+
+    // This is a signature for CommitRequest.Body, using the signing key associated with the client of the current session.
+    // Before a StorageProvider will generate a txn, it will first verfify the author of who's doing the commit is a
+    //    valid and legit community member.  
+    //            bytes               body_sig                = 2;
+
+}
+
+
 
 service Pnode {
 
@@ -128,10 +159,12 @@ service Pnode {
     //    channel's metadata as "session_token" in order for all the other rpc calls.
     rpc         StartSession(SessionRequest)                    returns (SessionInfo);
 
-    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
-    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
+    rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
 
-    rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfoResponse);
+    //rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
+    //rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
+
+    //rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfoResponse);
 }
 
 
@@ -139,7 +172,9 @@ service Pgateway {
 
     rpc         StartSession(SessionRequest)                    returns (SessionInfo);
 
+    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
 
+/*
     rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
 
 
@@ -151,11 +186,21 @@ service Pgateway {
 
     // RwE, CwD
     rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
-    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
+    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);*/
     
 }
 
+message CommunitySessionRequest {
 
+    // Which community this session wants to access (a pnode hosts multiple communities)
+                bytes           community_id            = 2;
+
+    // Specifies which scopes are being requested 
+    repeated    PserviceScope   service_scopes          = 4;
+
+    // Keys, tokens, info, params passed to ski.Provider.StartSession(), allo
+                plan.Block      SKI_invocation          = 5;
+}
 
 
 
@@ -176,8 +221,8 @@ message SessionRequest {
     // Specifies which scopes are being requested 
     repeated    PserviceScope   service_scopes          = 4;
 
-    // A set of keys and tokens presumed to allow a new session to begin
-                ski.KeyList     keys                    = 5;
+    // Keys, tokens, info, params passed to ski.Provider.StartSession(), allo
+                plan.Block      SKI_invocation          = 5;
 
 }
 
@@ -219,7 +264,7 @@ message EntryOpArgs {
                 map<string, 
                     bytes>      op_args                 = 3;
 
-                    pdi.Entry   entry                   = 4;
+                pdi.Entry       entry                   = 4;
 }
 
 message EntryOpStatus {

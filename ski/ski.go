@@ -228,13 +228,11 @@ const (
 
 
 // CryptoPkg is a generic pluggable interface that any crypto package can implement.  
-// It can even be  partially implemented (just return an err for functions that are not implemented).
+// It can even be partially implemented (just set nil values for funcs not implemented).
 // All calls are assumed to be reentrant and threadsafe compatible.
 type CryptoPkg struct {
 
     CryptoPkgID CryptoPkgID
-
-    CryptoPkgName string
 
 	/*****************************************************
 	** Symmetric encryption
@@ -295,7 +293,7 @@ func RegisterCryptoPkg(inPkg *CryptoPkg) error {
 
 	pkg := CryptoPkgRegistry[inPkg.CryptoPkgID]
     if pkg != nil && pkg != inPkg {
-		return plan.Errorf(nil, plan.CryptoPkgIDAlreadyRegistered, "the CryptoPkgID %d (%s) is already registered", inPkg.CryptoPkgID, inPkg.CryptoPkgName)
+		return plan.Errorf(nil, plan.CryptoPkgIDAlreadyRegistered, "the CryptoPkgID %d (%s) is already registered", inPkg.CryptoPkgID, CryptoPkgID_name[int32(inPkg.CryptoPkgID)])
 	}
 
 	CryptoPkgRegistry[inPkg.CryptoPkgID] = inPkg
