@@ -232,7 +232,16 @@ const (
 // All calls are assumed to be reentrant and threadsafe compatible.
 type CryptoPkg struct {
 
-    CryptoPkgID CryptoPkgID
+    CryptoPkgID         CryptoPkgID
+
+    // GenerateNewKey generates a new key.
+    // Pre: ioEntry.KeyInfo is already setup
+    // inRequestedKeyLen is the requested length of the private key. It can be ignored if this implmentation has a fixed key length.
+    GenerateNewKey func(
+        inRand io.Reader,
+        inRequestedKeyLen int,
+        ioEntry *KeyEntry,
+    ) error
 
 	/*****************************************************
 	** Symmetric encryption
@@ -262,7 +271,6 @@ type CryptoPkg struct {
 
     DecryptFrom func(
         inMsg []byte,
-        inKey []byte,
         inPeerPubKey []byte,
         inPrivKey []byte,
     ) ([]byte, error)

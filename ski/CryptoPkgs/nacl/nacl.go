@@ -47,6 +47,57 @@ var CryptoPkg = ski.CryptoPkg{
     CryptoPkgID: ski.CryptoPkgID_NaCl,
 
 	/*****************************************************
+	** Key generation
+	**/
+
+    GenerateNewKey: func(
+        inRand io.Reader,
+        inRequestedKeyLen int,
+        ioEntry *ski.KeyEntry,
+    ) error {
+
+        switch ioEntry.KeyType() {
+
+            case ski.KeyType_SYMMETRIC_KEY: {
+                ioEntry.PubKey = make([]byte, inRequestedKeyLen)
+                _, err := inRand.Read(ioEntry.PubKey)
+                if err != nil {
+                    return err
+                }
+
+                ioEntry.PrivKey = make([]byte, 32)
+                _, err = inRand.Read(ioEntry.PrivKey)
+                if err != nil {
+                    return err
+                }
+            }
+        
+            case ski.KeyType_ASYMMETRIC_KEY: {
+                pubKey, privKey, err := box.GenerateKey(inRand)
+                if err != nil {
+                    return err
+                }
+
+                ioEntry.PubKey = pubKey[:]
+                ioEntry.PrivKey = privKey[:]
+            }
+
+            case ski.KeyType_SIGNING_KEY: {
+                pubKey, privKey, err := sign.GenerateKey(inRand)
+                if err != nil {
+                    return err
+                }
+
+                ioEntry.PubKey = pubKey[:]
+                ioEntry.PrivKey = privKey[:]
+            }
+
+        }
+
+        return nil
+    },
+
+	/*****************************************************
 	** Symmetric encryption
 	**/
 
@@ -136,7 +187,6 @@ var CryptoPkg = ski.CryptoPkg{
 
     DecryptFrom: func(
         inMsg []byte,
-        inKey []byte,
         inPeerPubKey []byte,
         inPrivKey []byte,
     ) ([]byte, error) {
