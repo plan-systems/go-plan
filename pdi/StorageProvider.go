@@ -57,14 +57,6 @@ type StorageSession interface {
 // A valid RequestID is always >= 0
 type RequestID uint32
 
-// TxnRequest requests a given txn by name and commit time (both are required)
-// If IncludeBody == false, then StorageTxn.TxnBody will be nil (saving bandwidth)
-type TxnRequest struct {
-	TxnName       []byte
-	TimeCommitted int64
-	IncludeBody   bool
-}
-
 /*****************************************************
 ** StorageMsg
 **/
