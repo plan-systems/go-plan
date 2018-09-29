@@ -37,3 +37,8 @@ func (entry *KeyEntry) KeyType() KeyType {
 func (entry *KeyEntry) CryptoPkgID() CryptoPkgID {
 	return CryptoPkgID(entry.KeyInfo >> KeyTypeShift)
 }
+
+// EncodeKeyInfo encodes a key's parent pkg ID and type into a single uint32
+func EncodeKeyInfo(inID CryptoPkgID, inKeyType KeyType) uint32 {
+    return (uint32(inID) << KeyTypeShift ) | uint32(inKeyType)
+}
