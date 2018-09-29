@@ -6,7 +6,7 @@ package ski;
 
 
 enum KeyType {
-    INVALID_KEY_TYPE    = 0;
+    NOT_SET             = 0;
 
     SYMMETRIC_KEY       = 1;
     ASYMMETRIC_KEY      = 2;
@@ -18,6 +18,8 @@ enum  CryptoPkgID {
 
     NaCl                = 1;
 }
+
+
 
 
 message KeyEntry {
@@ -37,22 +39,6 @@ message KeyEntry {
 
 
 
-// A serialized KeyList is named as ski.KeyListProtobufCodec
-message KeyList {
-
-    // Any protocol-dependent label (or not), typically employed as a name for this Block instance (i.e. a field-name).
-                string          label                   = 1;
-
-    // key_entry_codec is a "multicodec path" -- aka multistream, see https://github.com/multiformats/multistream
-    // It expresses expectations on how the key entries on this KeyList can be used or what they conform to.
-                string          keys_codec              = 2;
-
-    repeated    KeyEntry        keys                    = 3;
-}
-
-
-
-
 enum KeyDomain {
 
     // Keyring shared with all community members
@@ -66,17 +52,52 @@ enum KeyDomain {
 
 }
 
+// KeyList is a list of KeyEntries and when serialized is identified by the codec name ski.KeyListProtobufCodec
+message KeyList {
 
-message KeyRef {
-
-    // The community in question
+    // The community associated with the keys in this list
                 bytes           community_id            = 1;
 
-    // The key domain in question
+    // The key domain associated with the keys in this list
                 KeyDomain       key_domain              = 2;
 
-    // The key's public name (for asysmmetric keys, the public key)
+    // Key storage
+    repeated    KeyEntry        keys                    = 3;
+}
+
+
+
+
+// KeySpec effectively names/specifies a key (within a given community keyring)
+message KeySpec {
+
+    // Which key domain does this key live in?
+                KeyDomain       key_domain              = 1;
+
+    // Optional -- the type of the key (or NOT_SET)
+                KeyType         key_type                = 2;
+
+    // KeyEntry.PubKey
                 bytes           pub_key                 = 3;
+}
+
+
+// KeySpecs is a list of KeySpec and when serialized is identified by the codec name ski.KeySpecsProtobufCodec
+message KeySpecs {
+
+    repeated    KeySpec         key_specs               = 1;
+}
+
+
+
+/*
+message KeyPathname {
+
+    // The parent community and domain in question
+                KeyPath         path                    = 1;
+
+    // The key's public name (for asysmmetric keys, the public key)
+                bytes           pub_key                 = 2;
 
 
 }
@@ -85,7 +106,8 @@ message KeyRef {
 
 message KeyRepo {
 
-                bytes           community_id            = 1;
+                KeyPath         key_path                = 1;
+
 
    // repeated    map<string, 
      //               bytes>      op_args                 = 3;
@@ -95,3 +117,4 @@ message KeyRepo {
 
 
 
+*/
