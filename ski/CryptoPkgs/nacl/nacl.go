@@ -1,6 +1,4 @@
-
-
-
+// Package nacl uses (libSodium/NaCl) to implement ski.CryptoPkg
 package nacl
 
 import (
@@ -54,44 +52,46 @@ var CryptoPkg = ski.CryptoPkg{
         inRand io.Reader,
         inRequestedKeyLen int,
         ioEntry *ski.KeyEntry,
-    ) error {
+    ) *plan.Perror {
 
-        switch ioEntry.KeyType() {
+        var err error
+
+        keyType := ioEntry.KeyType()
+
+        switch keyType {
 
             case ski.KeyType_SYMMETRIC_KEY: {
                 ioEntry.PubKey = make([]byte, inRequestedKeyLen)
-                _, err := inRand.Read(ioEntry.PubKey)
-                if err != nil {
-                    return err
+                _, err = inRand.Read(ioEntry.PubKey)
+                if err == nil {
+                    ioEntry.PrivKey = make([]byte, 32)
+                    _, err = inRand.Read(ioEntry.PrivKey)
                 }
 
-                ioEntry.PrivKey = make([]byte, 32)
-                _, err = inRand.Read(ioEntry.PrivKey)
-                if err != nil {
-                    return err
-                }
             }
         
             case ski.KeyType_ASYMMETRIC_KEY: {
                 pubKey, privKey, err := box.GenerateKey(inRand)
-                if err != nil {
-                    return err
+                if err == nil {
+                    ioEntry.PubKey = pubKey[:]
+                    ioEntry.PrivKey = privKey[:]
                 }
-
-                ioEntry.PubKey = pubKey[:]
-                ioEntry.PrivKey = privKey[:]
             }
 
             case ski.KeyType_SIGNING_KEY: {
                 pubKey, privKey, err := sign.GenerateKey(inRand)
-                if err != nil {
-                    return err
+                if err == nil {
+                    ioEntry.PubKey = pubKey[:]
+                    ioEntry.PrivKey = privKey[:]
                 }
-
-                ioEntry.PubKey = pubKey[:]
-                ioEntry.PrivKey = privKey[:]
             }
 
+            default:
+                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %d}", keyType)
+        }
+
+        if err != nil {
+            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %d}", keyType)
         }
 
         return nil
@@ -105,7 +105,7 @@ var CryptoPkg = ski.CryptoPkg{
         inRand io.Reader, 
         inMsg []byte,
         inKey []byte,
-    ) ([]byte, error) {
+    ) ([]byte, *plan.Perror) {
 
         if len(inKey) != 32 {
             return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", 32, len(inKey))
@@ -129,7 +129,7 @@ var CryptoPkg = ski.CryptoPkg{
     Decrypt: func(
         inMsg []byte,
         inKey []byte,
-    ) ([]byte, error) {
+    ) ([]byte, *plan.Perror) {
 
         var salt [24]byte
         copy(salt[:], inMsg[:24])
@@ -159,7 +159,7 @@ var CryptoPkg = ski.CryptoPkg{
         inMsg []byte,
         inPeerPubKey []byte,
         inPrivKey []byte,
-    ) ([]byte, error) {
+    ) ([]byte, *plan.Perror) {
 
         if len(inPeerPubKey) != 32 {
             return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected peer pub key length, want %d, got %s", 32, len(inPeerPubKey))
@@ -189,7 +189,7 @@ var CryptoPkg = ski.CryptoPkg{
         inMsg []byte,
         inPeerPubKey []byte,
         inPrivKey []byte,
-    ) ([]byte, error) {
+    ) ([]byte, *plan.Perror) {
 
         var salt [24]byte
         copy(salt[:], inMsg[:24])
@@ -217,7 +217,7 @@ var CryptoPkg = ski.CryptoPkg{
     Sign: func(
         inDigest []byte,
         inSignerPrivKey []byte,
-    ) ([]byte, error) {
+    ) ([]byte, *plan.Perror) {
 
         if len(inSignerPrivKey) != 64 {
             return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", 64, len(inSignerPrivKey))
@@ -239,7 +239,7 @@ var CryptoPkg = ski.CryptoPkg{
         inSig []byte,
         inDigest []byte,
         inSignerPubKey []byte,
-    ) error {
+    ) *plan.Perror {
 
         // need to re-combine the sig and hash to produce the
         // signed message that Open expects
