@@ -1,7 +1,9 @@
+// Package ski (Secure Key Interface) contains PLAN's crypto abstractions and pluggable interfaces
 package ski
 
 import (
-    "io"
+	"io"
+	"sync"
 
 	"github.com/plan-tools/go-plan/plan"
 )
@@ -11,14 +13,15 @@ import (
 **/
 
 // Session provides lambda-lifted crypto services from an opaque service provider.
-// All calls in this interface are threadsafe.
+// All calls in this interface are THREADSAFE.
 type Session interface {
-
-	// VerifySignature verifies that inSig is in fact the signature of inMsg signed by an owner of inSignerPubKey
-	VerifySignature(inSig []byte, inMsg []byte, inSignerPubKey []byte) *plan.Perror
 
 	// DispatchOp implements a complete set of SKI operations
 	DispatchOp(inOpArgs *OpArgs, inOnCompletion OpCompletionHandler)
+
+	//MergeKeys(inKeyList KeyList, inDst KeyPath)
+
+	//ExportKeys(inDst KeyPath)
 
 	// EndSession ends this SKI session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
 	// Following a call to EndSession(), no more references to this session should be made.
@@ -29,6 +32,15 @@ type Session interface {
 ** ski.Provider
 **/
 
+// StartSessionPB is a convenience struct used for ski.Provider.StartSession()
+type StartSessionPB struct {
+	Invocation     plan.Block
+	CommunityID    []byte
+	AccessScopes   AccessScopes
+	BaseDir        string
+	OnSessionEnded func(inReason string)
+}
+
 // Provider wraps how an SKI connection is implemented.  Perhaps it's locally implemented, or perhaps the it uses a network connection.
 type Provider interface {
 
@@ -37,9 +49,7 @@ type Provider interface {
 
 	// StartSession starts a new session SKI.session.  In general, you should only start one session
 	StartSession(
-		inInvocation plan.Block,
-		inAccessScopes AccessScopes,
-		inOnSessionEnded func(inReason string),
+		inPB StartSessionPB,
 	) (Session, *plan.Perror)
 }
 
@@ -62,21 +72,15 @@ func RegisterProvider(inProvider Provider) error {
 
 // StartSession returns a provider implementation given an invocation block
 func StartSession(
-	inInvocation plan.Block,
-	inAccessScopes AccessScopes,
-	inOnSessionEnded func(inReason string),
+	inPB StartSessionPB,
 ) (Session, *plan.Perror) {
 
-	provider := providerRegistry[inInvocation.Label]
-	if provider == nil || provider.InvocationStr() != inInvocation.Label {
-		return nil, plan.Errorf(nil, plan.InvocationNotAvailable, "ski.StartSession() failed to find provider for invocation %s", inInvocation.Label)
+	provider := providerRegistry[inPB.Invocation.Label]
+	if provider == nil || provider.InvocationStr() != inPB.Invocation.Label {
+		return nil, plan.Errorf(nil, plan.InvocationNotAvailable, "ski.StartSession() failed to find provider for invocation %s", inPB.Invocation.Label)
 	}
 
-	session, err := provider.StartSession(
-		inInvocation,
-		inAccessScopes,
-		inOnSessionEnded,
-	)
+	session, err := provider.StartSession(inPB)
 
 	return session, err
 }
@@ -109,8 +113,7 @@ var (
 		OpSignMsg,
 		OpSendKeys,
 
-		OpCreateSymmetricKey,
-		OpNewIdentityRev,
+		OpGenerateKeys,
 	)
 )
 
@@ -121,32 +124,27 @@ var (
 // OpArgs is a container for all the params needed for a SKI op to be completed.
 type OpArgs struct {
 
-	// OpName says what SKI operatio to perform and determines what inputs to use, etc. See below list of op names.
+	// CommunityID specifies which community key repo this Op should be dispatched to.
+	CommunityID []byte
+
+	// OpName says what SKI operation to perform and determines what inputs to use, etc. See below list of op names.
 	OpName string
 
 	// Specifies the key to be used for encrypting/decrypting/signing
-	CryptoKeyID plan.KeyID
+	CryptoKey KeySpec
 
-	// A list of key IDs that are specific to a given op.
-	OpKeyIDs []plan.KeyID
+	// A list of keys that the Op does something with
+	KeySpecs KeySpecs
 
 	// Sender/Recipient publicly available key -- a public address in the community key space
 	PeerPubKey []byte
 
-    // Input/Output buffer
+	// Input/Output buffer
 	Msg []byte
 }
 
 // OpCompletionHandler handles the result of a SKI operation
 type OpCompletionHandler func(inResults *plan.Block, inErr *plan.Perror)
-
-// Relevant labels used in the result block of OpCompletionHandler
-const (
-
-	// Used as names for returning
-	PubSigningKeyName = "pub_signing_key"
-	PubCryptoKeyName  = "pub_crypto_key"
-)
 
 // OpArgs.OpName -- these are the available operations for SKI.Session.DispatchOp()
 // Unless otherwise stated, output from an op is returned in inResults.Content
@@ -156,26 +154,23 @@ const (
 	 ** Symmetric crypto support
 	 **/
 
-	// OpEncrypt encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
+	// OpEncrypt encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKey
 	OpEncrypt = "encrypt_sym"
 
-	// OpDecrypt decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKeyID
+	// OpDecrypt decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKey
 	OpDecrypt = "decrypt_sym"
-
-	// OpCreateSymmetricKey creates a new symmetric key and returns the associated plan.KeyID
-	OpCreateSymmetricKey = "create_sym_key"
 
 	/*****************************************************
 	 ** Asymmetric crypto support
 	 **/
 
-	// OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
+	// OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKey
 	OpEncryptFor = "encrypt_for"
 
-	// OpDecryptFrom decrypts OpArgs.Msg from the sender's OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKeyID
+	// OpDecryptFrom decrypts OpArgs.Msg from the sender's OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKey
 	OpDecryptFrom = "decrypt_from"
 
-	// OpSignMsg creates a signature buffer for OpArgs.Msg, using the asymmetric key indexed by OpArgs.CryptoKeyID.
+	// OpSignMsg creates a signature buffer for OpArgs.Msg, using the asymmetric key indexed by OpArgs.CryptoKey.
 	// Returns: len(inResults.Parts) == 0
 	OpSignMsg = "sign_msg"
 
@@ -183,128 +178,156 @@ const (
 	 ** Key generation & transport
 	 **/
 
-	// OpNewIdentityRev issues a new identity revision and returns public information for that new rev.
-	// Recall that the plan.KeyID for each pub key is the right-most <plan.KeyIDSz> bytes.
+	// OpGenerateKeys generates a new key for each entry in OpArgs.KeySpecs.  Each entry in OpArgs.KeySpecs
+	//     must specify a valid KeyDomain and KeyType (PubKey is ignored).  On completion, this op serializes
+	//     OpArgs.KeyNames (except PubKey is now set with the new key's public key for each entry).
 	// Returns:
-	//     inResults.GetContentWithLabel(PubSigningKeyName): newly issued signing public key
-	//     inResults.GetContentWithLabel(PubCryptoKeyName): newly issued encryption public key
-	OpNewIdentityRev = "new_identity_rev"
+	//     inResults.GetContentWithCodec(ski.KeySpecsProtobufCodec): newly generated key (corresponding to OpArgs.KeySpecs)
+	OpGenerateKeys = "generate_keys"
 
-	// OpSendKeys securely "sends" the keys identified by OpArgs.OpKeyIDs to recipient associated with OpArgs.PeerPubKey,
-	//    encrypting the resulting transport buffer using the asymmetric key indexed by OpArgs.CryptoKeyID.
+	// OpSendKeys securely "sends" the keys identified by OpArgs.KeySpecs to recipient associated with OpArgs.PeerPubKey,
+	//    encrypting the resulting transport buffer using the asymmetric key indexed by OpArgs.CryptoKey.
 	OpSendKeys = "send_keys"
 
-	// OpAcceptKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.CryptoKeyID.
+	// OpAcceptKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.CryptoKey.
 	OpAcceptKeys = "accept_keys"
 )
 
 /*****************************************************
-** Const-astics
+** SKI serialization codec names
 **/
 
 const (
 
-	/*****************************************************
-	** PLAN keyring codec names
-	*
-
-	// CommunityKeyring is the keyring all members of a given PLAN community have
-	CommunityKeyring = "/plan/keyring/community/1"
-
-	// PersonalKeyring is one's personal keyring and is used to encrypt/decrypt private data.
-	PersonalKeyring = "/plan/keyring/personal/1"
-
-	// StorageKeyring contains keys needed to access or commit txns on a pdi.StorageProvider
-	StorageKeyring = "/plan/keyring/storage/1"
-    */
-
-	/*****************************************************
-	** PLAN SKI serialization codec names
-	**/
-
 	// KeyListProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
 	KeyListProtobufCodec = "/plan/ski/KeyList/1"
+
+	// KeySpecsProtobufCodec names the serialization codec for ski.KeySpecs (implemented via compilation of ski.proto)
+	KeySpecsProtobufCodec = "/plan/ski/KeySpecs/1"
 )
 
-
-// CryptoPkg is a generic pluggable interface that any crypto package can implement.  
+// CryptoPkg is a generic pluggable interface that any crypto package can implement.
 // It can even be partially implemented (just set nil values for funcs not implemented).
-// All calls are assumed to be reentrant and threadsafe compatible.
+// All calls are assumed to be threadsafe.
 type CryptoPkg struct {
+	CryptoPkgID CryptoPkgID
 
-    CryptoPkgID         CryptoPkgID
-
-    // GenerateNewKey generates a new key.
-    // Pre: ioEntry.KeyInfo is already setup
-    // inRequestedKeyLen is the requested length of the private key. It can be ignored if this implmentation has a fixed key length.
-    GenerateNewKey func(
-        inRand io.Reader,
-        inRequestedKeyLen int,
-        ioEntry *KeyEntry,
-    ) error
+	// GenerateNewKey generates a new key.
+	// Pre: ioEntry.KeyInfo is already setup
+	// inRequestedKeyLen is the requested length of the private key. It can be ignored if this implmentation has a fixed key length.
+	GenerateNewKey func(
+		inRand io.Reader,
+		inRequestedKeyLen int,
+		ioEntry *KeyEntry,
+	) *plan.Perror
 
 	/*****************************************************
 	** Symmetric encryption
 	**/
 
-    Encrypt func(
-        inRand io.Reader, 
-        inMsg []byte,
-        inKey []byte,
-    ) ([]byte, error)
+	Encrypt func(
+		inRand io.Reader,
+		inMsg []byte,
+		inKey []byte,
+	) ([]byte, *plan.Perror)
 
-    Decrypt func(
-        inMsg []byte,
-        inKey []byte,
-    ) ([]byte, error)
+	Decrypt func(
+		inMsg []byte,
+		inKey []byte,
+	) ([]byte, *plan.Perror)
 
 	/*****************************************************
 	** Asymmetric encryption
 	**/
 
-    EncryptFor func(
-        inRand io.Reader, 
-        inMsg []byte,
-        inPeerPubKey []byte,
-        inPrivKey []byte,
-    ) ([]byte, error)
+	EncryptFor func(
+		inRand io.Reader,
+		inMsg []byte,
+		inPeerPubKey []byte,
+		inPrivKey []byte,
+	) ([]byte, *plan.Perror)
 
-    DecryptFrom func(
-        inMsg []byte,
-        inPeerPubKey []byte,
-        inPrivKey []byte,
-    ) ([]byte, error)
+	DecryptFrom func(
+		inMsg []byte,
+		inPeerPubKey []byte,
+		inPrivKey []byte,
+	) ([]byte, *plan.Perror)
 
 	/*****************************************************
 	** Signing & Verification
 	**/
 
-    Sign func(
-        inDigest []byte,
-        inSignerPrivKey []byte,
-    ) ([]byte, error)
+	Sign func(
+		inDigest []byte,
+		inSignerPrivKey []byte,
+	) ([]byte, *plan.Perror)
 
-    VerifySignature func(
-        inSig []byte,
-        inDigest []byte,
-        inSignerPubKey []byte,
-    ) error
-
+	VerifySignature func(
+		inSig []byte,
+		inDigest []byte,
+		inSignerPubKey []byte,
+	) *plan.Perror
 }
 
-
 // CryptoPkgRegistry maps a CryptoPkgID to an implementation
-var CryptoPkgRegistry = map[CryptoPkgID]*CryptoPkg{}
+var cryptoPkgRegistry struct {
+	sync.RWMutex
+	Lookup map[CryptoPkgID]*CryptoPkg
+}
 
 // RegisterCryptoPkg registers the given provider so it can be invoked via ski.StartSession()
-func RegisterCryptoPkg(inPkg *CryptoPkg) error {
+func RegisterCryptoPkg(
+	inPkg *CryptoPkg,
+) *plan.Perror {
 
-	pkg := CryptoPkgRegistry[inPkg.CryptoPkgID]
-    if pkg != nil && pkg != inPkg {
-		return plan.Errorf(nil, plan.CryptoPkgIDAlreadyRegistered, "the CryptoPkgID %d (%s) is already registered", inPkg.CryptoPkgID, CryptoPkgID_name[int32(inPkg.CryptoPkgID)])
+	var err *plan.Perror
+	cryptoPkgRegistry.Lock()
+	pkg := cryptoPkgRegistry.Lookup[inPkg.CryptoPkgID]
+	if pkg == nil {
+		cryptoPkgRegistry.Lookup[inPkg.CryptoPkgID] = inPkg
+	} else if pkg != inPkg {
+		err = plan.Errorf(nil, plan.CryptoPkgIDAlreadyRegistered, "the CryptoPkgID %d (%s) is already registered", inPkg.CryptoPkgID, CryptoPkgID_name[int32(inPkg.CryptoPkgID)])
+	}
+	cryptoPkgRegistry.Unlock()
+
+	return err
+}
+
+// GetCryptoPkg fetches the given crypto package for use
+func GetCryptoPkg(
+	inCryptoPkgID CryptoPkgID,
+) (*CryptoPkg, *plan.Perror) {
+
+	cryptoPkgRegistry.RLock()
+	pkg := cryptoPkgRegistry.Lookup[inCryptoPkgID]
+	cryptoPkgRegistry.RUnlock()
+
+	if pkg == nil {
+		return nil, plan.Errorf(nil, plan.CryptoPkgNotFound, "the CryptoPkgID %d was not found", inCryptoPkgID)
 	}
 
-	CryptoPkgRegistry[inPkg.CryptoPkgID] = inPkg
+	return pkg, nil
+}
 
-	return nil
+// VerifySignature returns nil err if the signature of inDigest plus the signer's private key matches the given signature.
+// This function is threadsafe.
+func VerifySignature(
+	inCryptoPkgID CryptoPkgID,
+	inSig []byte,
+	inDigest []byte,
+	inSignerPubKey []byte,
+) *plan.Perror {
+
+	pkg, err := GetCryptoPkg(inCryptoPkgID)
+	if err != nil {
+		return err
+	}
+
+	err = pkg.VerifySignature(
+		inSig,
+		inDigest,
+		inSignerPubKey,
+	)
+
+	return err
 }
