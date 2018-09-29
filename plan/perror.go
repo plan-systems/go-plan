@@ -150,6 +150,15 @@ const (
 	// InvocationAlreadyExists means an ski.Provider has already been registered with the given invocation string
 	InvocationAlreadyExists
 
+    // CryptoPkgIDAlreadyRegistered  means the given package ID was already registered
+    CryptoPkgIDAlreadyRegistered
+
+    // CryptoPkgNotFound means the requested CryptoPkgID was not registered for any CryptoPkgID
+    CryptoPkgNotFound
+
+    // KeyGenerationFailed means key generation failed
+    KeyGenerationFailed
+
 	// KeyringNotSpecified means no keyring scope name was given for the SKI operation
 	KeyringNotSpecified
 
@@ -183,11 +192,14 @@ const (
 	// FailedToMarshalAccessGrant means an error occurred while encoding a PDI security access grant
 	FailedToMarshalAccessGrant
 
-	// FailedToDecryptCommunityData means the
-	FailedToDecryptCommunityData
+	// FailedToDecryptData means either the key or buffer to to be decrypted failed verfication,
+	FailedToDecryptData
 
-	// FailedToDecryptPersonalData means personal decryption failed
-	FailedToDecryptPersonalData
+    // VerifySignatureFailed means either the given signature did not match the given digest.
+    VerifySignatureFailed
+
+    // KeyringStoreNotFound means the cold storage for a keyring failed to load or does not exist
+    KeyringStoreNotFound
 
 	/*****************************************************
 	** StorageSession / StorageProvider
