@@ -1,4 +1,4 @@
-// Package nacl uses (libSodium/NaCl) to implement ski.CryptoPkg
+// Package nacl uses (libSodium/NaCl) to implement ski.CryptoKit
 package nacl
 
 import (
@@ -39,10 +39,10 @@ var (
 
 
 
-// CryptoPkg is used with ski.RegisterCryptoPkg() so it is freely available.
-var CryptoPkg = ski.CryptoPkg{
+// CryptoKit is used with ski.RegisterCryptoKit() so it is freely available.
+var CryptoKit = ski.CryptoKit{
 
-    CryptoPkgID: ski.CryptoPkgID_NaCl,
+    CryptoKitID: ski.CryptoKitID_NaCl,
 
 	/*****************************************************
 	** Key generation

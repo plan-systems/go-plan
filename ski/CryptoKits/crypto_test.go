@@ -9,29 +9,29 @@ import (
 
 	"github.com/plan-tools/go-plan/ski"
 
-	"github.com/plan-tools/go-plan/ski/CryptoPkgs/nacl"
+	"github.com/plan-tools/go-plan/ski/CryptoKits/nacl"
 )
 
 var gTesting *testing.T
 
-func TestCryptoPkgs(t *testing.T) {
+func TestCryptoKits(t *testing.T) {
 
 	gTesting = t
 
 	// Register providers to test
-	cryptoPkgsToTest := []*ski.CryptoPkg{
-		&nacl.CryptoPkg,
+	cryptoKitsToTest := []*ski.CryptoKit{
+		&nacl.CryptoKit,
 	}
 
-	for _, pkg := range cryptoPkgsToTest {
+	for _, kit := range cryptoKitsToTest {
 
 		for i := 0; i < 100; i++ {
-			testPkg(pkg, 32)
+			testKit(kit, 32)
 		}
 	}
 }
 
-func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
+func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	msgSz := int(1 + math_rand.Int31n(5) + 7 * math_rand.Int31n(10))
 
@@ -58,13 +58,13 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo = ski.EncodeKeyInfo(pkg.CryptoPkgID, ski.KeyType_SYMMETRIC_KEY)
-		err := pkg.GenerateNewKey(reader, inKeyLen, &entry)
+		entry.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_SYMMETRIC_KEY)
+		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
-		crypt, err = pkg.Encrypt(reader, msgOrig, entry.PrivKey)
+		crypt, err = kit.Encrypt(reader, msgOrig, entry.PrivKey)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 			badMsg = make([]byte, len(crypt))
 		}
 
-		msg, err = pkg.Decrypt(crypt, entry.PrivKey)
+		msg, err = kit.Decrypt(crypt, entry.PrivKey)
 		if bytes.Compare(msg, msgOrig) != 0 {
 			gTesting.Fatal("symmetric decrypt failed check")
 		}
@@ -86,7 +86,7 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 			copy(badMsg, crypt)
 			badMsg[rndPos] += rndAdj
 
-			msg, err = pkg.Decrypt(badMsg, entry.PrivKey)
+			msg, err = kit.Decrypt(badMsg, entry.PrivKey)
 			if err == nil {
 				gTesting.Fatal("there should have been a decryption error!")
 			}
@@ -99,20 +99,20 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo = ski.EncodeKeyInfo(pkg.CryptoPkgID, ski.KeyType_ASYMMETRIC_KEY)
-		err := pkg.GenerateNewKey(reader, inKeyLen, &entry)
+		entry.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_ASYMMETRIC_KEY)
+		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
 		recipient := ski.KeyEntry{}
-		recipient.KeyInfo = ski.EncodeKeyInfo(pkg.CryptoPkgID, ski.KeyType_ASYMMETRIC_KEY)
-		err = pkg.GenerateNewKey(reader, inKeyLen, &recipient)
+		recipient.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_ASYMMETRIC_KEY)
+		err = kit.GenerateNewKey(reader, inKeyLen, &recipient)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
-		crypt, err = pkg.EncryptFor(reader, msgOrig, recipient.PubKey, entry.PrivKey)
+		crypt, err = kit.EncryptFor(reader, msgOrig, recipient.PubKey, entry.PrivKey)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
@@ -121,7 +121,7 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 			badMsg = make([]byte, len(crypt))
 		}
 
-		msg, err = pkg.DecryptFrom(crypt, entry.PubKey, recipient.PrivKey)
+		msg, err = kit.DecryptFrom(crypt, entry.PubKey, recipient.PrivKey)
 		if bytes.Compare(msg, msgOrig) != 0 {
 			gTesting.Fatal("asymmetric decrypt failed check")
 		}
@@ -134,7 +134,7 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 			copy(badMsg, crypt)
 			badMsg[rndPos] += rndAdj
 
-			msg, err = pkg.DecryptFrom(badMsg, entry.PubKey, recipient.PrivKey)
+			msg, err = kit.DecryptFrom(badMsg, entry.PubKey, recipient.PrivKey)
 			if err == nil {
 				gTesting.Fatal("there should have been a decryption error!")
 			}
@@ -148,13 +148,13 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo = ski.EncodeKeyInfo(pkg.CryptoPkgID, ski.KeyType_SIGNING_KEY)
-		err := pkg.GenerateNewKey(reader, inKeyLen, &entry)
+		entry.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_SIGNING_KEY)
+		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
-		crypt, err = pkg.Sign(msgOrig, entry.PrivKey)
+		crypt, err = kit.Sign(msgOrig, entry.PrivKey)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
@@ -163,7 +163,7 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 			badMsg = make([]byte, len(crypt))
 		}
 
-		err = pkg.VerifySignature(crypt, msgOrig, entry.PubKey)
+		err = kit.VerifySignature(crypt, msgOrig, entry.PubKey)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
@@ -176,7 +176,7 @@ func testPkg(pkg *ski.CryptoPkg, inKeyLen int) {
 			copy(badMsg, crypt)
 			badMsg[rndPos] += rndAdj
 
-			err = pkg.VerifySignature(badMsg, msgOrig, entry.PubKey)
+			err = kit.VerifySignature(badMsg, msgOrig, entry.PubKey)
 			if err == nil {
 				gTesting.Fatal("there should have been a sig failed error!")
 			}
