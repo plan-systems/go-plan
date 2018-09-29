@@ -1,14 +1,12 @@
-package nacl
+package file
 
 import (
 	crypto_rand "crypto/rand"
     "sync"
 
 	"github.com/plan-tools/go-plan/ski"
+	"github.com/plan-tools/go-plan/plan"
 
-	plan "github.com/plan-tools/go-plan/plan"
-	box "golang.org/x/crypto/nacl/box"
-	sign "golang.org/x/crypto/nacl/sign"
 )
 
 
