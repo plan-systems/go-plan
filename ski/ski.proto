@@ -13,8 +13,22 @@ enum KeyType {
     SIGNING_KEY         = 3;
 }
 
-enum  CryptoPkgID {
-    INVALID_PKG_ID      = 0;
+
+enum KeyDomain {
+
+    // Keys shared with all other community members
+    COMMUNITY           = 0;
+
+    // Keys explicitly shared with select community members (e.g. private channel keys)
+    PEERS               = 1;
+
+    // Private keyring -- should never be shared with others, even peers in the community.
+    PERSONAL            = 2;
+
+}
+
+enum  CryptoKitID {
+    INVALID_KIT_ID      = 0;
 
     NaCl                = 1;
 }
@@ -24,45 +38,38 @@ enum  CryptoPkgID {
 
 message KeyEntry {
     
-    // key_info := (CryptoPkgID << 3) |  KeyType
-                uint32          key_info                = 1;
+    // Specifies what type of KeyType this is
+                KeyType         key_type                = 1;
 
-    // Unix timestamp when this key was created
-                int64           time_created            = 2;
-
-    // Private part of the key -- should be used and copied carefully.
-                bytes           priv_key                = 3;
-
-    // Public part of the key; how this key is also referenced publicly.
-                bytes           pub_key                 = 4;
-}
-
-
-
-enum KeyDomain {
-
-    // Keyring shared with all community members
-    COMMUNITY_KEYRING           = 0;
-
-    // Personal keyring for private channels
-    PRIVATE_CHANNEL_KEYRING     = 1;
-
-    // Personal keyring
-    PERSONAL_KEYRING            = 2;
-
-}
-
-// KeyList is a list of KeyEntries and when serialized is identified by the codec name ski.KeyListProtobufCodec
-message KeyList {
-
-    // The community associated with the keys in this list
-                bytes           community_id            = 1;
-
-    // The key domain associated with the keys in this list
+    // Specifies which domaon/area this key is used in
                 KeyDomain       key_domain              = 2;
 
+    // Specifies which CryptoKit handles this key's ops
+                CryptoKitID     crypto_kit_id           = 3;
+
+    // Unix timestamp when this key was created
+                int64           time_created            = 4;
+
+    // Private part of the key -- should be used and copied carefully.
+                bytes           priv_key                = 5;
+
+    // Public part of the key; how this key is also referenced publicly.
+                bytes           pub_key                 = 6;
+}
+
+
+
+
+
+// KeyBundle is a set of KeyEntries grouped by KeyDomain.
+// When a KeyBundle is serialized, it's identified by the codec name ski.KeyBundleProtobufCodec
+message KeyBundle {
+
+    // The community associated with the keys in this bundle
+                bytes           community_id            = 1;
+
     // Key storage
-    repeated    KeyEntry        keys                    = 3;
+    repeated    KeyEntry        keys                    = 2;
 }
 
 
@@ -85,7 +92,7 @@ message KeySpec {
 // KeySpecs is a list of KeySpec and when serialized is identified by the codec name ski.KeySpecsProtobufCodec
 message KeySpecs {
 
-    repeated    KeySpec         key_specs               = 1;
+    repeated    KeySpec         specs                   = 1;
 }
 
 
