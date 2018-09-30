@@ -5,21 +5,7 @@
          A rchitecture
 P  L  A  N etwork
 
-Welcome to PLAN!
-
-PLAN is a secure, all-in-one communications and logistics planning tool for individuals and organizations.
-It is intended to be an instrument of productivity, vision, and self-reliance.
-
-All the parts of PLAN are free and open-source (GPLv3), and each component and layer is intended to be "pluggable"
-or otherwise an embodiment of an open-protocol.  The design principles of PLAN are similar and consistent with
-Tim Berners-Lee's design and implementation of http.
-
-go-plan is the benchmark implementation of PLAN's p2p client-serving node.
-
-Universe willing, may PLAN empower organizations and individuals with little or no resources
-to communicate and self-organize intuitively and reliably. 
-
-I see PLAN supporting her users, the members of the PLAN Foundation, and myself so that I could not wish for more.
+May PLAN support her users, the members of the PLAN Foundation, and myself so that I could not wish for more.
 
 ~ proto, summer 2018  */
 
@@ -44,13 +30,13 @@ const (
 	CommunityIDSz = 24
 
 	// KeyIDSz is the number of bytes used to identify a key entry on a PLAN keyring.
-	// It's "modest-sized" since a newly generated must pass collision checks before it's put into use.
+	// It's "modest-sized" since a newly generated key must pass collision checks before it's put into use.
 	KeyIDSz = 16
 
 	// ChannelIDSz specifies the byte size of ChannelID
 	ChannelIDSz = 16
 
-	// MemberIDSz specifies the byte size of KeyID
+	// MemberIDSz specifies the byte size of MemberID
 	MemberIDSz = 16
 
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
