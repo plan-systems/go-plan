@@ -49,7 +49,7 @@ enum EntryOp {
     **/
 
     // Appends this content entry to the specified channel.
-    POST_NEW_CONTENT            = 0;
+    POST_CONTENT                = 0;
 
     // This entry's body lists one or more channel entries to effectively mark as removed/invisible.
     REMOVE_ENTRIES              = 1;
@@ -240,7 +240,7 @@ message EntryCrypt {
                 bytes           community_key_id        = 3;        // Needed to access header_crypt
                 bytes           header_crypt            = 5;        // := Encrypt(<EntryHeader>.Marshal(), <EntryCrypt>.community_key_id)
                 bytes           body_crypt              = 6;        // := Encrypt(<Body>.Marshal(), <EntryHeader>.body_key_id)
-                bytes           sig                     = 7;        // := ComputeSig(<EntryCrypt>, GetKey(author_member_id,author_member_rev))
+                bytes           sig                     = 7;        // := ComputeSig(<EntryCrypt>, GetKey(author_member_id,author_member_epoch))
 }
 
 
@@ -257,11 +257,11 @@ message EntryHeader {
                 fixed32         time_authored_ns        = 2;        // [0,999999999] -- serves 
                 int64           time_sealed             = 3;        // Unix timestamp
                 EntryOp         entry_op                = 4;
-                bytes           channel_id              = 5;        // Channel id this entry is posted to.
-                fixed64         channel_epoch_id        = 6;        // Epoch of this channel in effect when this entry was sealed
+                bytes           channel_id              = 5;        // Channel that this entry is posted to.
+                fixed64         channel_epoch_id        = 6;        // Epoch of the channel in effect when this entry was sealed
                 bytes           author_member_id        = 7;        // Creator of this entry (and signer of .Sig)
-                fixed64         author_member_epoch     = 8;        // Which rev of the author's identity was used for encryption (or 0 if n/a)
-                bytes           body_key_id             = 10;       // Specifies which key was used to encrypt 
+                fixed64         author_member_epoch     = 8;        // Epoch of the author's identity when this entry was sealed
+                bytes           body_key_id             = 10;       // Specifies which key was used to encrypt EntryCrypt.body_crypt
                 plan.Block      extensions              = 11;       // Available for unrestricted client use.
 }
 
@@ -354,17 +354,17 @@ message StorageTxn {
 message TxnRequest {
 
     // Unix timestamp of the commit time of txn(s) to be read
-                uint64          time_committed              = 1;
+                int64           time_committed              = 1;
 
    // If set, this is the txn name to be fetched.  
    // If omitted, all txns with the matching time committed. 
                 bytes           txn_name                    = 2;
 
     // If true, StorageTxn.Body will be set/sent for each txn returned.
-    // If fasle, StorageTxn.Body == nil for each txn returned.
+    // If false, StorageTxn.Body == nil for each txn returned (saving bandwidth)
                 bool            include_body                = 3;
 
     // If > 0, this caps the the number of txns returned until the requested is considered complete.
-                uint64          max_txns                   = 4;
+                uint64          max_txns                    = 4;
 }
 
