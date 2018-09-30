@@ -150,11 +150,11 @@ const (
 	// InvocationAlreadyExists means an ski.Provider has already been registered with the given invocation string
 	InvocationAlreadyExists
 
-    // CryptoPkgIDAlreadyRegistered  means the given package ID was already registered
-    CryptoPkgIDAlreadyRegistered
+    // CryptoKitIDAlreadyRegistered  means the given package ID was already registered
+    CryptoKitIDAlreadyRegistered
 
-    // CryptoPkgNotFound means the requested CryptoPkgID was not registered for any CryptoPkgID
-    CryptoPkgNotFound
+    // CryptoKitNotFound means the requested CryptoKitID was not registered for any CryptoKitID
+    CryptoKitNotFound
 
     // KeyGenerationFailed means key generation failed
     KeyGenerationFailed
@@ -164,6 +164,9 @@ const (
 
 	// KeyringNotFound means the given keyring name was not found
 	KeyringNotFound
+
+	// KeyDomainNotFound means the KeyDomain given was not known (and out of range)
+	KeyDomainNotFound
 
 	// UnknownSKIOpName means the given SKI op name was not recognized
 	UnknownSKIOpName
