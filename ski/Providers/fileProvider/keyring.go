@@ -1,7 +1,6 @@
 package file
 
 import (
-	crypto_rand "crypto/rand"
     "sync"
 
 	"github.com/plan-tools/go-plan/ski"
@@ -14,12 +13,117 @@ import (
 
 // Keyring contains a set of KeyEntry
 type Keyring struct {
-    sync.RWMutex
-    
-    Label           string
-    KeysCodec       string
-    keysByID        map[plan.KeyID]*ski.KeyEntry
+    KeysByID        map[plan.KeyID]*ski.KeyEntry
 }
+
+
+
+type Keyrings struct {
+    sync.RWMutex
+
+    ByKeyDomain     [ski.NumKeyDomains]Keyring
+}
+
+
+
+func (keyrings *Keyrings) GenerateNewKeys(
+    inKeySpecs ski.KeySpecs,
+) ([]*ski.KeyEntry, *plan.Perror) {
+
+
+}
+
+
+
+func (keyrings *Keyrings) ExportNamedKeys(
+    inKeySpecs ski.KeySpecs,
+    inErrorOnKeyNotFound bool,
+) ([]*ski.KeyEntry, *plan.Perror) {
+
+    outKeys := make([]*ski.KeyEntry, len(inKeySpecs.Specs))
+
+    keyrings.RLock()
+    defer keyrings.RUnlock()
+
+   for i, keySpec := range inKeySpecs.Specs {
+
+        var err plan.Perror
+        var keyEntry *ski.KeyEntry
+
+        if keySpec.KeyDomain < 0 || keySpec.KeyDomain > ski.NumKeyDomains {
+            err = plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {%v}", keySpec.KeyDomain)
+        }
+        
+        if err == nil {
+            keyID := plan.GetKeyID(keySpec.PubKey)
+
+            outKeys[i] = keyrings.ByKeyDomain[keySpec.KeyDomain].KeysByID[keyID]
+            if keyEntry == nil {
+                err = plan.Errorf(nil, plan.KeyIDNotFound, "one or more keys not found {keyID:%v}", inKeyID)
+            }
+        }
+
+        // If we don't error out, nil is left in elements, allowing the calling to know what keys weren't found
+        if err != nil && inErrorOnKeyNotFound {
+            return nil, err
+        }
+   }
+
+   return outKeys, nil
+}
+
+
+func (keyrings *Keyrings) ExportKeyring(
+    inKeyDomain ski.KeyDomain,
+) ([]*ski.KeyEntry) {
+
+
+    keyrings.RLock()
+
+    keyring := keyrings.ByKeyDomain[keySpec.KeyDomain]
+    
+    outKeys := make([]*ski.KeyEntry, len(keyring))
+
+    for i, keyEntry := range keyring.KeysByID {
+        outKeys[i] = keyEntry
+    }
+
+    keyrings.RUnlock()
+
+    // TODO: sort by time
+
+   return outKeys
+}
+
+
+
+type KeyRepo struct {
+    sync.RWMutex
+
+    ByCommunity   map[plan.CommunityID]*Keyrings
+}
+
+
+func (keyRepo *KeyRepo) FetchKeyrings(
+    inCommunityID []byte,
+) (*Keyrings, *plan.Perror) {
+
+    CID := plan.GetCommunityID(inCommunityID)
+
+    keyRepo.RLock()
+    keyrings, ok := keyRepo.ByCommunity[CID]
+    keyRepo.RUnlock()
+
+    if ! ok {
+        return nil, plan.Errorf(nil, plan.KeyringNotFound, "no keyrings found for community ID %v", inCommunityID)
+    }
+
+    return keyrings, nil
+}
+
+
+
+
 
 // NewKeyring creates and empty keyring with the given label/name.
 func NewKeyring(inLabel string) *Keyring {
@@ -31,25 +135,6 @@ func NewKeyring(inLabel string) *Keyring {
     }
 }
 
-
-
-// NewIdentity generates encryption and signing keys, adds them to the
-// Keyring, and returns the public keys associated with those private keys.
-func (kr *Keyring) NewIdentity() (outSigningKey []byte, outEncKey []byte) {
-
-    encrKey := kr.NewKeyEntry(naclEncryptionKey)
-    signKey := kr.NewKeyEntry(naclSigningKey)
-
-    return signKey.PubKey, encrKey.PubKey
-}
-
-
-
-// NewSymmetricKey generates a new symmetric key and adds it to the Keyring,
-// and returns the CommunityKeyID associated with that key.
-func (kr *Keyring) NewSymmetricKey() plan.KeyID {
-    return kr.NewKeyEntry(naclSymmetricKey).GetKeyID()
-}
 
 // NewKeyEntry generates a new KeyEntry of the given type 
 func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *ski.KeyEntry {
@@ -173,107 +258,6 @@ func (kr *Keyring) GetKey(inKeyID plan.KeyID) (
 	}
 	return entry, nil
 }
-
-
-
-// GetSigningKey fetches the d's private signing key from the keychain for a
-// specific public key, or an error if the key doesn't exist.
-func (kr *Keyring) GetSigningKey(inKeyID plan.KeyID) (
-	[]byte, *plan.Perror) {
-
-	kr.RLock()
-    entry, ok := kr.keysByID[inKeyID]
-    kr.RUnlock()
-    
-	if !ok || entry.KeyInfo != naclSigningKey {
-		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "signing key not found {keyID:%v}", inKeyID)
-	}
-	return entry.PrivKey, nil
-}
-
-
-
-// GetEncryptKey fetches the d's private encrypt key from the keychain,
-// or an error if the key doesn't exist.
-func (kr *Keyring) GetEncryptKey(inKeyID plan.KeyID) (
-	[]byte, *plan.Perror) {
-    
-	kr.RLock()
-    entry, ok := kr.keysByID[inKeyID]
-    kr.RUnlock()
-
-	if !ok || entry.KeyInfo != naclEncryptionKey {
-		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "encrypt key not found {keyID:%v}", inKeyID)
-	}
-	return entry.PrivKey, nil
-}
-
-
-
-// GetSymmetricKey fetches the community key from the keychain for a
-// based on its ID, or an error if the key doesn't exist.
-func (kr *Keyring) GetSymmetricKey(inKeyID plan.KeyID) (
-	[]byte, *plan.Perror) {
-    
-	kr.RLock()
-    entry, ok := kr.keysByID[inKeyID]
-    kr.RUnlock()
-
-	if !ok || entry.KeyInfo != naclSymmetricKey {
-		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "community key not found {keyID:%v}", inKeyID)
-	}
-	return entry.PrivKey, nil
-}
-
-
-
-
-
-func generateKeyEntry(inKeyInfo uint32) *ski.KeyEntry {
-    entry := &ski.KeyEntry{
-        KeyInfo: inKeyInfo,
-        TimeCreated: plan.Now().UnixSecs,
-    }
-    
-    switch inKeyInfo {
-
-        case naclSymmetricKey:{
-            entry.PubKey = make([]byte, plan.KeyIDSz)
-            _, err := crypto_rand.Read(entry.PubKey)
-            if err != nil {
-                panic(err)
-            }
-
-            entry.PrivKey = make([]byte, 32)
-            _, err = crypto_rand.Read(entry.PrivKey)
-            if err != nil {
-                panic(err)
-            }
-        }
-
-        case naclEncryptionKey:{
-            publicKey, privateKey, err := box.GenerateKey(crypto_rand.Reader)
-            if err != nil {
-                panic(err)
-            }
-            entry.PrivKey = privateKey[:]
-            entry.PubKey = publicKey[:]
-        }
-
-        case naclSigningKey:{
-            publicKey, privateKey, err := sign.GenerateKey(crypto_rand.Reader)
-            if err != nil {
-                panic(err)
-            }
-            entry.PrivKey = privateKey[:]
-            entry.PubKey = publicKey[:]
-        }
-    }
-
-    return entry
-
-}
-
 
 
 

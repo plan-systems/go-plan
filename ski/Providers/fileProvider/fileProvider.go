@@ -6,6 +6,7 @@ import (
     //"net/http"
     //"log"
     //io"
+    "sync"
 	crypto_rand "crypto/rand"
 
 	"github.com/plan-tools/go-plan/ski"
@@ -36,6 +37,7 @@ var (
 
     
 )
+
 
 
 
@@ -210,7 +212,7 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
             ski.OpDecryptFrom,
             ski.OpSendKeys,
             ski.OpAcceptKeys,
-            ski.OpSignMsg:
+            ski.OpSign:
             cryptoKey, err = session.KeyRepo.GetKey(opArgs.CommunityID, opArgs.CryptoKey)
         }
     }
@@ -219,8 +221,8 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
         return nil, err
     }
     
-    var cryptoPkg *ski.CryptoPkg
-    cryptoPkg, err = ski.GetCryptoPkg(cryptoKey.CryptoPkgID())
+    var cryptoPkg *ski.CryptoKit
+    cryptoPkg, err = ski.GetCryptoKit(cryptoKey.CryptoKitID())
     if err != nil {
         return nil, err
     }
@@ -231,7 +233,7 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     {
         switch opArgs.OpName{
 
-            case ski.OpSignMsg:
+            case ski.OpSign:
                 msg, err = cryptoPkg.Sign(
                     opArgs.Msg, 
                     cryptoKey.PrivKey)
@@ -278,7 +280,6 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
                 err = plan.Errorf(nil, plan.UnknownSKIOpName, "unrecognized SKI operation %s", opArgs.OpName)
         }
     }
-
 
 
 
