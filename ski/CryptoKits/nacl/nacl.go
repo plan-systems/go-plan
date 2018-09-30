@@ -32,10 +32,7 @@ var (
         +0,+0,+0,+0,-0,-0,-0,-0,
     }
 
-    
 )
-
-
 
 
 
@@ -56,9 +53,7 @@ var CryptoKit = ski.CryptoKit{
 
         var err error
 
-        keyType := ioEntry.KeyType()
-
-        switch keyType {
+        switch ioEntry.KeyType {
 
             case ski.KeyType_SYMMETRIC_KEY: {
                 ioEntry.PubKey = make([]byte, inRequestedKeyLen)
@@ -87,11 +82,11 @@ var CryptoKit = ski.CryptoKit{
             }
 
             default:
-                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %d}", keyType)
+                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %d}", ioEntry.KeyType)
         }
 
         if err != nil {
-            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %d}", keyType)
+            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %d}", ioEntry.KeyType)
         }
 
         return nil

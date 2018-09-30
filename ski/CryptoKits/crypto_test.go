@@ -48,7 +48,9 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 		gTesting.Fatal("initial msg check failed!?")
 	}
 
-	entry := ski.KeyEntry{}
+	entry := ski.KeyEntry{
+        CryptoKitId: kit.CryptoKitID,
+    }
 
 	var crypt []byte
 
@@ -58,7 +60,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_SYMMETRIC_KEY)
+		entry.KeyType = ski.KeyType_SYMMETRIC_KEY
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
@@ -99,14 +101,13 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_ASYMMETRIC_KEY)
+		entry.KeyType = ski.KeyType_ASYMMETRIC_KEY
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
-		recipient := ski.KeyEntry{}
-		recipient.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_ASYMMETRIC_KEY)
+		recipient := entry
 		err = kit.GenerateNewKey(reader, inKeyLen, &recipient)
 		if err != nil {
 			gTesting.Fatal(err)
@@ -148,7 +149,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo = ski.EncodeKeyInfo(kit.CryptoKitID, ski.KeyType_SIGNING_KEY)
+		entry.KeyType = ski.KeyType_SIGNING_KEY
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
