@@ -2,6 +2,7 @@ package file
 
 import (
     "sync"
+	crypto_rand "crypto/rand"
 
 	"github.com/plan-tools/go-plan/ski"
 	"github.com/plan-tools/go-plan/plan"
@@ -12,55 +13,74 @@ import (
 
 
 // Keyring contains a set of KeyEntry
-type Keyring struct {
+type keyring struct {
     KeysByID        map[plan.KeyID]*ski.KeyEntry
 }
 
 
 
-type Keyrings struct {
+type KeyringSet struct {
     sync.RWMutex
 
-    ByKeyDomain     [ski.NumKeyDomains]Keyring
+    ByKeyDomain     [ski.NumKeyDomains]keyring
 }
 
 
 
-func (keyrings *Keyrings) GenerateNewKeys(
-    inKeySpecs ski.KeySpecs,
+func (set *KeyringSet) GenerateNewKeys(
+    inKeyReqs []*KeyEntry,
 ) ([]*ski.KeyEntry, *plan.Perror) {
 
+    keysNotMerged := inKeyReqs
 
+    // Loop and hope we don't have a ~ 2^256 collusion.  Good luck!
+    for ; len(keysNotMerged) > 0; {
+
+        newKeys, err := ski.GenerateNewKeys(crypto_rand.Reader, 32, keysNotMerged)
+        if err != nil {
+            return err
+        }
+
+        // Let's all laugh a give cheers to the possibility of a 1:2^256 collision!
+        keysNotMerged := set.MergeKeys(newKeys)
+        if len(keysNotMerged) == 0 {
+            break
+        }
+    }
+   
 }
 
 
-
-func (keyrings *Keyrings) ExportNamedKeys(
+// ExportNamedKeys returns a list of KeyEntries, where each element corresponds to the elements in inKeySpecs. 
+// If inErrorOnKeyNotFound is set and a KeySpec isn't found, an error is returned.  Otherwise, nil is returned for that element.
+func (set *KeyringSet) ExportNamedKeys(
     inKeySpecs ski.KeySpecs,
     inErrorOnKeyNotFound bool,
 ) ([]*ski.KeyEntry, *plan.Perror) {
 
     outKeys := make([]*ski.KeyEntry, len(inKeySpecs.Specs))
 
-    keyrings.RLock()
-    defer keyrings.RUnlock()
+    set.RLock()
+    defer set.RUnlock()
 
-   for i, keySpec := range inKeySpecs.Specs {
+    for i, keySpec := range inKeySpecs.Specs {
 
         var err plan.Perror
         var keyEntry *ski.KeyEntry
 
         if keySpec.KeyDomain < 0 || keySpec.KeyDomain > ski.NumKeyDomains {
-            err = plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {%v}", keySpec.KeyDomain)
+            err = plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {KeyDomain: %v}", keySpec.KeyDomain)
         }
         
         if err == nil {
             keyID := plan.GetKeyID(keySpec.PubKey)
 
-            outKeys[i] = keyrings.ByKeyDomain[keySpec.KeyDomain].KeysByID[keyID]
-            if keyEntry == nil {
+            keyEntry = set.ByKeyDomain[keySpec.KeyDomain].KeysByID[keyID]
+            if inErrorOnKeyNotFound && keyEntry == nil {
                 err = plan.Errorf(nil, plan.KeyIDNotFound, "one or more keys not found {keyID:%v}", inKeyID)
             }
+
+            outKeys[i] = keyEntry
         }
 
         // If we don't error out, nil is left in elements, allowing the calling to know what keys weren't found
@@ -73,57 +93,107 @@ func (keyrings *Keyrings) ExportNamedKeys(
 }
 
 
-func (keyrings *Keyrings) ExportKeyring(
+func (set *KeyringSet) ExportKeyring(
     inKeyDomain ski.KeyDomain,
 ) ([]*ski.KeyEntry) {
 
-
-    keyrings.RLock()
-
-    keyring := keyrings.ByKeyDomain[keySpec.KeyDomain]
-    
-    outKeys := make([]*ski.KeyEntry, len(keyring))
-
-    for i, keyEntry := range keyring.KeysByID {
-        outKeys[i] = keyEntry
+    if inKeyDomain < 0 || inKeyDomain > ski.NumKeyDomains {
+        return plan.Errorf(nil, plan.KeyDomainNotFound, "keyring not found {KeyDomain: %v}", inKeyDomain)
     }
 
+    outKeys := make([]*ski.KeyEntry, len(keyring))
+
+    keyrings.RLock()
+    {
+        keyring := set.ByKeyDomain[keySpec.KeyDomain]
+    
+        for i, keyEntry := range keyring.KeysByID {
+            outKeys[i] = keyEntry
+        }
+    }
     keyrings.RUnlock()
 
-    // TODO: sort by time
+    // TODO: keys sort by time
 
    return outKeys
 }
 
 
 
+
+// MergeKeys adds the keys to this KeyringSet returning a list of the collisions not merged.
+// If an incoming collides (and isn't exactly identical to the existing entry), 
+//    then it is added to list of keys returned (i.e. this func merges the keys it can).
+func (set *KeyringSet) MergeKeys(
+    inKeysToMerge []*KeyEntry,
+) []*ski.KeyEntry {
+
+    var keysNotMerged []*ski.KeyEntry
+    var keyID plan.KeyID
+    
+    var errs []*plan.Perror
+    
+    set.Lock()
+    for _, keyEntry := range inKeysToMerge {
+
+        keyMerged := false
+        if keyEntry.KeyDomain >= 0 && keyEntry.KeyDomain < ski.NumKeyDomains {
+
+            keyID := entry.GetKeyID()
+            keyring := &set.ByKeyDomain[keySpec.KeyDomain]
+            existing := keyring.KeysByID[keyID]
+            if existing == nil || existing.EqualTo(entry) {
+                keyMerged = true
+                if existing == nil {
+                    keyring.KeysByID[keyID] = keyEntry
+                }
+            }
+            
+        }
+        
+        if ! keyMerged {
+            keysNotMerged = append(keysNotMerged, keyEntry)
+        }
+    }
+    set.Unlock()
+
+/*
+    if len(collisions) > 0 {
+        err = plan.Errorf(nil, plan.KeyIDCollision, "key ID collision while adding keys {keyID:%v}", collisions)
+    }*/
+
+    return keysNotMerged
+
+}
+
+
 type KeyRepo struct {
     sync.RWMutex
 
-    ByCommunity   map[plan.CommunityID]*Keyrings
+    ByCommunity   map[plan.CommunityID]*KeyringSet
 }
 
 
 func (keyRepo *KeyRepo) FetchKeyrings(
     inCommunityID []byte,
-) (*Keyrings, *plan.Perror) {
+) (*KeyringSet, *plan.Perror) {
 
     CID := plan.GetCommunityID(inCommunityID)
-
+ 
     keyRepo.RLock()
-    keyrings, ok := keyRepo.ByCommunity[CID]
+    keyringSet, ok := keyRepo.ByCommunity[CID]
     keyRepo.RUnlock()
 
     if ! ok {
         return nil, plan.Errorf(nil, plan.KeyringNotFound, "no keyrings found for community ID %v", inCommunityID)
     }
 
-    return keyrings, nil
+    return keyringSet, nil
 }
 
 
 
-
+/*
 
 // NewKeyring creates and empty keyring with the given label/name.
 func NewKeyring(inLabel string) *Keyring {
@@ -134,7 +204,7 @@ func NewKeyring(inLabel string) *Keyring {
         keysByID: map[plan.KeyID]*ski.KeyEntry{},
     }
 }
-
+*/
 
 // NewKeyEntry generates a new KeyEntry of the given type 
 func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *ski.KeyEntry {
@@ -161,7 +231,7 @@ func (kr *Keyring) NewKeyEntry(inKeyInfo uint32) *ski.KeyEntry {
    
 
 }
-
+/*
 
 // ExportKeys exports the given list of keys into a buffer t
 func (kr *Keyring) ExportKeys(
@@ -219,7 +289,7 @@ func (kr *Keyring) MergeKeys(
     return err
 
 }
-
+*/
 
 /*
 func (kr *Keyring) GetKeyEntry(
@@ -242,22 +312,3 @@ func (kr *Keyring) GetKeyEntry(
 	return nil
 }
 */
-
-
-// GetKey fetches the key from the keychain,
-// or an error if the key doesn't exist.
-func (kr *Keyring) GetKey(inKeyID plan.KeyID) (
-	*ski.KeyEntry, *plan.Perror) {
-    
-	kr.RLock()
-    entry, ok := kr.keysByID[inKeyID]
-    kr.RUnlock()
-
-	if !ok {
-		return nil, plan.Errorf(nil, plan.KeyIDNotFound, "key not found {keyID:%v}", inKeyID)
-	}
-	return entry, nil
-}
-
-
-
