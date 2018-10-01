@@ -28,17 +28,24 @@ enum KeyDomain {
 }
 
 enum  CryptoKitID {
-    INVALID_KIT_ID      = 0;
+    DEFAULT_KIT_ID      = 0;
 
     NaCl                = 1;
 }
 
+ 
 
-
-
+// KeyEntry is used in 3 ways:
+//    1) Storage/Export mode: KeyEntry used to store all fields of a fully generated key 
+//         a) KeyEntry.PrivKey != nil
+//    2) Ref mode: KeyEntry used to reference/specifiy an existing key somewhere else 
+//         a) KeyEntry.PrivKey == nil
+//         b) Fields used: KeyType, KeyDomain, PubKey (other fields ignored)
+//    3) KeyGen mode: KeyEntry used to generate a new key
+//         a) Fields used: KeyType, KeyDomain, CryptoKitID (other fields ignored)
 message KeyEntry {
     
-    // Specifies what type of KeyType this is
+    // Specifies what type of KeyType this is (or NOT_SET)
                 KeyType         key_type                = 1;
 
     // Specifies which domaon/area this key is used in
@@ -47,22 +54,26 @@ message KeyEntry {
     // Specifies which CryptoKit handles this key's ops
                 CryptoKitID     crypto_kit_id           = 3;
 
-    // Unix timestamp when this key was created
+    // Unix timestamp when this key was created (or 0 if not set)
                 int64           time_created            = 4;
 
-    // Private part of the key -- should be used and copied carefully.
-                bytes           priv_key                = 5;
-
     // Public part of the key; how this key is also referenced publicly.
-                bytes           pub_key                 = 6;
+    // When a KeyEntry is being used to specify the generation of a new key, this field is ignored.
+                bytes           pub_key                 = 5;
+
+    // Private part of the key -- should be used and copied carefully.
+    // When a KeyEntry is used to reference/specify an existing key, this field is not set and/or is ignored.
+                bytes           priv_key                = 6;
+
 }
 
 
 
 
 
-// KeyBundle is a set of KeyEntries grouped by KeyDomain.
+// KeyBundle is a set of KeyEntries
 // When a KeyBundle is serialized, it's identified by the codec name ski.KeyBundleProtobufCodec
+// See KeyEntry mode comments.
 message KeyBundle {
 
     // The community associated with the keys in this bundle
@@ -75,53 +86,3 @@ message KeyBundle {
 
 
 
-// KeySpec effectively names/specifies a key (within a given community keyring)
-message KeySpec {
-
-    // Which key domain does this key live in?
-                KeyDomain       key_domain              = 1;
-
-    // Optional -- the type of the key (or NOT_SET)
-                KeyType         key_type                = 2;
-
-    // KeyEntry.PubKey
-                bytes           pub_key                 = 3;
-}
-
-
-// KeySpecs is a list of KeySpec and when serialized is identified by the codec name ski.KeySpecsProtobufCodec
-message KeySpecs {
-
-    repeated    KeySpec         specs                   = 1;
-}
-
-
-
-/*
-message KeyPathname {
-
-    // The parent community and domain in question
-                KeyPath         path                    = 1;
-
-    // The key's public name (for asysmmetric keys, the public key)
-                bytes           pub_key                 = 2;
-
-
-}
-
-
-
-message KeyRepo {
-
-                KeyPath         key_path                = 1;
-
-
-   // repeated    map<string, 
-     //               bytes>      op_args                 = 3;
-
-}
-
-
-
-
-*/

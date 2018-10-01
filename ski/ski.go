@@ -8,7 +8,6 @@ import (
 	"github.com/plan-tools/go-plan/plan"
 )
 
-
 // NumKeyDomains is the number of possible ski.KeyDomain values (increment the last enum)
 const NumKeyDomains = KeyDomain_PERSONAL + 1
 
@@ -101,20 +100,21 @@ var (
 
 	// ContentReadAccess only allows the client to decrypt data
 	ContentReadAccess AccessScopes = []string{
-        OpMergeKeys,
-        OpGenerateKeys,
 		OpDecrypt,
-        OpDecryptFrom,
+		OpDecryptFrom,
 	}
 
 	// ContentAuthoringAccess allows the client to encrypt and sign data
 	ContentAuthoringAccess = []string{
-        OpMergeKeys,
-        OpGenerateKeys,
 		OpEncrypt,
 		OpEncryptFor,
-    }
+        OpSign,
+	}
 
+    AddKeysAccess = []string {
+		OpImportKeys,
+		OpGenerateKeys,
+    }
 )
 
 /*****************************************************
@@ -124,17 +124,14 @@ var (
 // OpArgs is a container for all the params needed for a SKI op to be completed.
 type OpArgs struct {
 
-	// CommunityID specifies which community key repo this Op should be dispatched to.
-	CommunityID []byte
-
 	// OpName says what SKI operation to perform and determines what inputs to use, etc. See below list of op names.
 	OpName string
 
 	// Specifies the key to be used for encrypting/decrypting/signing
-	CryptoKey KeySpec
+	CryptoKey KeyEntry
 
 	// A list of keys that the Op does something with
-	KeySpecs KeySpecs
+	KeySpecs KeyBundle
 
 	// Sender/Recipient publicly available key -- a public address in the community key space
 	PeerPubKey []byte
@@ -175,30 +172,38 @@ const (
 	OpSign = "sign_msg"
 
 	/*****************************************************
-	 ** Key generation & transport
+	 ** Key generation & exporting
 	 **/
 
-	// OpGenerateKeys generates a new key for each entry in OpArgs.KeySpecs.  Each entry in OpArgs.KeySpecs
-	//     must specify a valid KeyDomain and KeyType (PubKey is ignored).  On completion, this op serializes
-	//     OpArgs.KeyNames (except PubKey is now set with the new key's public key for each entry).
+	// OpGenerateKeys generates a new key for each entry in OpArgs.KeySpecs, returning only public info
+    //     about newly generated keys (use the Export ops for getting private key data).
+    // See "KeyGen mode" notes where KeyEntry is declared.  On completion, returns serialized KeyBundle
+    //     where the elements correspond to OpArgs.KeySpecs (except all the key fields are set EXCEPT KeyEntry.PrivKey)
 	// Returns:
-	//     inResults.GetContentWithCodec(ski.KeySpecsProtobufCodec)
+	//     inResults.GetContentWithCodec(ski.KeyBundleProtobufCodec)
 	OpGenerateKeys = "generate_keys"
 
-	// OpExportNamedKeys exports the KeyEntryfor each entry in OpArgs.KeySpecs into a ski.KeyBundle.  This is then marshaled
-    //     and encrypted using the asymmetric key specified by OpArgs.CryptoKey, and than retuned in OpArgs.Msg.Content.
-    // Note: if a named key is not found (or is invalidly specified), this entire op will error out.
+	// OpExportNamedKeys exports the KeyEntry for each corresponding element in OpArgs.KeySpecs into a ski.KeyBundle.  
+    //     This KeyBundle is then marshaled and encrypted using the asymmetric key specified by OpArgs.CryptoKey, 
+    //     and than retuned in OpArgs.Msg.Content.
+	// Note: if a key is not found (or is invalidly specified), this entire op will error out.
 	OpExportNamedKeys = "export_named_keys"
 
-    // OpExportKeyring operates like OpExportNamedKeys except the entire keyring specfified by OpArgs.KeySpecs.Specs[0].KeyDomain is exported.
+	// OpExportKeyring operates like OpExportNamedKeys except the entire keyring specfified by OpArgs.KeySpecs.Specs[0].KeyDomain is exported.
 	OpExportKeyring = "export_keyring"
 
-	// OpMergeKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.CryptoKey.
-    // OpArgs.Msg.Content is first decrypted using the key referenced by OpArgs.CryptoKey.  The resulting buffer unmarshalled into a
-    //     ski.KeyBundle and merged with the key repo.
-    // Note if any of the keys being merged collides with an existing key and it's not an exact match (duplicate), then this op will
-    //     error out and will have no effect.
-	OpMergeKeys = "merge_keys"
+	/*****************************************************
+	 ** Key importing
+	 **/
+
+	// OpImportKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.CryptoKey.
+	// OpArgs.Msg.Content is first decrypted using the key referenced by OpArgs.CryptoKey.  The resulting buffer unmarshalled into a
+	//     ski.KeyBundle and merged with the key repo.
+	// Note if a key being imported collides with an existing key (and it isn't an exact duplicate), it's spec is added to a KeyBundle
+    //    that is also returned with the label ski.KeysNotImportedLabel
+	OpImportKeys = "import_keys"
+
+
 )
 
 /*****************************************************
@@ -212,6 +217,10 @@ const (
 
 	// KeySpecsProtobufCodec names the serialization codec for ski.KeySpecs (implemented via compilation of ski.proto)
 	KeySpecsProtobufCodec = "/plan/ski/KeySpecs/1"
+
+    // KeysNotImportedLabel is the label used for a serialized KeyBundle when OpImportKeys encounters keys it couldn't import.
+    KeysNotImportedLabel = "keys_not_imported"
+
 )
 
 // CryptoKit is a generic pluggable interface that any crypto package can implement.
@@ -277,7 +286,7 @@ type CryptoKit struct {
 }
 
 // CryptoKitRegistry maps a CryptoKitID to an implementation
-var cryptoPkgRegistry struct {
+var cryptoKitRegistry struct {
 	sync.RWMutex
 	Lookup map[CryptoKitID]*CryptoKit
 }
@@ -288,14 +297,14 @@ func RegisterCryptoKit(
 ) *plan.Perror {
 
 	var err *plan.Perror
-	cryptoPkgRegistry.Lock()
-	pkg := cryptoPkgRegistry.Lookup[inPkg.CryptoKitID]
+	cryptoKitRegistry.Lock()
+	pkg := cryptoKitRegistry.Lookup[inPkg.CryptoKitID]
 	if pkg == nil {
-		cryptoPkgRegistry.Lookup[inPkg.CryptoKitID] = inPkg
+		cryptoKitRegistry.Lookup[inPkg.CryptoKitID] = inPkg
 	} else if pkg != inPkg {
 		err = plan.Errorf(nil, plan.CryptoKitIDAlreadyRegistered, "the CryptoKitID %d (%s) is already registered", inPkg.CryptoKitID, CryptoKitID_name[int32(inPkg.CryptoKitID)])
 	}
-	cryptoPkgRegistry.Unlock()
+	cryptoKitRegistry.Unlock()
 
 	return err
 }
@@ -305,9 +314,9 @@ func GetCryptoKit(
 	inCryptoKitID CryptoKitID,
 ) (*CryptoKit, *plan.Perror) {
 
-	cryptoPkgRegistry.RLock()
-	pkg := cryptoPkgRegistry.Lookup[inCryptoKitID]
-	cryptoPkgRegistry.RUnlock()
+	cryptoKitRegistry.RLock()
+	pkg := cryptoKitRegistry.Lookup[inCryptoKitID]
+	cryptoKitRegistry.RUnlock()
 
 	if pkg == nil {
 		return nil, plan.Errorf(nil, plan.CryptoKitNotFound, "the CryptoKitID %d was not found", inCryptoKitID)
