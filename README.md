@@ -1,9 +1,13 @@
+# PLAN
+
 ```
          P urposeful
          L ogistics
          A rchitecture
 P  L  A  N etwork
 ```
+
+PLAN is an multi-purpose communications and logistics planning tool for individuals and organizations. 
 
 # go-plan
 
