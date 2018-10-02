@@ -127,10 +127,10 @@ type OpArgs struct {
 	// OpName says what SKI operation to perform and determines what inputs to use, etc. See below list of op names.
 	OpName string
 
-	// Specifies the key to be used for encrypting/decrypting/signing
+	// Key spec to used for encrypting/decrypting/signing
 	CryptoKey KeyEntry
 
-	// A list of keys that the Op does something with
+	// A list of key specs that the Op does something with
 	KeySpecs KeyBundle
 
 	// Sender/Recipient publicly available key -- a public address in the community key space
@@ -229,7 +229,7 @@ const (
 type CryptoKit struct {
 	CryptoKitID CryptoKitID
 
-	// Pre: ioEntry.KeyType, .KeyDomain, and .CryptoKitID is already set
+	// Pre: ioEntry.KeyType, .KeyDomain, .CryptoKitID, and .TimeCreated is already set.
 	// inRequestedKeyLen is the requested length of the private key. It can be ignored if this implmentation has a fixed key length.
 	GenerateNewKey func(
 		inRand io.Reader,
