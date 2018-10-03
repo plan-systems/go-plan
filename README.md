@@ -13,7 +13,7 @@ P  L  A  N etwork
 
 `go-plan` is the official benchmark implementation of PLAN's p2p client-serving node.
 
-PLAN's [design and engineering documentation](https://github.com/plan-tools/design-docs) lays out PLAN design fundamantals and shows how each project fits into the whole.
+PLAN's [design and engineering documentation](https://github.com/plan-tools/design-docs) lays out PLAN's architecture and shows how each project fits into the whole.
 
 PLAN Website: http://plan.tools
 
