@@ -24,3 +24,10 @@ vendor/
 
 # debug binaries
 *debug
+
+
+ski/ski.pb.go
+pdi/pdi.pb.go
+plan/plan.pb.go
+pservice/pservice.pb.go
+
