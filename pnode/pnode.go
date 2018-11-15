@@ -15,11 +15,13 @@ import (
     "net"
     "encoding/hex"
     "encoding/json"
-    //"encoding/base64"
+    "encoding/base64"
 
     //"github.com/tidwall/redcon"
 
     "github.com/plan-tools/go-plan/plan"
+    "github.com/plan-tools/go-plan/ski"
+    //"github.com/plan-tools/go-plan/ski/Providers/nacl"
 
     // This inits in with sql, so no named import is needed
     _ "github.com/mattn/go-sqlite3"
@@ -44,29 +46,19 @@ import (
 
 )
 
+
+
 /*
 const (
     DEBUG     = true
 )
 
 
-A community KeyID identifies a specific shared "community-global" symmetric key.
-When a PLAN client starts a session with a pnode, the client sends the pnode her community-public keys.
-PDIEntryCrypt.CommunityKeyID specifies which community key was used to encrypt PDIEntryCrypt.Header.
-If/when an admin of a community issues a new community key,  each member is securely sent this new key via
-the community key channel (where is key is asymmetrically sent to each member still "in" the community. 
-
 When a PLAN client starts a new session with a pnode, the client sends the community keys for the session.  This allows
 pnode to process and decrypt incoming PDIEntryCrypt entries from the storage medium (e.g. Ethereum).  Otherwise, pnode
 has no ability to decrypt PDIEntryCrypt.Header.  A pnode could be configured to keep the community keychain even when there
 are no open client PLAN sessions so that incoming entries can be processed.  Otherwise, incoming entries won't be processed
 from the lowest level PDI storage layer.  Both configurations are reasonable depending on security preferences.
-
-When a community admin initiates a community-key "rekey event", the newly generated community key is securely and individually
-"sent" to each community member via the community's public key transfer channel. The new community key is encrypted using each member's public key.
-When a pnode is processing an entry that it does not have a community key for, it will check the community's public key channel
-for an entry for the current client's public key, it will send the client the encrypted community key.  The client uses its SKI
-to decrypt the payload into the new community key.  This key is added to the user's SKI keychain and is sent back to pnode.
 
 
 Recall that the pnode client has no ability to decrypt PDIEntryCrypt.Body if PDIEntryHeader.AccessChannelID isn't set for
@@ -96,6 +88,7 @@ type Pnode struct {
 
     Params                      PnodeParams
 
+    FSNameEncoding              *base64.Encoding
 }
 
 
@@ -138,7 +131,8 @@ type PnodeConfig struct {
 
 
 type PnodeParams struct {
-    BasePath string
+    BasePath          string
+    ClientStoragePath string 
 }
 
 
@@ -167,7 +161,9 @@ func init() {
 
 
 func NewPnode(inParams PnodeParams) *Pnode {
-    pn := &Pnode{}
+    pn := &Pnode{
+        FSNameEncoding: base64.RawURLEncoding,
+    }
 
     pn.Config.DefaultFileMode = os.FileMode(0775)
     pn.Config.GrpcNetworkName = DefaultGrpcNetworkName
@@ -190,6 +186,9 @@ func NewPnode(inParams PnodeParams) *Pnode {
 
 // Startup does basic loading from disk etc
 func (pn *Pnode) Startup(inFullInit bool) error {
+
+    ski.RegisterProvider(nacl.Provider)
+    ski.RegisterCryptoKit(nacl.CryptoKit)
 
     var err error
 
@@ -275,10 +274,9 @@ func (pn *Pnode) InitOnDisk() error {
 }
 
 
-
 func (pn *Pnode) LoadConfigIn() error {
 
-    buf, err := ioutil.ReadFile( pn.Params.BasePath + PnodeConfigFilename )
+    buf, err := ioutil.ReadFile(pn.GetConfigPathname())
     if err == nil {
         err = json.Unmarshal(buf, &pn.Config)
     }
@@ -309,18 +307,34 @@ func (pn *Pnode) RegisterCommunityRepo( CR *CommunityRepo ) {
 
 func (pn *Pnode) WriteConfigOut() error {
 
-    os.MkdirAll( pn.Params.BasePath, pn.Config.DefaultFileMode )
+    os.MkdirAll(pn.Params.BasePath, pn.Config.DefaultFileMode)
 
     buf, err := json.MarshalIndent( &pn.Config, "", "\t" )
     if err != nil {
         return err
     }
 
-    err = ioutil.WriteFile( pn.Params.BasePath + PnodeConfigFilename, buf, pn.Config.DefaultFileMode )
+    err = ioutil.WriteFile(pn.GetConfigPathname(), buf, pn.Config.DefaultFileMode )
 
     return err
 
 }
+
+func (pn *Pnode) GetConfigPathname() string {
+    return path.Join(pn.Params.BasePath, PnodeConfigFilename)
+}
+
+
+func (pn *Pnode) SetupDirForClient(inClientID []byte) string {
+    clientDir := pn.FSNameEncoding.EncodeToString(inClientID)
+
+    pathname := path.Join(pn.Params.ClientStoragePath, clientDir)
+
+    os.MkdirAll(pathname, pn.Config.DefaultFileMode)
+
+    return pathname
+}
+
 
 
 
@@ -392,6 +406,10 @@ func NewClientSession(in *pservice.SessionRequest) *ClientSession {
 }
 
 
+const (
+    UnlockPersonalKeyring = "/plan/SKI/local/1"
+)
+
 // StartSession implements pservice.PserviceServer
 func (pn *Pnode) StartSession(
     ctx context.Context,
@@ -404,6 +422,31 @@ func (pn *Pnode) StartSession(
     if CR == nil {
         return nil, plan.Errorf(nil, plan.CommunityNotFound, "communityID not found {ID:%v}", in.CommunityId)
     }
+/*
+    keyCrypt, err := CR.ReadMemberFile(in.ClientId, "keyring")
+    if err != nil {
+        return nil, plan.Error(err, plan.KeyringStoreNotFound, "keyring store not found")
+    }
+*/  //
+
+    // See https://github.com/melvincarvalho/gold for TLS in Go 
+    clientDir := SetupDirForClient(in.ClientId)
+
+    skiSession, err := ski.StartSession( 
+        *in.SKIInvocation,
+        ski.GatewayRWAccess,
+        clientDir,
+        nil,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    skiSession.DispatchOp(OpArgs{
+        ski.OpAcceptKeys,
+
+
+
 
     session := NewClientSession(in)
 

@@ -6,7 +6,7 @@ import (
     //"net/http"
     //"log"
     //io"
-    "sync"
+    //"sync"
 	crypto_rand "crypto/rand"
 
 	"github.com/plan-tools/go-plan/ski"
@@ -61,7 +61,7 @@ func (provider *fileProvider) NewSession() *fileSession {
 	session := &fileSession{
         provider,
         NewKeyring(""),
-        map[string]bool{},
+        [ski.NumKeyDomains]map[string]bool{},
         nil,
     }
 	return session
@@ -87,8 +87,11 @@ func (provider *fileProvider) StartSession(
     session.parentProvider = provider
 
     // Bind the request op scope
-    for _, opName := range inPB.AccessScopes {
-        session.allowedOps[opName] = true
+    for i, domain := range inPB.AccessScopes {
+        allowedOpsForDomain := session.allowedOps[i]
+        for _, opName := range domain {
+            allowedOpsForDomain[opName] = true
+        }
     }
 
     provider.sessions = append(provider.sessions, session)
@@ -135,7 +138,7 @@ type fileSession struct {
     parentProvider      *fileProvider
     //KeyRepos            map[plan.CommunityID]KeyRepo
     keyring             *Keyring
-    allowedOps          map[string]bool
+    allowedOps          [ski.NumKeyDomains]map[string]bool
     onSessionEnded      func(inReason string)
 }
 
@@ -152,12 +155,43 @@ func (session *fileSession) EndSession(inReason string, inOnCompletion plan.Acti
     return
 }
 
+func (session *fileSession) CheckPermissionsForOp(
+    inArgs *ski.OpArgs,
+    ) *plan.Perror {
 
+    /*
+    for i, keySpec := inKeySpecs {
+        if keySpec.KeyDomain < 0 || keySpec.KeyDomain > ski.NumKeyDomains {
+            return plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {KeyDomain: %v, PubKey: %v}", keySpec.KeyDomain, keySpec.PubKey)
+        }
+        
+        //allowedOpsForDomain := session.allowedOps[keySpec.KeyDomain]
 
-func (session *fileSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
+    }
+  
 
     if ! session.allowedOps[inArgs.OpName] {
         err := plan.Errorf(nil, plan.InsufficientSKIAccess, "insufficient SKI permissions for op %s", inArgs.OpName)
+        inOnCompletion(nil, err)
+        return
+    }
+    TODO: Implement me? 
+    for i, domain := range inPB.AccessScopes {
+        allowedOpsForDomain := session.allowedOps[i]
+        if allowedOpsForDomain[
+        for _, opName := range domain {
+            allowedOpsForDomain[opName] = true
+        }
+    }
+    */
+
+    return nil
+}
+
+func (session *fileSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
+
+    err := session.CheckPermissionsForOp(inArgs)
+    if err != nil {
         inOnCompletion(nil, err)
         return
     }
@@ -185,9 +219,9 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     {
         switch opArgs.OpName {
 
-            case ski.OpSendKeys: {
-                opArgs.Msg, err = session.encodeSendKeysMsg(opArgs.KeySpecs)
-            }
+            case ski.OpExportNamedKeys:
+                opArgs.Msg, err = session.exportKeysIntoMsg(opArgs.KeySpecs)
+    
         }
 
         if err != nil {
@@ -210,9 +244,10 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
             ski.OpDecrypt,
             ski.OpEncryptFor,
             ski.OpDecryptFrom,
-            ski.OpSendKeys,
-            ski.OpAcceptKeys,
-            ski.OpSign:
+            ski.OpSign,
+            ski.OpExportNamedKeys,
+            ski.OpExportKeyring,
+            ski.OpMergeKeys:
             cryptoKey, err = session.KeyRepo.GetKey(opArgs.CommunityID, opArgs.CryptoKey)
         }
     }
@@ -233,26 +268,30 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     {
         switch opArgs.OpName{
 
-            case ski.OpSign:
+            case 
+            ski.OpSign:
                 msg, err = cryptoPkg.Sign(
                     opArgs.Msg, 
                     cryptoKey.PrivKey)
             
 
-            case ski.OpEncrypt:
+            case 
+            ski.OpEncrypt:
                 msg, err = cryptoPkg.Encrypt(
                     crypto_rand.Reader, 
                     opArgs.Msg, 
                     cryptoKey.PrivKey)
 
-            case ski.OpDecrypt:
+            case 
+            ski.OpDecrypt:
                 msg, err = cryptoPkg.Decrypt(
                     opArgs.Msg, 
                     cryptoKey.PrivKey)
 
             case 
             ski.OpEncryptFor, 
-            ski.OpSendKeys:
+            ski.OpExportNamedKeys,
+            ski.OpExportKeyring:
                 msg, err = cryptoPkg.EncryptFor(
                     crypto_rand.Reader, 
                     opArgs.Msg, 
@@ -261,14 +300,15 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
 
             case 
             ski.OpDecryptFrom,
-            ski.OpAcceptKeys:
+            ski.OpMergeKeys:
                 msg, err = cryptoPkg.DecryptFrom(
                     opArgs.Msg, 
                     opArgs.PeerPubKey,
                     cryptoKey.PrivKey)
     
 
-            case ski.OpGenerateKeys:{
+            case 
+            ski.OpGenerateKeys:{
                 err = session.keyring.GenerateKeys(opArgs.KeySpecs)
                 if err == nil {
                     msg, _ = opArgs.KeySpecs.Marshal()
@@ -309,21 +349,20 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
 
 
 
-func (session *fileSession) encodeSendKeysMsg(
+func (session *fileSession) exportKeysIntoMsg(
     inKeylist []*ski.KeySpec,
     ) ([]byte, *plan.Perror) {
 
-
     var keyListBuf []byte
     {
+        // Make a KeyList that will contain a list of all the keys we're exporting
         keyList := ski.KeyList{
             Label: session.keyring.Label,
             KeysCodec: session.keyring.KeysCodec,
             Keys: make([]*ski.KeyEntry, 0, len(inKeylist)),
         }
 
-        //var perr *plan.Perror
-
+        // Perform thr export
         keysNotFound := session.keyring.ExportKeys(inKeylist, &keyList)
         if len(keysNotFound) > 0 {
             return nil, plan.Errorf(nil, plan.FailedToMarshalAccessGrant, "failed to marshal %d keys", len(keysNotFound))
@@ -351,7 +390,7 @@ func (session *fileSession) encodeSendKeysMsg(
 }
 
 
-func (session *fileSession) decodeAcceptKeysMsg(inMsg []byte) *plan.Perror {
+func (session *fileSession) mergeKetsFromMsg(inMsg []byte) *plan.Perror {
 
     block := plan.Block{}
     err := block.Unmarshal(inMsg)

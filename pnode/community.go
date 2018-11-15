@@ -68,7 +68,6 @@ type CommunityRepo struct {
     //activeSession           ClientSession
 
     DefaultFileMode         os.FileMode
-    DirEncoding             *base64.Encoding
 
     storage                 pdi.StorageSession
     storageProvider         pdi.StorageProvider
@@ -114,21 +113,6 @@ const (
 */
 
 
-/*
-There are two sources of access control information, both stored in a channel's owning access channel.
-   (1)  Default ChannelAccess levels, and
-   (2)  ChannelAccess grants given to explicit community members. 
-
-Note that evne access channels follow the same plumbing, offering a powerful but compact hierarchal permissions schema.
-
-Any channel (or access channel) can either be community-public or private.
-    (a) community-public -- entry body encrypted with a community key and the owning access channel specifies
-                            what permissions are and what users have grants outside of that (e.g. default READ_ACCESS,
-                            users Alice and Bob have READWRITE_ACCESS access, Charlie is set for NO_ACCESS, and Daisy has MODERATOR_ACCESS.
-    (b) private          -- entry body encrypted with the channel key "sent" to users via the channel's access channel.  Like with (a), 
-                            members are granted explicit access levels (listed in ChannelAccess)
-
-*/
 
 type LoadChannelStoreFlags int32
 const (
@@ -139,8 +123,10 @@ const (
 
 
 
-
-
+const (
+    layer1Dir = "Layer I"
+    layer2Dir = "Layer II"
+)
 
 
 func NewCommunityRepo(
@@ -151,7 +137,6 @@ func NewCommunityRepo(
     CR := &CommunityRepo{
         ParentPnode: inParent,
         Info: inInfo,
-        DirEncoding: base64.RawURLEncoding,
         DefaultFileMode: inParent.Config.DefaultFileMode,
         txnsToProcess: make(chan txnInProcess),
     }
@@ -241,7 +226,7 @@ func (CR *CommunityRepo) LoadChannelStore(
 
     CS.Lock()
 
-    CS.channelDir = path.Join(CR.AbsRepoPath, "ch", CR.DirEncoding.EncodeToString(CS.ChannelID[:]))
+    CS.channelDir = path.Join(CR.AbsRepoPath, "ch", CR.ParentPnode.DirNameEncoding.EncodeToString(CS.ChannelID[:]))
 
     if inCreateNew {
 
@@ -329,7 +314,7 @@ func (CR *CommunityRepo) StartService() error {
 
 
     CR.storageProvider = bolt.NewProvider(
-        path.Join(CR.AbsRepoPath, "Layer I"),
+        path.Join(CR.AbsRepoPath, layer1Dir),
         CR.DefaultFileMode,
     )
 
@@ -453,6 +438,42 @@ func (CR *CommunityRepo) StartService() error {
 }
 
 
+func (CR *CommunityRepo) ReadMemberFile(
+    inMemberID []byte, 
+    inFileName string,
+    ) ([]byte, error) {
+
+    pathname := path.Join(
+        CR.AbsRepoPath, 
+        layer2Dir, 
+        CR.DirNameEncoding.EncodeToString(inMemberID[:]),
+        inFileName)
+
+    return ioutil.ReadFile(pathname)
+
+}
+
+
+func (CR *CommunityRepo) WriteMemberFile(
+    inMemberID []byte,
+    inFileName string,
+    inData []byte,
+    ) error {
+
+    pathname := path.Join(
+        CR.AbsRepoPath, 
+        layer2Dir, 
+        CR.DirNameEncoding.EncodeToString(inMemberID[:]),
+        inFileName)
+
+    return ioutil.WriteFile(pathname, inData, CR.DefaultFileMode)
+
+}
+
+
+
+
+
 
 func (CR *CommunityRepo) PublishEntry( inEntry *pdi.EntryCrypt ) {
 
@@ -553,7 +574,7 @@ func (eip *entryInProcess) unpackHeader(
     eip.skiSession.DispatchOp( 
 
         &ski.OpArgs {
-            OpName: ski.OpDecryptFromCommunity,
+            OpName: ski.OpDecrypt,
             CryptoKeyID: plan.GetKeyID(eip.entry.CommunityKeyId),
             Msg: eip.entry.HeaderCrypt,
         }, 
@@ -601,7 +622,7 @@ func (eip *entryInProcess) validateEntry() *plan.Perror {
 
     eip.entryHash = eip.entry.ComputeHash()
 
-    perr = eip.skiProvider.VerifySignature( 
+    perr = eip.skiSession.VerifySignature( 
         eip.entry.Sig,
         eip.entryHash,
         eip.authorEpoch.PubSigningKey,
