@@ -34,28 +34,26 @@ Examples:
     
 */
 
+// Block is a portable, compact, self-describing, nestable information container inspired from HTTP.
 message Block {
 
-    // This is an optional, human-understandable name/label for this Block (i.e. a field-name). 
-    // In general, a Block's label conforms to the context/protocol its being used in or with (if applicable).
+    // An optional, name/label for this Block (i.e. a field-name).
+    // A Block's label conforms to the context/protocol it's being used with (as applicable).
                 string          label                   = 1;
 
-    // Similar to a MIME type, this field self-describes the binary format of Block.content.  
-    // Anyone handed this Block only needs to look a Block's codec in order to accurately process/deserialize its content.
-    // This field is a "multicodec path" -- see: https://github.com/multiformats/multistream
+    // Like a MIME type, this descriptor self-describes the data format of Block.content.
+    // Anyone handed this Block uses this field to accurately process/deserialize its content.
+    // This is a "multicodec path" -- see: https://github.com/multiformats/multistream
                 string          codec                   = 2;
 
-    // This is alternative numerical repesentation of Block.codec
-    // For a list of codes: https://github.com/multiformats/multicodec/blob/master/table.csv
+    // This is a reserved integer alternative to Block.Codec.
+    // See: https://github.com/multiformats/multicodec/blob/master/table.csv
                 uint32          codec_code              = 3;
 
-    // Data of any kind, serialized in conformance with the accompanying codec descriptor (above).
+    // Payload data, serialized in accordance with the accompanying codec descriptors (above).
                 bytes           content                 = 4;
 
-    // In addition to it's label and content, a Block can contain nested "sub" blocks.  A Block's sub blocks
+    // A Block can optionally contain nested "sub" blocks.  A Block's sub-blocks
     //    can be interpreted or employed any way a client or protocol sees fit.
     repeated    Block           subs                    = 5;
 }
-
-
-

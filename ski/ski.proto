@@ -16,14 +16,17 @@ enum KeyType {
 
 enum KeyDomain {
 
+    // Keys scoped outside this community
+    GLOBAL              = 0;
+
     // Keys shared with all other community members
-    COMMUNITY           = 0;
+    COMMUNITY           = 1;
 
     // Keys explicitly shared with select community members (e.g. private channel keys)
-    PEERS               = 1;
+    PEERS               = 2;
 
     // Private keyring -- should never be shared with others, even peers in the community.
-    PERSONAL            = 2;
+    PERSONAL            = 3;
 
 }
 
@@ -71,7 +74,7 @@ message KeyEntry {
 
 
 
-// KeyBundle is a set of KeyEntries
+// KeyBundle packages a set of KeyEntry structs (for one of the above three generally prescibed purposes).
 // When a KeyBundle is serialized, it's identified by the codec name ski.KeyBundleProtobufCodec
 // See KeyEntry mode comments.
 message KeyBundle {
