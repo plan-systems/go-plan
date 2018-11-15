@@ -37,6 +37,32 @@ enum ChannelAccess {
 }
 
 
+enum EntryStatus {
+
+    UNSPECIFIED                 = 0;
+
+    // The given entry is considered authetic and a live operating part of the local community repo.
+    LIVE                        = 1;
+
+    // The given entry is currently in conflict with another entry having equal authority.
+    AMBIGUOUS_CONFLICT          = 2;
+
+    // The given entry is deferred as a result of one of many possibilies encountered during 
+    //    Channel Entry Validation (see design-docs/PLAN-Proof-of-correctness.md).
+    DEFERRED                    = 3;
+
+    // The given entry is currently in conflict with its channel's parent access control channel.
+    DISALLOWED                  = 4;
+
+    // The given entry has been confirmed to be associated with unauthorized activity, a security breach, or inappropriate behavior.
+    DISBARRED                   = 5;
+
+    // One or more parts of this entry are not self-consistent or does not self-validate.
+    MALFORMED                   = 6;
+
+}
+
+
 /**********************************************************************************************************************
 EntryOp specifies a specific flavor of PDI transaction.  Although the PLAN UI will not allow the user to things 
 she doesn't have permission to do, every pnode in the community rigorously verifies that the author of any given 
