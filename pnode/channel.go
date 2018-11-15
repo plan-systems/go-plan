@@ -88,10 +88,12 @@ const (
 type ChannelActionVerb string
 const (
 
-    // VerbChannelGenesis creates a new channel, specifying a complete set of channel properties via an encoded form of ChannelProperties
+    // VerbChannelGenesis creates a new channel, specifying a complete set of channel properties
+    //     via an encoded form of ChannelProperties.
     VerbChannelGenesis              = "genesis"
 
-    // VerbChannelSetProperties sets a specified number of channel properties.  .VerbData is a json encoded list of param keys and new values.
+    // VerbChannelSetProperties sets a specified number of channel properties.  
+    //     .VerbData is a json encoded list of param keys and new values.
     VerbChannelSetProperties        = "set"
 
 )
@@ -103,7 +105,8 @@ type ChannelStore struct {
 
     ChannelID               plan.ChannelID
 
-    // PrevAccessTime specifies when this channel store was last accessed, used to know how long a channel store has been idle.
+    // PrevAccessTime specifies when this channel store was last accessed, 
+    //    used to know how long a channel store has been idle.
     PrevActivityTime        plan.Time
     
     // AccessRank specifies what index this channel store is in its parent ChannelStoreGroup
@@ -130,8 +133,7 @@ type ChannelStore struct {
 
 
 
-// ACStore represents an permissions/access control container.  Entries to a AccessChannelID appear as
-//     a given public 
+// ACStore represents an permissions/access control container.  
 type ACStore struct {
 
     // This represents the db that contains a sequential list of 
@@ -148,7 +150,8 @@ type ACStore struct {
 
 
 
-// ChannelAdminAction is a record of a change of one or more channel properties *or* an action associated with the channel (e.g. channel rekey event) 
+// ChannelAdminAction is a record of a change of one or more channel properties *or* 
+//     an action associated with the channel (e.g. channel rekey event).
 // During a channel's lifetime, it be set so that a different access channel governs permissions for this channel.
 type ChannelAdminAction struct {
 
@@ -251,10 +254,12 @@ func (CS *ChannelStore) OpenIndexDB() error {
         }
     
         // Note that we don't use a hash index since we have EntryLookupByTime.
-        // Since all entries have an associated timestamp, an entry can be found in O(1) time (as long as its hashname is accompanied by its timestamp,
-        //     which is ok since incoming entries will always include the author timestamp.
-        // This is reasonable and saves the trouble of maintaining a big index plus the lookup time.  Plus the chance of a hash collision goes down 
-        //    since the collision would have to occur during the same second UTC!
+        // Since all entries have an associated timestamp, an entry can be found in O(1) time 
+        //     (as long as its hashname is accompanied by its timestamp, which is ok since 
+        //     incoming entries will always include the author timestamp.
+        // This is reasonable and saves the trouble of maintaining a big index plus the lookup time.  
+        //    Plus the chance of a hash collision goes down since the collision would have
+        //    to occur during the same second UTC!
         sqlStmt := `
         CREATE TABLE IF NOT EXISTS ChannelEntries (
             tsAuthor            BIGINT,         /* Unix timestamp bore by the entry itself                      */
@@ -359,39 +364,5 @@ func (CS *ChannelStore) WriteEntryToStorage( inEntry *pdi.EntryCrypt, inHdr *pdi
 
 
 
-
-
-
-/*
-
-
-
-// A channel access control list (PDIEntry.accessCtrlRef)
-//     - Effectively allows a composite user and group access control mapping be built (in effect specifying users and groups that have read, write, ownership permission).
-//     - Maps to a keyring entry in each user's SKI containing the corresponding master key to encrypt/decrypt channel entries when that ACL was in effect
-//     - Any community user can be...
-//          ...issued the channel msg master key (read access)
-//              - Entries contain the user's pubkey and their "verify" pubkey (allowing signatures to be authenticated)
-//              - These users are issued new master keys if/when a channel moves to newly generated access control list
-//          ...placed on the channel's write list (write access)
-//              - Although a user could hack their client so that they're on this write list, other nodes will not have this alteration and will reject the entry.
-//          ...placed on a ban list.  Similar to the a write access hack, a banned user's entry will be rejected by other swarm nodes.
-//              - This allows a channel to be offer community-public write access, except for explicitly named user or group id.
-
-
-
-*/
-
-
-
-
-// Every Channel keeps the following files:
-//    a) channel data tome (unstructured binary file)
-//        - the data body of incoming channel entries is first appended to this file
-//        - read+append access to this file is used to optimize performance and caching (since data is never altered, only appended)
-//    b) channel entry index (sqlite db)
-//        - for each channel entry: timestamp_secs (int64, ascending-indexed),  entry hashname (TINYTEXT), tome_file_pos, tome_entry_len
-//    c) list of the access control list history and when each one went into effect -- so it knows what to reject
-//        - when a user is "added" to the channel, the owner must grant master key acces for each rev of the control list into the past (or as far as the owner wants to go)
 
 
