@@ -134,6 +134,10 @@ service StorageProvider {
 
     // Commits the given txn body to this storage, using the signing key obtained from step (2) of StartSession().
     rpc         CommitTxn(CommitRequest)                        returns (stream pdi.StorageTxn);
+
+    // Returns a continuous stream of status reports indicating server health, connectivity, stats, etc. 
+    rpc         ReportStatus(ReportStatusPB)                    returns (stream StatusReport);
+
 }
 
 
