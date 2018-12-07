@@ -7,16 +7,34 @@
 P  L  A  N etwork
 ```
 
-[PLAN](http://plan.tools) is an multi-purpose communications and logistics planning tool for individuals and organizations. 
+[PLAN](http://plan-systems.org) is an multi-purpose communications and logistics planning tool for individuals and organizations. 
 
-# go-plan
+## About
 
-`go-plan` is the official benchmark implementation of PLAN's p2p client-serving node.
+`go-plan` is the official reference implementation of PLAN's peer-to-peer backend daemon/node.  Dubbed `pnode`, its primary functions are to:
+- Securely replicate community data with other community nodes
+- Provide "serverless" scalable bandwidth and storage for PLAN communities
+- Securely host the [plan-unity](https://github.com/plan-systems/plan-unity) clients of community members
 
-PLAN's [design and engineering documentation](https://github.com/plan-tools/design-docs) lays out PLAN's architecture and shows how each project fits into the whole.
+To understand the purpose and role of this project, see PLAN's [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
 
-PLAN Website: http://plan.tools
+## Project Log
 
-## License
 
-[GPL-v3](https://www.gnu.org/licenses/gpl-3.0.en.htmlm)
+|    Date     | Status                                                          |
+|:-----------:|-----------------------------------------------------------------|
+| 07 Dec 2018 | Architecture docs complete; resuming active development         |
+| 10 Sep 2018 | Pausing active development to work on PLAN PoC                  |
+| 15 Aug 2018 | SKI makeover following permissions model proof of concept       |
+| 04 Jul 2018 | Active development begins                                       |
+
+
+
+## Links
+
+|                           |                                                          |
+|--------------------------:|----------------------------------------------------------|
+|                 Team Lead | [Drew O'Meara](mailto:drew2019@plan-systems.org)         |
+| Design & Engineering Docs | https://github.com/plan-systems/design-docs              |
+|              PLAN Website | http://plan-systems.org                                  |
+|                   License | [GPL-v3](https://www.gnu.org/licenses/gpl-3.0.en.htmlm)  |
