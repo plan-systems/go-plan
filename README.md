@@ -16,7 +16,7 @@ P  L  A  N etwork
 - Provide "serverless" scalable bandwidth and storage for PLAN communities
 - Securely host the [plan-unity](https://github.com/plan-systems/plan-unity) clients of community members
 
-To understand the purpose and role of this project, see PLAN's [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
+To better understand this project, see PLAN's [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
 
 ## Project Log
 
