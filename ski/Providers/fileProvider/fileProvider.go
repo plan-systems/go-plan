@@ -9,8 +9,8 @@ import (
     //"sync"
 	crypto_rand "crypto/rand"
 
-	"github.com/plan-tools/go-plan/ski"
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/ski"
+	"github.com/plan-systems/go-plan/plan"
     
 )
 
@@ -390,7 +390,7 @@ func (session *fileSession) exportKeysIntoMsg(
 }
 
 
-func (session *fileSession) mergeKetsFromMsg(inMsg []byte) *plan.Perror {
+func (session *fileSession) mergeKeysFromMsg(inMsg []byte) *plan.Perror {
 
     block := plan.Block{}
     err := block.Unmarshal(inMsg)

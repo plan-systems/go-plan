@@ -18,11 +18,11 @@ import (
 
     //"github.com/tidwall/redcon"
 
-    "github.com/plan-tools/go-plan/pdi/StorageProviders/bolt"
+    "github.com/plan-systems/go-plan/pdi/StorageProviders/bolt"
 
-    "github.com/plan-tools/go-plan/pdi"
-    "github.com/plan-tools/go-plan/plan"
-    "github.com/plan-tools/go-plan/ski"
+    "github.com/plan-systems/go-plan/pdi"
+    "github.com/plan-systems/go-plan/plan"
+    "github.com/plan-systems/go-plan/ski"
 
     // This inits in with sql, so no named import is needed
     _ "github.com/mattn/go-sqlite3"

@@ -6,8 +6,8 @@ import (
     //"net/http"
     //"log"
     "io"
-	"github.com/plan-tools/go-plan/ski"
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/ski"
+	"github.com/plan-systems/go-plan/plan"
     
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"

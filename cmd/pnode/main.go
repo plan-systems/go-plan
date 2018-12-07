@@ -6,7 +6,7 @@ import (
     "flag"
     "log"
 
-    "github.com/plan-tools/go-plan/pnode"
+    "github.com/plan-systems/go-plan/pnode"
 
 )
 

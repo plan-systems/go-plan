@@ -8,11 +8,11 @@ import (
 
     "testing"
 
-	"github.com/plan-tools/go-plan/ski"
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/ski"
+	"github.com/plan-systems/go-plan/plan"
 
 
-	"github.com/plan-tools/go-plan/ski/Providers/nacl"
+	"github.com/plan-systems/go-plan/ski/Providers/nacl"
 
 )
 

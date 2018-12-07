@@ -13,8 +13,8 @@ import (
     "sync"
     "sync/atomic"
 
-	"github.com/plan-tools/go-plan/pdi"
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/pdi"
+	"github.com/plan-systems/go-plan/plan"
 
 	"github.com/boltdb/bolt"
 )
@@ -214,7 +214,7 @@ func (session *boltSession) readerWriter() {
             wakeTimer = nil
         }
 
-        // FIRST, choose requests made via RequestTxns() and CommitTxns(), THEN make incremental progress frorm the read head.
+        // FIRST, choose requests made via RequestTxns() and CommitTxns(), THEN make incremental progress from the read head.
         select {
             case batch := <- session.txnBatchInbox:
 
@@ -264,7 +264,7 @@ func (session *boltSession) readerStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.S
 
         err = txn.UnmarshalWithOptionalBody(txnBuf, true)
         if err != nil {
-            err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
+            err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarshal() failed")
         } else {
             if ! session.readheadPos.Equals(txn.TimeCommitted, txn.TxnName) {
                 err = plan.Errorf(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed for txn %v (expected %v)", txn.TxnName, session.readheadPos[:])
@@ -314,7 +314,7 @@ func (session *boltSession) readTxns(tx *bolt.Tx, bucket *bolt.Bucket, txnsReque
 
             err := txn.UnmarshalWithOptionalBody(txnBuf, req.IncludeBody)
             if err != nil {
-                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
+                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarshal() failed")
             } else {
                 if txn.TimeCommitted != req.TimeCommitted || bytes.Compare(txn.TxnName, req.TxnName) != 0 {
                     err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
@@ -514,10 +514,10 @@ func (session *boltSession) readBurst() {
 
             err = txn.UnmarshalWithOptionalBody(txnBuf, req.IncludeBody)
             if err != nil {
-                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
+                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarshal() failed")
             } else {
                 if txn.TimeCommitted != req.TimeCommitted || bytes.Compare(txn.TxnName, req.TxnName) != 0 {
-                    err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verificiation failed")
+                    err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
                 }
             }
 
@@ -743,10 +743,10 @@ func (session *boltSession) readBatch(inBatch *txnBatch) {
 
             err = txn.UnmarshalWithOptionalBody(txnBuf, req.IncludeBody)
             if err != nil {
-                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarhal() failed")
+                err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn.Unmarshal() failed")
             } else {
                 if txn.TimeCommitted != req.TimeCommitted || bytes.Compare(txn.TxnName, req.TxnName) != 0 {
-                    err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verificiation failed")
+                    err = plan.Error(err, plan.FailedToUnmarshalTxn, "StorageTxn verification failed")
                 }
             }
 
@@ -949,7 +949,7 @@ func (tk *timeSortableKey) Equals(inTime int64, inTxnName []byte) bool {
 
 
 
-// Increment "adds 1" to a TimeSortableKey, alloing a search routine to increment to the next possible hashname.
+// Increment "adds 1" to a TimeSortableKey, allowing a search routine to increment to the next possible hashname.
 // Purpose is to increment.  E.g.
 //   ... 39 00 => ... 39 01
 //   ... 39 01 => ... 39 02
@@ -957,7 +957,7 @@ func (tk *timeSortableKey) Equals(inTime int64, inTxnName []byte) bool {
 //   ... 39 ff => ... 3A 00
 func (tk *timeSortableKey) Increment() {
 
-	// pos says which byte-significan't digit we're on -- start at the least signigicant
+	// pos says which byte-significan't digit we're on -- start at the least significant
 	pos := timeSortableKeySz - 1
 	for {
 
@@ -975,7 +975,7 @@ func (tk *timeSortableKey) Increment() {
 /*
 
 // This allows efficient time-based sorting of StorageTxn hashnames.  For a hash collision to occur with these sizes,
-//     the txns would have to occur during the *same* second AND be 1 in 10^77 (AND would have to occur in the *same* communty)
+//     the txns would have to occur during the *same* second AND be 1 in 10^77 (AND would have to occur in the *same* community)
 
 
 

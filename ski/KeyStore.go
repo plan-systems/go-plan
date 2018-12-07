@@ -4,7 +4,7 @@ import (
     "sync"
 	crypto_rand "crypto/rand"
 
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/plan"
 
 )
 
@@ -199,7 +199,7 @@ type KeyStore struct {
     ByCommunity   map[plan.CommunityID]*KeyringSet
 }
 
-// FetchKeyrings returns the KeyringSet associated with the given communuty ID 
+// FetchKeyrings returns the KeyringSet associated with the given community ID 
 func (keyStore *KeyStore) FetchKeyrings(
     inCommunityID []byte,
 ) (*KeyringSet, *plan.Perror) {

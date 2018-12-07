@@ -1,6 +1,6 @@
 # ski
 --
-    import "github.com/plan-tools/go-plan/ski"
+    import "github.com/plan-systems/go-plan/ski"
 
 Package ski is a reference implementation of the SKI plugin
 

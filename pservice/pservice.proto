@@ -6,9 +6,9 @@ syntax = "proto3";
 
 package pservice;
 
-import "github.com/plan-tools/go-plan/pdi/pdi.proto";
-//import "github.com/plan-tools/go-plan/ski/ski.proto";
-import "github.com/plan-tools/go-plan/plan/plan.proto";
+import "github.com/plan-systems/go-plan/pdi/pdi.proto";
+//import "github.com/plan-systems/go-plan/ski/ski.proto";
+import "github.com/plan-systems/go-plan/plan/plan.proto";
 
 
 
@@ -102,7 +102,7 @@ PLAN's "community-private" compartmentalization is a major feature of PLAN that 
 
 message MemberInfoRequest {
 
-    // Identifes which community member
+    // Identifies which community member
                 bytes               member_id               = 1;
 
 }
@@ -126,7 +126,7 @@ service StorageProvider {
     // Session start:
     //    0) On StorageProvider node initial setup, it hold a pub/private key pair.  
     //    1) When a client connects, it encrypts the member's storage txn signing key with the StorageProvider's pub key.
-    //    2) The node decrypts the challenge using its private key, and now has the abilty to sign new txns.
+    //    2) The node decrypts the challenge using its private key, and now has the ability to sign new txns.
     rpc         StartSession(SessionRequest)                    returns (SessionInfo);
 
     // Requests a sequence of txns starting with the specified time or txn name.
@@ -148,7 +148,7 @@ message CommitRequest {
                 plan.Block          body                    = 1;
 
     // This is a signature for CommitRequest.Body, using the signing key associated with the client of the current session.
-    // Before a StorageProvider will generate a txn, it will first verfify the author of who's doing the commit is a
+    // Before a StorageProvider will generate a txn, it will first verify the author of who's doing the commit is a
     //    valid and legit community member.  
     //            bytes               body_sig                = 2;
 
@@ -202,7 +202,7 @@ message CommunitySessionRequest {
     // Specifies which scopes are being requested 
     repeated    PserviceScope   service_scopes          = 4;
 
-    // Keys, tokens, info, params passed to ski.Provider.StartSession(), allo
+    // Keys, tokens, info, params passed to ski.Provider.StartSession()
                 plan.Block      SKI_invocation          = 5;
 }
 
@@ -225,7 +225,7 @@ message SessionRequest {
     // Specifies which scopes are being requested 
     repeated    PserviceScope   service_scopes          = 4;
 
-    // Keys, tokens, info, params passed to ski.Provider.StartSession(), allo
+    // Keys, tokens, info, params passed to ski.Provider.StartSession()
                 plan.Block      SKI_invocation          = 5;
 
 }

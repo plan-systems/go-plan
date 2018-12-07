@@ -17,6 +17,8 @@ func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 ** Perror / plan.Error()
 **/
 
+// GUI error philosophy: errors can be suppressed by type or by item that they are for.
+
 // Perror is PLAN's common error struct.  Perror.Code allows easy matching while allowing error strings to contain useful contextual information.
 type Perror struct {    
 	Code int32
@@ -195,7 +197,7 @@ const (
 	// FailedToMarshalAccessGrant means an error occurred while encoding a PDI security access grant
 	FailedToMarshalAccessGrant
 
-	// FailedToDecryptData means either the key or buffer to to be decrypted failed verfication,
+	// FailedToDecryptData means either the key or buffer to to be decrypted failed verification,
 	FailedToDecryptData
 
     // VerifySignatureFailed means either the given signature did not match the given digest.

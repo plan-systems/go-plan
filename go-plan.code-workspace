@@ -2,6 +2,12 @@
     "folders": [
         {
             "path": "."
+        },
+        {
+            "path": "../design-docs"
+        },
+        {
+            "path": "../plan-protobufs"
         }
     ],
     "settings": {

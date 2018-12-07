@@ -14,9 +14,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/plan-tools/go-plan/pdi"
-	"github.com/plan-tools/go-plan/pdi/StorageProviders/bolt"
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/pdi"
+	"github.com/plan-systems/go-plan/pdi/StorageProviders/bolt"
+	"github.com/plan-systems/go-plan/plan"
 )
 
 var gTesting *testing.T

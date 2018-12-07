@@ -5,7 +5,7 @@ package pdi
 import (
     "sync"
 
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/plan"
 
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 )

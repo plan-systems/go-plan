@@ -1,4 +1,4 @@
-package: github.com/plan-tools/go-plan
+package: github.com/plan-systems/go-plan
 import:
 - package: github.com/ethereum/go-ethereum/common/hexutil
 - package: github.com/ethereum/go-ethereum/crypto/sha3

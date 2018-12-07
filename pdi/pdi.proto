@@ -1,10 +1,10 @@
-// See plan-tools/plan-protobuf/README.md
+// See plan-systems/plan-protobuf/README.md
 
 syntax = "proto3";
 
 package pdi;
 
-import "github.com/plan-tools/go-plan/plan/plan.proto";
+import "github.com/plan-systems/go-plan/plan/plan.proto";
 
 
 /**********************************************************************************************************************
@@ -41,13 +41,13 @@ enum EntryStatus {
 
     UNSPECIFIED                 = 0;
 
-    // The given entry is considered authetic and a live operating part of the local community repo.
+    // The given entry is considered authentic and a live operating part of the local community repo.
     LIVE                        = 1;
 
     // The given entry is currently in conflict with another entry having equal authority.
     AMBIGUOUS_CONFLICT          = 2;
 
-    // The given entry is deferred as a result of one of many possibilies encountered during 
+    // The given entry is deferred as a result of one of many possibilities encountered during 
     //    Channel Entry Validation (see design-docs/PLAN-Proof-of-correctness.md).
     DEFERRED                    = 3;
 
@@ -199,7 +199,7 @@ message ChannelEpoch {
     // If set, entries_are_locked must/will always be true.
                 bool            entries_are_locked_forever  = 8;
 
-    // If set, pnodes with web services running will attempt to share this channel to outside the community
+    // If set, nodes with web services running will attempt to share this channel to outside the community
                 bool            is_externally_shared        = 9;
                         
     /*  If set, this channel can be used to validate EntryOps applied to other channels (including other access channels).
@@ -330,7 +330,7 @@ enum TxnStatus {
     // The txn has been committed and has been confirmed as stored (but could still potentially be reverted)
     COMMITTED                   = 8;
 
-    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equiivalent state to AWAITING_COMMIT)
+    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equivalent state to AWAITING_COMMIT)
     REVOKED                     = 9;
 
     // The txn has been committed, confirmed as stored, and faces no possibility of being reverted.
@@ -343,8 +343,8 @@ enum TxnStatus {
 message StorageTxn {
 
     // Issued by the storage layer (not storage clients) some time after StorageSession.Commit()
-    // Since a StorageProvier creates/assigns txn names, they can be any length (typically 8 to 32 bytes),
-    //    but the length is *never* changes when a StorageProvier inits a new repo.
+    // Since a StorageProvider creates/assigns txn names, they can be any length (typically 8 to 32 bytes),
+    //    but the length is *never* changes when a StorageProvider inits a new repo.
                 bytes           txn_name                    = 1;
 
     // Unix timestamp of when this txn was committed for storage (0 if not committed)

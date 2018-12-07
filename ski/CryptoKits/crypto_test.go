@@ -7,9 +7,9 @@ import (
 
 	"testing"
 
-	"github.com/plan-tools/go-plan/ski"
+	"github.com/plan-systems/go-plan/ski"
 
-	"github.com/plan-tools/go-plan/ski/CryptoKits/nacl"
+	"github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 )
 
 var gTesting *testing.T

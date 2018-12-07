@@ -51,7 +51,17 @@ Maybe pnode and pgateway are fused and it's storage layer this is remote (or is 
     8)  When the client authors a new entry, it's sent to pnode where it is encrypted and forwarded onto pnode for processing.  
 
 
-
+0) Unity client starts
+    a) launches local pgateway
+    b) which community IDs to unlock (and pw for each)
+    c) pgateway.StartSession() w/ pws encrypted by pgateway's private key (a KeyList with an SKI invocation that makes is a key loaders)
+1) pgateway instantiates new SKI provider based on 0.(c)
+    a) provider loads keyrings from disk, dencrypting each w/ the given pws
+    b) pgateway now has full user keyrings
+2) gateway logs into pnode(s), passing it itx txn signing key 
+3) newly authored entries are authored in the client and sent to pgateway
+4) new entries are encrypted and signed with the gateway's keys
+5) new entries are packaged into a plan.Block and committed to the StorageProvider. 
 */
 
 

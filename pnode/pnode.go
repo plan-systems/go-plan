@@ -19,9 +19,9 @@ import (
 
     //"github.com/tidwall/redcon"
 
-    "github.com/plan-tools/go-plan/plan"
-    "github.com/plan-tools/go-plan/ski"
-    //"github.com/plan-tools/go-plan/ski/Providers/nacl"
+    "github.com/plan-systems/go-plan/plan"
+    "github.com/plan-systems/go-plan/ski"
+    //"github.com/plan-systems/go-plan/ski/Providers/nacl"
 
     // This inits in with sql, so no named import is needed
     _ "github.com/mattn/go-sqlite3"
@@ -33,7 +33,7 @@ import (
     //"github.com/stretchr/testify/assert"
 
 
-    "github.com/plan-tools/go-plan/pservice"
+    "github.com/plan-systems/go-plan/pservice"
 
     //"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -216,7 +216,7 @@ func (pn *Pnode) Run() {
     // For each community repo a pnode is hosting, start service for that community repo.
     // By "start service" we mean that each PDI layer that repo is configured with starts up (e.g. Ethereum private distro) such that:
     //     (a) new PDI entries *from* that layer are handed over process processing
-    //     (b) newly authored entried from the PLAN client are handed over to the PDI layer to be replicated to other pnodes 
+    //     (b) newly authored entries from the PLAN client are handed over to the PDI layer to be replicated to other nodes 
     //         also carrying that community.
     for _, CR := range pn.CRbyID {
         CR.StartService()
@@ -450,7 +450,7 @@ func (pn *Pnode) StartSession(
 
     session := NewClientSession(in)
 
-    // TODO secuitry checks to prevent DoS
+    // TODO security checks to prevent DoS
     pn.ActiveSessions.InsertSession(session)
     
     sessionInfo := &pservice.SessionInfo{

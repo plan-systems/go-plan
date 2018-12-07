@@ -3,7 +3,7 @@ package pdi
 import (
 	"fmt"
 
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/plan"
 )
 
 /*****************************************************
@@ -11,13 +11,16 @@ import (
 **/
 
 // StorageProvider wraps a persistent storage service "producer".  The StorageProvider+StorageSession model is designed
-//    to wrap ANY kind of append-only database, particularly a blockchain.  Further this interface design allows the
+//    to wrap ANY kind of append-only database, particularly a distributed ledger.  Further, this interface design allows the
 //    provider to be remote (and serve requests via RPC).
 type StorageProvider interface {
 
 	// StartSession initiates a new session with a given db/repo identifier (typically a UUID or hashname)
+    // inDatabaseUUID can be any length binary identifier (typically 16-32 bytes) and is used to resume access
+    //    to a previously access db.
 	StartSession(
-		inDatabaseID []byte,
+		inDatabaseUUID []byte,
+        inParams *plan.Block,
 	) (StorageSession, error)
 }
 
@@ -26,7 +29,7 @@ type StorageProvider interface {
 **/
 
 // StorageSession wraps a persistent storage (or replicating) service "consumer"
-// All calls to this interface are implemented to be THREADSAFE.
+// All calls to this interface are considered THREADSAFE.
 type StorageSession interface {
 
 	// IsReady reports if this session is open and ready to receive requests
@@ -45,7 +48,7 @@ type StorageSession interface {
 	GetBookmark() (*plan.Block, error)
 
 	// CommitTxn submits the given block to the storage implementation for publishing.  Once the inTxnBody has been committed,
-	//    a corresponding StorageTxn will appear in the session's StorageMsg channel with status.
+	//    a corresponding StorageTxn will appear in the session's outgoing StorageMsg channel with status.
 	CommitTxn(inTxnBody *plan.Block) (RequestID, error)
 
 	// EndSession ends this session, resulting in the sessions parent provider signal the session's end.

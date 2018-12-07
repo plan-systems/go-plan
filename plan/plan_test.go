@@ -1,5 +1,5 @@
 
-package plan // import "github.com/plan-tools/go-plan/plan"
+package plan // import "github.com/plan-systems/go-plan/plan"
 
 
 import (

@@ -5,7 +5,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/plan-tools/go-plan/plan"
+	"github.com/plan-systems/go-plan/plan"
 )
 
 // NumKeyDomains is the number of possible ski.KeyDomain values (increment the last enum)
@@ -185,11 +185,11 @@ const (
 
 	// OpExportNamedKeys exports the KeyEntry for each corresponding element in OpArgs.KeySpecs into a ski.KeyBundle.  
     //     This KeyBundle is then marshaled and encrypted using the asymmetric key specified by OpArgs.CryptoKey, 
-    //     and than retuned in OpArgs.Msg.Content.
+    //     and than returned in OpArgs.Msg.Content.
 	// Note: if a key is not found (or is invalidly specified), this entire op will error out.
 	OpExportNamedKeys = "export_named_keys"
 
-	// OpExportKeyring operates like OpExportNamedKeys except the entire keyring specfified by OpArgs.KeySpecs.Specs[0].KeyDomain is exported.
+	// OpExportKeyring operates like OpExportNamedKeys except the entire keyring specified by OpArgs.KeySpecs.Specs[0].KeyDomain is exported.
 	OpExportKeyring = "export_keyring"
 
 	/*****************************************************
@@ -230,7 +230,7 @@ type CryptoKit struct {
 	CryptoKitID CryptoKitID
 
 	// Pre: ioEntry.KeyType, .KeyDomain, .CryptoKitID, and .TimeCreated is already set.
-	// inRequestedKeyLen is the requested length of the private key. It can be ignored if this implmentation has a fixed key length.
+	// inRequestedKeyLen is the requested length of the private key. It can be ignored if this implementation has a fixed key length.
 	GenerateNewKey func(
 		inRand io.Reader,
 		inRequestedKeyLen int,

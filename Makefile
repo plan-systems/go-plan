@@ -9,7 +9,7 @@ help:
 	@echo "This project uses glide to manage its dependencies. Download the"
 	@echo "latest version from https://github.com/Masterminds/glide/releases"
 	@echo "Targets in this Makefile will set the GOPATH appropriately if the"
-	@echo "repository is within ./src/github.com/plan-tools/go-plan"
+	@echo "repository is within ./src/github.com/plan-systems/go-plan"
 	@echo "Otherwise... good luck."
 	@echo "GOPATH=$(GOPATH)"
 
@@ -46,7 +46,7 @@ PKG ?=
 ifeq ($(PKG), )
 PKG := ./...
 else
-PKG := github.com/plan-tools/go-plan/$(PKG)
+PKG := github.com/plan-systems/go-plan/$(PKG)
 endif
 
 test:
