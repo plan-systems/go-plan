@@ -12,7 +12,7 @@ P  L  A  N etwork
 
 ## About
 
-`go-plan` is the official reference implementation of PLAN's peer-to-peer backend daemon/node.  Dubbed `pnode`, its primary functions are to:
+`go-plan` is the official reference implementation of PLAN's peer-to-peer backend daemon/node.  Dubbed "pnode", its primary functions are to:
 - Securely replicate community data with other community nodes
 - Provide "serverless" scalable bandwidth and storage for PLAN communities
 - Securely host the [plan-unity](https://github.com/plan-systems/plan-unity) clients of community members
