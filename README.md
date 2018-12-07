@@ -7,8 +7,7 @@
 P  L  A  N etwork
 ```
 
-[PLAN](http://plan-systems.org) is a free, multi-purpose collaboration and logistics planning tool for organizations and communities. To better understand PLAN and the role of `go-plan`, see the [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
-
+[PLAN](http://plan-systems.org) is a free and open platform for groups to securely communicate, collaborate, and coordinate projects and activities. To better understand PLAN and the role of `plan-protobufs`, see the [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
 
 ## About
 
