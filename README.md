@@ -7,7 +7,8 @@
 P  L  A  N etwork
 ```
 
-[PLAN](http://plan-systems.org) is an multi-purpose communications and logistics planning tool for individuals and organizations. 
+[PLAN](http://plan-systems.org) is a free multi-purpose communications and logistics planning tool for organizations and communities. To better understand PLAN and the role of `go-plan`, see the [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
+
 
 ## About
 
@@ -16,7 +17,6 @@ P  L  A  N etwork
 - Provide "serverless" scalable bandwidth and storage for PLAN communities
 - Securely host the [plan-unity](https://github.com/plan-systems/plan-unity) clients of community members
 
-To better understand this project, see PLAN's [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
 
 ## Project Log
 
