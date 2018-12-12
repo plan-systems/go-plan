@@ -2,9 +2,6 @@
 package ski
 
 import (
-	"io"
-	"sync"
-
 	"github.com/plan-systems/go-plan/plan"
 )
 
@@ -21,10 +18,6 @@ type Session interface {
 
 	// DispatchOp implements a complete set of SKI operations
 	DispatchOp(inOpArgs *OpArgs, inOnCompletion OpCompletionHandler)
-
-	//MergeKeys(inKeyList KeyList, inDst KeyPath)
-
-	//ExportKeys(inDst KeyPath)
 
 	// EndSession ends this SKI session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
 	// Following a call to EndSession(), no more references to this session should be made.
@@ -61,15 +54,15 @@ type Provider interface {
 **/
 
 // ProviderRegistry maps provider names to implementations
-var providerRegistry = map[string]Provider{}
+var gProviderRegistry = map[string]Provider{}
 
 // RegisterProvider registers the given provider so it can be invoked via ski.StartSession()
 func RegisterProvider(inProvider Provider) error {
 	istr := inProvider.InvocationStr()
-	if providerRegistry[istr] != nil {
+	if gProviderRegistry[istr] != nil {
 		return plan.Errorf(nil, plan.InvocationAlreadyExists, "the ski invocation %s already exists", istr)
 	}
-	providerRegistry[istr] = inProvider
+	gProviderRegistry[istr] = inProvider
 	return nil
 }
 
@@ -78,7 +71,7 @@ func StartSession(
 	inPB StartSessionPB,
 ) (Session, *plan.Perror) {
 
-	provider := providerRegistry[inPB.Invocation.Label]
+	provider := gProviderRegistry[inPB.Invocation.Label]
 	if provider == nil || provider.InvocationStr() != inPB.Invocation.Label {
 		return nil, plan.Errorf(nil, plan.InvocationNotAvailable, "ski.StartSession() failed to find provider for invocation %s", inPB.Invocation.Label)
 	}
@@ -99,19 +92,20 @@ type AccessScopes []string
 var (
 
 	// ContentReadAccess only allows the client to decrypt data
-	ContentReadAccess AccessScopes = []string{
+	ContentReadAccess = AccessScopes{
 		OpDecrypt,
 		OpDecryptFrom,
 	}
 
 	// ContentAuthoringAccess allows the client to encrypt and sign data
-	ContentAuthoringAccess = []string{
+	ContentAuthoringAccess = AccessScopes{
 		OpEncrypt,
 		OpEncryptFor,
         OpSign,
 	}
 
-    AddKeysAccess = []string {
+    // AddKeysAccess allows keys to be imported and generated
+    AddKeysAccess = AccessScopes{
 		OpImportKeys,
 		OpGenerateKeys,
     }
@@ -215,135 +209,7 @@ const (
 	// KeyBundleProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
 	KeyBundleProtobufCodec = "/plan/ski/KeyBundle/1"
 
-	// KeySpecsProtobufCodec names the serialization codec for ski.KeySpecs (implemented via compilation of ski.proto)
-	KeySpecsProtobufCodec = "/plan/ski/KeySpecs/1"
-
     // KeysNotImportedLabel is the label used for a serialized KeyBundle when OpImportKeys encounters keys it couldn't import.
     KeysNotImportedLabel = "keys_not_imported"
 
 )
-
-// CryptoKit is a generic pluggable interface that any crypto package can implement.
-// It can even be partially implemented (just set nil values for funcs not implemented).
-// All calls are assumed to be threadsafe.
-type CryptoKit struct {
-	CryptoKitID CryptoKitID
-
-	// Pre: ioEntry.KeyType, .KeyDomain, .CryptoKitID, and .TimeCreated is already set.
-	// inRequestedKeyLen is the requested length of the private key. It can be ignored if this implementation has a fixed key length.
-	GenerateNewKey func(
-		inRand io.Reader,
-		inRequestedKeyLen int,
-		ioEntry *KeyEntry,
-	) *plan.Perror
-
-	/*****************************************************
-	** Symmetric encryption
-	**/
-
-	Encrypt func(
-		inRand io.Reader,
-		inMsg []byte,
-		inKey []byte,
-	) ([]byte, *plan.Perror)
-
-	Decrypt func(
-		inMsg []byte,
-		inKey []byte,
-	) ([]byte, *plan.Perror)
-
-	/*****************************************************
-	** Asymmetric encryption
-	**/
-
-	EncryptFor func(
-		inRand io.Reader,
-		inMsg []byte,
-		inPeerPubKey []byte,
-		inPrivKey []byte,
-	) ([]byte, *plan.Perror)
-
-	DecryptFrom func(
-		inMsg []byte,
-		inPeerPubKey []byte,
-		inPrivKey []byte,
-	) ([]byte, *plan.Perror)
-
-	/*****************************************************
-	** Signing & Verification
-	**/
-
-	Sign func(
-		inDigest []byte,
-		inSignerPrivKey []byte,
-	) ([]byte, *plan.Perror)
-
-	VerifySignature func(
-		inSig []byte,
-		inDigest []byte,
-		inSignerPubKey []byte,
-	) *plan.Perror
-}
-
-// CryptoKitRegistry maps a CryptoKitID to an implementation
-var cryptoKitRegistry struct {
-	sync.RWMutex
-	Lookup map[CryptoKitID]*CryptoKit
-}
-
-// RegisterCryptoKit registers the given provider so it can be invoked via ski.StartSession()
-func RegisterCryptoKit(
-	inPkg *CryptoKit,
-) *plan.Perror {
-
-	var err *plan.Perror
-	cryptoKitRegistry.Lock()
-	pkg := cryptoKitRegistry.Lookup[inPkg.CryptoKitID]
-	if pkg == nil {
-		cryptoKitRegistry.Lookup[inPkg.CryptoKitID] = inPkg
-	} else if pkg != inPkg {
-		err = plan.Errorf(nil, plan.CryptoKitIDAlreadyRegistered, "the CryptoKitID %d (%s) is already registered", inPkg.CryptoKitID, CryptoKitID_name[int32(inPkg.CryptoKitID)])
-	}
-	cryptoKitRegistry.Unlock()
-
-	return err
-}
-
-// GetCryptoKit fetches the given crypto package for use
-func GetCryptoKit(
-	inCryptoKitID CryptoKitID,
-) (*CryptoKit, *plan.Perror) {
-
-	cryptoKitRegistry.RLock()
-	pkg := cryptoKitRegistry.Lookup[inCryptoKitID]
-	cryptoKitRegistry.RUnlock()
-
-	if pkg == nil {
-		return nil, plan.Errorf(nil, plan.CryptoKitNotFound, "the CryptoKitID %d was not found", inCryptoKitID)
-	}
-
-	return pkg, nil
-}
-
-// VerifySignature returns nil err if the signature of inDigest plus the signer's private key matches the given signature.
-// This function is threadsafe.
-func VerifySignature(
-	inCryptoKitID CryptoKitID,
-	inSig []byte,
-	inDigest []byte,
-	inSignerPubKey []byte,
-) *plan.Perror {
-
-	pkg, err := GetCryptoKit(inCryptoKitID)
-	if err != nil {
-		return err
-	}
-
-	err = pkg.VerifySignature(
-		inSig,
-		inDigest,
-		inSignerPubKey,
-	)
-
-	return err
-}
