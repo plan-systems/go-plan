@@ -59,6 +59,7 @@ func Test1(t *testing.T) {
 
 	pb.session, err = provider.StartSession(
 		communityID[:],
+        nil,
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -125,7 +126,7 @@ func Test1(t *testing.T) {
 
 						case pdi.OpTxnReport, pdi.OpRequestTxns:
 							for _, txn := range msg.Txns {
-								verifyRandoBody(*txn.Body)
+								verifyRandomBody(*txn.Body)
 							}
 
 							// If we verified the last txn, close the session, ending the test
@@ -188,7 +189,7 @@ func Test1(t *testing.T) {
 		for i := 0; i < pb.numToCommit; i++ {
 
 			var err error
-			body := makeRandoBody(i + 1)
+			body := makeRandomBody(i + 1)
 			pb.reqIDs[i], err = pb.session.CommitTxn(body)
 			if err != nil {
 				log.Fatal(err)
@@ -224,7 +225,7 @@ func getTmpDir() string {
 
 }
 
-func makeRandoBody(idx int) *plan.Block {
+func makeRandomBody(idx int) *plan.Block {
 
 	var blobBuf [20000]byte
 
@@ -254,7 +255,7 @@ func makeRandoBody(idx int) *plan.Block {
 	return body
 }
 
-func verifyRandoBody(body plan.Block) {
+func verifyRandomBody(body plan.Block) {
 	blob, err := hex.DecodeString(body.Label)
 	if err != nil {
 		gTesting.Fatal(err)

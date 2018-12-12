@@ -51,13 +51,13 @@ func NewProvider(
 		fileMode:    inFileMode,
 	}
 
-
 	return storage
 }
 
 // StartSession implements StorageProvider.StartSession
 func (provider *boltProvider) StartSession(
 	inDatabaseID []byte,
+    inParams *plan.Block,
 ) (pdi.StorageSession, error) {
 
 	if len(inDatabaseID) < 2 || len(inDatabaseID) > 64 {
@@ -135,7 +135,7 @@ func (provider *boltProvider) endSession(
 	for i, session := range provider.sessions {
 		if session == inSession {
 
-            // Update the sesison status
+            // Update the session status
             inSession.status = msg.AlertCode
 
             // Remove this session ptr from the session list
@@ -957,7 +957,7 @@ func (tk *timeSortableKey) Equals(inTime int64, inTxnName []byte) bool {
 //   ... 39 ff => ... 3A 00
 func (tk *timeSortableKey) Increment() {
 
-	// pos says which byte-significan't digit we're on -- start at the least significant
+	// pos says which byte-significant digit we're on -- start at the least significant
 	pos := timeSortableKeySz - 1
 	for {
 

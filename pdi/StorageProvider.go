@@ -119,7 +119,7 @@ const (
 	** SessionFailureAlerts
 	**/
 
-	// SessionFailureAlertMask is used to filter alerts that reflect a falure or problem happening
+	// SessionFailureAlertMask is used to filter alerts that reflect a failure or problem happening
 	SessionFailureAlertMask AlertCode = 0x0200 + iota
 
 	// StorageFailure means database access failed in an unexpected way
