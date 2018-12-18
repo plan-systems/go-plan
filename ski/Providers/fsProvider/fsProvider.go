@@ -1,10 +1,9 @@
-// Package file implements ski.Provider for keys stored locally on the file system
-package file
+// Package fs implements ski.Provider for keys stored on the local file system (via encrypted file)
+package fs
 
 import (
     //"encoding/json"
-    //"net/http"
-    //"log"
+    "log"
     //io"
     //"sync"
 	crypto_rand "crypto/rand"
@@ -18,10 +17,10 @@ import (
 const (
 
     // KeysCodec is used to express the format in each KeyEntry
-    KeysCodec = "/plan/ski/KeyEntry/NaCl/1"
+    KeysCodec = "/plan/ski/KeyEntry/1"
 
-    // ProviderInvocation should be passed for inInvocation when calling SKI.fileProvider.StartSession()
-    providerInvocation = "/plan/ski/Provider/fileProvider/1"
+    // ProviderInvocation should be passed for inInvocation when calling SKI.fsProvider.StartSession()
+    providerInvocation = "/plan/ski/Provider/fsProvider/1"
 
 
 )
@@ -30,8 +29,8 @@ const (
 
 var (
 
-    // Provider is the primary "entry" point for a NaCl "provider"
-    Provider = newfileProvider()
+    // Provider is the primary "entry" point
+    Provider = newfsProvider()
 
 
 
@@ -41,15 +40,15 @@ var (
 
 
 
-// fileProvider is a local implemention of SKI.Provider
-type fileProvider struct {
-    sessions            []*fileSession
+// fsProvider is a local implemention of SKI.Provider
+type fsProvider struct {
+    sessions            []*fsSession
 }
 
 
-func newfileProvider() *fileProvider {
+func newfsProvider() *fsProvider {
 
-    var provider = &fileProvider{
+    var provider = &fsProvider{
         nil,
     }
 
@@ -57,24 +56,25 @@ func newfileProvider() *fileProvider {
 }
 
 // NewSession initializes the SKI's keyring.
-func (provider *fileProvider) NewSession() *fileSession {
-	session := &fileSession{
+func (provider *fsProvider) NewSession(
+    inPB ski.StartSessionPB,
+) *fsSession {
+	session := &fsSession{
         provider,
-        NewKeyring(""),
+        inPB,
+        &ski.KeyRepo{},
         [ski.NumKeyDomains]map[string]bool{},
         nil,
     }
 	return session
 }
 
-
-func (provider *fileProvider) InvocationStr() string {
+func (provider *fsProvider) InvocationStr() string {
     return providerInvocation
 }
 
-
 // StartSession starts a new SKI session
-func (provider *fileProvider) StartSession(
+func (provider *fsProvider) StartSession(
     inPB ski.StartSessionPB,
 ) (ski.Session, *plan.Perror) {
 
@@ -82,7 +82,7 @@ func (provider *fileProvider) StartSession(
         panic("ski invocation does not match")
     }
 
-    session := provider.NewSession()
+    session := provider.NewSession(inPB)
     session.onSessionEnded = inPB.OnSessionEnded
     session.parentProvider = provider
 
@@ -106,12 +106,9 @@ func RegisterForInvocation() {
 
 
 
-/*****************************************************
-** ski.InvokeProvider()
-**/
 
 
-func (provider *fileProvider) EndSession(inSession *fileSession, inReason string) *plan.Perror {
+func (provider *fsProvider) EndSession(inSession *fsSession, inReason string) *plan.Perror {
     for i, session := range provider.sessions {
         if session == inSession {
             n := len(provider.sessions)-1
@@ -131,13 +128,15 @@ func (provider *fileProvider) EndSession(inSession *fileSession, inReason string
 
 
 
-// fileSession represents a local implementation of the SKI
-type fileSession struct {
+// fsSession represents a local implementation of the SKI
+type fsSession struct {
 
     // TODO: put in mutex!?
-    parentProvider      *fileProvider
+    parentProvider      *fsProvider
+    sessionPB           ski.StartSessionPB
+
     //KeyRepos            map[plan.CommunityID]KeyRepo
-    keyring             *Keyring
+    KeyRepo             *ski.KeyRepo
     allowedOps          [ski.NumKeyDomains]map[string]bool
     onSessionEnded      func(inReason string)
 }
@@ -148,14 +147,14 @@ type fileSession struct {
 
 
 // EndSession ends this SKI session
-func (session *fileSession) EndSession(inReason string, inOnCompletion plan.Action) {
+func (session *fsSession) EndSession(inReason string, inOnCompletion plan.Action) {
     err := session.parentProvider.EndSession(session, inReason)
 
     inOnCompletion(nil, err)
     return
 }
 
-func (session *fileSession) CheckPermissionsForOp(
+func (session *fsSession) CheckPermissionsForOp(
     inArgs *ski.OpArgs,
     ) *plan.Perror {
 
@@ -188,7 +187,7 @@ func (session *fileSession) CheckPermissionsForOp(
     return nil
 }
 
-func (session *fileSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
+func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
 
     err := session.CheckPermissionsForOp(inArgs)
     if err != nil {
@@ -196,21 +195,28 @@ func (session *fileSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.Op
         return
     }
 
-    results, err := session.doOp(*inArgs)
+    keyringSet, err := session.KeyRepo.FetchKeyringSet(session.sessionPB.CommunityID)
+    if err != nil {
+        inOnCompletion(nil, err)
+        return
+    }
+
+    results, err := doOp(
+        keyringSet,
+        *inArgs,
+    )
     inOnCompletion(results, err)
 }
 
 
 
 
-
-
-
-
-func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
+func doOp(
+    ioKeyringSet *ski.KeyringSet,
+    opArgs ski.OpArgs,
+) (*plan.Block, *plan.Perror) {
 
     outResults := &plan.Block{}
-
 
     var err *plan.Perror
 
@@ -220,7 +226,7 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
         switch opArgs.OpName {
 
             case ski.OpExportNamedKeys:
-                opArgs.Msg, err = session.exportKeysIntoMsg(opArgs.KeySpecs)
+                opArgs.Msg, err = exportKeysIntoMsg(ioKeyringSet, opArgs.KeySpecs.Keys)
     
         }
 
@@ -235,8 +241,6 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     var cryptoKey *ski.KeyEntry
 
     {
-        var keyBuf []byte
-
         switch opArgs.OpName {
 
             case 
@@ -247,17 +251,17 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
             ski.OpSign,
             ski.OpExportNamedKeys,
             ski.OpExportKeyring,
-            ski.OpMergeKeys:
-            cryptoKey, err = session.KeyRepo.GetKey(opArgs.CommunityID, opArgs.CryptoKey)
+            ski.OpImportKeys:
+            cryptoKey, err = ioKeyringSet.FetchKey(&opArgs.CryptoKey)
         }
-    }
 
-    if err != nil {
-        return nil, err
+        if err != nil {
+            return nil, err
+        }
     }
     
     var cryptoPkg *ski.CryptoKit
-    cryptoPkg, err = ski.GetCryptoKit(cryptoKey.CryptoKitID())
+    cryptoPkg, err = ski.GetCryptoKit(cryptoKey.CryptoKitId)
     if err != nil {
         return nil, err
     }
@@ -300,7 +304,7 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
 
             case 
             ski.OpDecryptFrom,
-            ski.OpMergeKeys:
+            ski.OpImportKeys:
                 msg, err = cryptoPkg.DecryptFrom(
                     opArgs.Msg, 
                     opArgs.PeerPubKey,
@@ -309,10 +313,10 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
 
             case 
             ski.OpGenerateKeys:{
-                err = session.keyring.GenerateKeys(opArgs.KeySpecs)
+                err = ioKeyringSet.GenerateNewKeys(opArgs.KeySpecs.Keys)
                 if err == nil {
                     msg, _ = opArgs.KeySpecs.Marshal()
-                    outResults.Codec = ski.KeySpecsProtobufCodec
+                    outResults.Codec = ski.KeyBundleProtobufCodec
                 }
             }
 
@@ -327,8 +331,8 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
     // 4) POST OP
     if err == nil {
         switch opArgs.OpName {
-            case ski.OpAcceptKeys:
-                err = session.decodeAcceptKeysMsg(msg)
+            case ski.OpImportKeys:
+                err = importKeysFromMsg(ioKeyringSet, msg)
                 msg = nil
         }
     }
@@ -349,40 +353,41 @@ func (session *fileSession) doOp(opArgs ski.OpArgs) (*plan.Block, *plan.Perror) 
 
 
 
-func (session *fileSession) exportKeysIntoMsg(
-    inKeylist []*ski.KeySpec,
-    ) ([]byte, *plan.Perror) {
+func exportKeysIntoMsg(
+    ioKeyringSet *ski.KeyringSet,
+    inKeySpecs []*ski.KeyEntry,
+) ([]byte, *plan.Perror) {
 
-    var keyListBuf []byte
+    var keysBuf []byte
     {
         // Make a KeyList that will contain a list of all the keys we're exporting
-        keyList := ski.KeyList{
-            Label: session.keyring.Label,
-            KeysCodec: session.keyring.KeysCodec,
-            Keys: make([]*ski.KeyEntry, 0, len(inKeylist)),
-        }
+        keyBundle := ski.KeyBundle{}
 
         // Perform thr export
-        keysNotFound := session.keyring.ExportKeys(inKeylist, &keyList)
+        keysNotFound := ioKeyringSet.FetchKeys(
+            inKeySpecs,
+            &keyBundle,
+        )
+
         if len(keysNotFound) > 0 {
-            return nil, plan.Errorf(nil, plan.FailedToMarshalAccessGrant, "failed to marshal %d keys", len(keysNotFound))
+            return nil, plan.Errorf(nil, plan.FailedToMarshalKeyExport, "failed to find %d keys during export", len(keysNotFound))
         }
 
         var err error
-        keyListBuf, err = keyList.Marshal()
+        keysBuf, err = keyBundle.Marshal()
         if err != nil {
-            return nil, plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal exported key list")
+            return nil, plan.Error(err, plan.FailedToMarshalKeyExport, "failed to marshal exported keys")
         }
     }
 
     block := plan.Block {
-        Codec: ski.KeyListProtobufCodec,
-        Content: keyListBuf,
+        Codec: ski.KeyBundleProtobufCodec,
+        Content: keysBuf,
     }
 
     msg, err := block.Marshal()
     if err != nil {
-        return nil, plan.Error(err, plan.FailedToMarshalAccessGrant, "failed to marshal access grant block")
+        return nil, plan.Error(err, plan.FailedToMarshalKeyExport, "failed to marshal exported keys")
     }
 
     return msg, nil
@@ -390,35 +395,38 @@ func (session *fileSession) exportKeysIntoMsg(
 }
 
 
-func (session *fileSession) mergeKeysFromMsg(inMsg []byte) *plan.Perror {
+func importKeysFromMsg(
+    ioKeyringSet *ski.KeyringSet,
+    inMsg []byte,
+) *plan.Perror {
 
     block := plan.Block{}
     err := block.Unmarshal(inMsg)
 	if err != nil {
-		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant body data failed to unmarshal")
+		return plan.Error(err, plan.FailedToProcessKeyImport, "key import body data failed to unmarshal")
     }
 
-
-    keyListBuf := block.GetContentWithCodec(ski.KeyListProtobufCodec, 0)
-    if keyListBuf == nil {
-		return plan.Errorf(nil, plan.FailedToProcessAccessGrant, "did not find valid '%s' attachment", ski.KeyListProtobufCodec)
+    keysBuf := block.GetContentWithCodec(ski.KeyBundleProtobufCodec, 0)
+    if keysBuf == nil {
+		return plan.Errorf(nil, plan.FailedToProcessKeyImport, "did not find valid '%s' attachment", ski.KeyBundleProtobufCodec)
     }
 
-    keyList := ski.KeyList{}
-    
-    err = keyList.Unmarshal(keyListBuf)
+    keyBundle := ski.KeyBundle{}
+
+    err = keyBundle.Unmarshal(keysBuf)
 	if err != nil {
-		return plan.Error(err, plan.FailedToProcessAccessGrant, "access grant content failed to unmarshal")
+		return plan.Error(err, plan.FailedToProcessKeyImport, "key import content failed to unmarshal")
     }
 
-    perr := session.keyring.MergeKeys(keyList)
-	if perr != nil {
-		return perr
-    }
+    keysFailed := ioKeyringSet.ImportKeys(keyBundle.Keys)
+    if len(keysFailed) > 0 {
 
+        // TODO: should more be done here other than print a msg?  We don't want this to be fatal
+        warn := plan.Errorf(nil, plan.KeyImportFailed, "failed to import the given keys {%v}", keysFailed)
+        log.Print(warn)
+    }
 
     return nil
-
 }
 
 
@@ -426,11 +434,3 @@ func (session *fileSession) mergeKeysFromMsg(inMsg []byte) *plan.Perror {
 
 
 
-/*
-
-// Signing encapsulates algorithms that sign a byte digest and can verify it. 
-type Signing interface {
-
-  
-}
-*/
