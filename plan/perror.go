@@ -179,23 +179,26 @@ const (
 	// InvalidSKISession means the given session is not currently open
 	InvalidSKISession
 
-	// KeyIDNotFound means a key source did not contain the requested key ID
-	KeyIDNotFound
+	// KeyEntryNotFound means a key source did not contain the requested key ID
+	KeyEntryNotFound
 
 	// KeyIDCollision occurs when a key is placed in a keyring that already contains the key ID
 	KeyIDCollision
 
+    // KeyImportFailed means one or more keys that tried to be imported failed.
+    KeyImportFailed
+
 	// BadKeyFormat means key data was a length or format that was invalid or unexpected
 	BadKeyFormat
 
-	// FailedToDecryptAccessGrant means a PDI entry body content failed to decrypt
-	FailedToDecryptAccessGrant
+	// FailedToDecryptKeyImport means a PDI entry body content failed to decrypt
+	FailedToDecryptKeyImport
 
-	// FailedToProcessAccessGrant means that an error occurred while processing a PDI security access grant
-	FailedToProcessAccessGrant
+	// FailedToProcessKeyImport means that an error occurred while processing a PDI key import
+	FailedToProcessKeyImport
 
-	// FailedToMarshalAccessGrant means an error occurred while encoding a PDI security access grant
-	FailedToMarshalAccessGrant
+	// FailedToMarshalKeyExport means an error occurred while encoding a PDI key export
+	FailedToMarshalKeyExport
 
 	// FailedToDecryptData means either the key or buffer to to be decrypted failed verification,
 	FailedToDecryptData
@@ -203,8 +206,11 @@ const (
     // VerifySignatureFailed means either the given signature did not match the given digest.
     VerifySignatureFailed
 
-    // KeyringStoreNotFound means the cold storage for a keyring failed to load or does not exist
-    KeyringStoreNotFound
+    // KeyTomeFailedToLoad means the cold storage for a keyring failed to load or does not exist
+    KeyTomeFailedToLoad
+
+    // KeyTomeFailedToWrite means an error occured while trying to write a key file
+    KeyTomeFailedToWrite
 
 	/*****************************************************
 	** StorageSession / StorageProvider
