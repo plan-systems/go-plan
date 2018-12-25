@@ -81,7 +81,8 @@ type CryptoKit struct {
 // gCryptoKitRegistry maps a CryptoKitID to an available ("registered") implementation
 var gCryptoKitRegistry struct {
 	sync.RWMutex
-	Lookup map[CryptoKitID]*CryptoKit
+	Lookup       map[CryptoKitID]*CryptoKit
+    DefaultKitID CryptoKitID
 }
 
 // RegisterCryptoKit is convenience fuction that registers the given provider so it can be invoked via ski.StartSession()
@@ -91,6 +92,10 @@ func RegisterCryptoKit(
 
 	var err *plan.Perror
 	gCryptoKitRegistry.Lock()
+    if gCryptoKitRegistry.Lookup == nil {
+        gCryptoKitRegistry.Lookup = map[CryptoKitID]*CryptoKit{} 
+        gCryptoKitRegistry.DefaultKitID = inPkg.CryptoKitID
+    }
 	pkg := gCryptoKitRegistry.Lookup[inPkg.CryptoKitID]
 	if pkg == nil {
 		gCryptoKitRegistry.Lookup[inPkg.CryptoKitID] = inPkg
@@ -113,6 +118,9 @@ func GetCryptoKit(
 ) (*CryptoKit, *plan.Perror) {
 
 	gCryptoKitRegistry.RLock()
+    if inCryptoKitID == CryptoKitID_DEFAULT_KIT_ID {
+        inCryptoKitID = gCryptoKitRegistry.DefaultKitID
+    }
 	pkg := gCryptoKitRegistry.Lookup[inCryptoKitID]
 	gCryptoKitRegistry.RUnlock()
 
