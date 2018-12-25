@@ -8,30 +8,130 @@ import (
 
 )
 
-// KeyRepo is a memory-resident data structure that stores KeyEntry, placed in a hierarchy of data structures, indexed by:
+// keyRepo is a memory-resident data structure that stores KeyEntry, placed in a hierarchy of data structures, indexed by:
 //    CommunityID => KeyDomain => KeyEntry.PubKey
-type KeyRepo struct {
+type keyRepo struct {
     sync.RWMutex
 
     ByCommunity   map[plan.CommunityID]*KeyringSet
 }
 
+
+
+func newKeyRepo() *keyRepo {
+    return &keyRepo{
+        ByCommunity: map[plan.CommunityID]*KeyringSet{},
+    }
+}
+
+
+func (KR *keyRepo) Clear() {
+
+
+    // TODO: zero out each key entry to protect private keys
+    KR.RLock()
+    for k := range KR.ByCommunity {
+        delete(KR.ByCommunity, k)
+    }
+    KR.RUnlock()
+
+}
+
+
 // FetchKeyringSet returns the KeyringSet associated with the given community ID 
-func (KR *KeyRepo) FetchKeyringSet(
+func (KR *keyRepo) FetchKeyringSet(
     inCommunityID []byte,
+    inAutoCreate bool,
 ) (*KeyringSet, *plan.Perror) {
 
     CID := plan.GetCommunityID(inCommunityID)
  
     KR.RLock()
-    keyringSet, ok := KR.ByCommunity[CID]
+    krSet, ok := KR.ByCommunity[CID]
+    if ! ok && inAutoCreate {
+        krSet = &KeyringSet{
+            CommunityID: inCommunityID,
+        }
+        for i := 0; i < int(NumKeyDomains); i++ {
+            krSet.ByKeyDomain[i] = keyring{
+                map[plan.KeyID]*KeyEntry{},
+            }
+        }
+        KR.ByCommunity[CID] = krSet
+        ok = true
+    }
     KR.RUnlock()
 
     if ! ok {
         return nil, plan.Errorf(nil, plan.KeyringNotFound, "no keyrings found for community ID %v", inCommunityID)
     }
 
-    return keyringSet, nil
+    return krSet, nil
+}
+
+
+
+
+
+func (KR *keyRepo) Marshal() ([]byte, *plan.Perror) {
+
+    KR.RLock()
+
+    keyTome := KeyTome {
+        make([]*KeyBundle, 0, len(KR.ByCommunity)),
+    }
+
+    for _, krSet := range KR.ByCommunity {
+
+        krSet.RLock()
+        {
+            entryCount := 0
+
+            for i := 0; i < int(NumKeyDomains); i++ {
+                entryCount += len(krSet.ByKeyDomain[i].KeysByID)
+            }
+
+            bundle := &KeyBundle{
+                krSet.CommunityID,
+                make([]*KeyEntry, 0, entryCount),
+            }
+
+            for i := 0; i < int(NumKeyDomains); i++ {
+                for _, keyEntry := range krSet.ByKeyDomain[i].KeysByID {
+                    bundle.Keys = append(bundle.Keys, keyEntry)
+                }
+            }
+
+            keyTome.Bundles = append(keyTome.Bundles, bundle)
+        }
+        krSet.RUnlock()
+    }
+
+    dAtA, merr := keyTome.Marshal()
+    if merr != nil {
+        return nil, plan.Errorf(merr, plan.FailedToMarshal, "Unexpected error marshaing KeyTome")
+    }
+
+    return dAtA, nil
+}
+
+
+
+func (KR *keyRepo) Unmarshal(dAtA []byte) *plan.Perror {
+
+    keyTome := KeyTome{}
+
+    merr := keyTome.Unmarshal(dAtA)
+    if merr != nil {
+        return plan.Errorf(merr, plan.FailedToUnmarshal, "Unexpected error unmarshaing KeyTome")
+    }
+
+    for _, bundle := range keyTome.Bundles {
+        krSet, _ := KR.FetchKeyringSet(bundle.CommunityId, true)
+        krSet.ImportKeys(bundle.Keys)
+    }
+
+    return nil
 }
 
 
@@ -46,18 +146,19 @@ type keyring struct {
 
 // KeyringSet organizes a set of KeyEntry by ski.KeyDomain.
 type KeyringSet struct {
+   
     sync.RWMutex
-
-    ByKeyDomain     [NumKeyDomains]keyring
+    
+    CommunityID     []byte
+    ByKeyDomain     [NumKeyDomains]keyring 
 }
 
 
 
 
 
-
 // GenerateNewKeys generates the requested keys and adds them to this KeyringSet
-func (ks *KeyringSet) GenerateNewKeys(
+func (krSet *KeyringSet) GenerateNewKeys(
     ioKeyReqs []*KeyEntry,
 ) *plan.Perror {
 
@@ -73,7 +174,7 @@ func (ks *KeyringSet) GenerateNewKeys(
 
         // Let's all laugh and be merry at a 1:2^256 collision!  I want a pony and air-jammer-road-rammer!
         // But seriously ladies and gentleman, we just loop if it happens.  
-        keysNotMerged := ks.ImportKeys(newKeys)
+        keysNotMerged := krSet.ImportKeys(newKeys)
         if len(keysNotMerged) == 0 {
             break
         }
@@ -103,7 +204,7 @@ func (ks *KeyringSet) GenerateNewKeys(
 
 
 
-func (ks *KeyringSet) getKeyEntryInternal(
+func (krSet *KeyringSet) getKeyEntryInternal(
     inKeySpec *KeyEntry,
 ) (*KeyEntry, *plan.Perror) {
 
@@ -116,7 +217,7 @@ func (ks *KeyringSet) getKeyEntryInternal(
     
     if err == nil {
         keyID := plan.GetKeyID(inKeySpec.PubKey)
-        keyEntry = ks.ByKeyDomain[inKeySpec.KeyDomain].KeysByID[keyID]
+        keyEntry = krSet.ByKeyDomain[inKeySpec.KeyDomain].KeysByID[keyID]
     }
 
     if keyEntry == nil && err == nil {
@@ -131,7 +232,7 @@ func (ks *KeyringSet) getKeyEntryInternal(
 // FetchKeys fetches the KeyEntry for each element in inKeySpecs (by .KeyDomain and .PubKey).  
 // If a key spec IS found, the full KeyEntry ptr is appended to ioKeys.  TREAT AS READ ONLY, ESP SINCE IT CONTAINS THE PRIVATE KEY.
 // If a key spec is NOT found, the requested key spec is appended to a slice and returned.  i.e. if all keys were found, the return value is nil.
-func (ks *KeyringSet) FetchKeys(
+func (krSet *KeyringSet) FetchKeys(
     inKeySpecs []*KeyEntry,
     ioKeyBundle *KeyBundle,
 )  []*KeyEntry {
@@ -140,10 +241,10 @@ func (ks *KeyringSet) FetchKeys(
 
     keysFound := make([]*KeyEntry, 0, len(inKeySpecs))
 
-    ks.RLock()
+    krSet.RLock()
     {
         for _, keySpec := range inKeySpecs {
-            keyEntry, _ := ks.getKeyEntryInternal(keySpec)
+            keyEntry, _ := krSet.getKeyEntryInternal(keySpec)
             
             if keyEntry != nil {
                 keysFound = append(keysFound, keyEntry)
@@ -152,7 +253,7 @@ func (ks *KeyringSet) FetchKeys(
             }
         }
     }
-    ks.RUnlock()
+    krSet.RUnlock()
 
     ioKeyBundle.Keys = append(ioKeyBundle.Keys, keysFound...)
 
@@ -160,13 +261,13 @@ func (ks *KeyringSet) FetchKeys(
 }
 
 // FetchKey is identical to FetchNamedKeys() except is for only one key.
-func (ks *KeyringSet) FetchKey(
+func (krSet *KeyringSet) FetchKey(
     inKeySpec *KeyEntry,
 ) (*KeyEntry, *plan.Perror) {
 
-    ks.RLock()
-    keyEntry, err := ks.getKeyEntryInternal(inKeySpec)
-    ks.RUnlock()
+    krSet.RLock()
+    keyEntry, err := krSet.getKeyEntryInternal(inKeySpec)
+    krSet.RUnlock()
 
     return keyEntry, err
 }
@@ -174,7 +275,7 @@ func (ks *KeyringSet) FetchKey(
 
 
 // GetKeyring returns an entire KeyDomain
-func (ks *KeyringSet) GetKeyring(
+func (krSet *KeyringSet) GetKeyring(
     inKeyDomain KeyDomain,
 ) ([]*KeyEntry, *plan.Perror) {
 
@@ -182,20 +283,22 @@ func (ks *KeyringSet) GetKeyring(
         return nil, plan.Errorf(nil, plan.KeyDomainNotFound, "keyring not found {KeyDomain: %v}", inKeyDomain)
     }
 
-    ks.RLock()
+    krSet.RLock()
     
-    keysByID := ks.ByKeyDomain[inKeyDomain].KeysByID
+    keysByID := krSet.ByKeyDomain[inKeyDomain].KeysByID
     outKeys := make([]*KeyEntry, 0, len(keysByID))
     for _, keyEntry := range keysByID {
         outKeys = append(outKeys, keyEntry)
     }
 
-    ks.RUnlock()
+    krSet.RUnlock()
 
     // TODO: keys sort by time or by ID
 
    return outKeys, nil
 }
+
+
 
 /*
 func SerializeKeysAsBundle(
@@ -237,20 +340,20 @@ func SerializeKeysAsBundle(
 // ImportKeys adds the keys to this KeyringSet returning a list of the collisions not merged.
 // If an incoming collides (and isn't exactly identical to the existing entry), 
 //    then it is added to list of keys returned (i.e. this func merges the keys it can).
-func (ks *KeyringSet) ImportKeys(
+func (krSet *KeyringSet) ImportKeys(
     inKeysToMerge []*KeyEntry,
 ) []*KeyEntry {
 
     var keysSkipped []*KeyEntry
         
-    ks.Lock()
+    krSet.Lock()
     for _, keyEntry := range inKeysToMerge {
 
         if keyEntry != nil {
             merged := false
             if keyEntry.KeyDomain >= 0 && keyEntry.KeyDomain < NumKeyDomains {
                 keyID := keyEntry.GetKeyID()
-                keyring := &ks.ByKeyDomain[keyEntry.KeyDomain]
+                keyring := &krSet.ByKeyDomain[keyEntry.KeyDomain]
                 existing := keyring.KeysByID[keyID]
                 if existing == nil || existing.EqualTo(keyEntry) {
                     merged = true
@@ -265,7 +368,7 @@ func (ks *KeyringSet) ImportKeys(
             }
         }
     }
-    ks.Unlock()
+    krSet.Unlock()
 
     return keysSkipped
 

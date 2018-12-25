@@ -1,20 +1,25 @@
 package main
 
 import (
-	"bytes"
-    "math/rand"
-    "fmt"
-    //"log"
+	//"bytes"
+    //"math/rand"
+    //"fmt"
+	"os/user"
+    "path"
+    "time"
+    //"ioutil"
 
     "testing"
 
 	"github.com/plan-systems/go-plan/ski"
 	"github.com/plan-systems/go-plan/plan"
 
+    "github.com/plan-systems/go-plan/ski/Providers/fileRepo"
 
-	"github.com/plan-systems/go-plan/ski/Providers/nacl"
+	"github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 
 )
+
 
 
 
@@ -22,17 +27,33 @@ import (
 var gTesting *testing.T
 
 
-func TestCommunityEncryption(t *testing.T) {
+func getTmpDir() string {
+
+	usr, err := user.Current()
+	if err != nil {
+		gTesting.Fatal(err)
+	}
+
+	return path.Join(usr.HomeDir, "plan-testing")
+}
+
+
+func TestFileSysSKI(t *testing.T) {
+
 
     gTesting = t
 
-    providersToTest := []string {}
 
-    ski.RegisterProvider(nacl.Provider)
+   
+    ski.RegisterProvider(fs.Provider)
+    ski.RegisterCryptoKit(&nacl.CryptoKit)
+    ski.RegisterCryptoKit(&nacl.CryptoKit)
+    ski.RegisterCryptoKit(&nacl.CryptoKit)
 
     // Register providers to test 
+    providersToTest := []string{}
     providersToTest = append(providersToTest, 
-        nacl.Provider.InvocationStr(),
+        fs.Provider.InvocationStr(),
     )
 
     for _, invocationStr := range providersToTest {
@@ -42,15 +63,151 @@ func TestCommunityEncryption(t *testing.T) {
         }
 
         A := newSession(invocation, "Alice")
-        B := newSession(invocation, "Bob")
+        //B := newSession(invocation, "Bob")
 
-        doCoreTests(A, B)
+        doCoreTests(A, A) //B)
 
         A.endSession("done A")
-        B.endSession("done B")
+        //B.endSession("done B")
     }
+
+
 }
 
+
+
+
+
+
+type testSession struct {
+    name        string
+    session     ski.Session
+    blocker     chan int   
+    signingPubKey []byte
+    encryptPubKey []byte
+}
+
+
+
+
+func (ts *testSession) doOp(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
+
+    var outErr *plan.Perror
+    var outResults *plan.Block
+
+    ts.session.DispatchOp(&inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
+        outErr = inErr
+        outResults = opResults
+
+        ts.blocker <- 1
+    })
+
+    <- ts.blocker
+
+    return outResults, outErr
+}
+
+
+
+
+
+// test setup helper
+func newSession(inInvocation plan.Block, inName string) *testSession {
+
+    ts := &testSession{
+        name:inName,
+        blocker:make(chan int, 100),
+    }
+
+
+    userID := [6]byte{0, 1, 2, 3, 4, 5}
+    commID := [6]byte{0, 0, 1, 1, 2, 2}
+
+    var err *plan.Perror
+    ts.session, err = ski.StartSession(ski.SessionParams{
+        Invocation: inInvocation,
+        UserID: userID[:],
+        CommunityID: commID[:],
+        BaseDir: getTmpDir(),
+    })
+
+    if err != nil {
+        gTesting.Fatal(err)
+    }
+
+    ts.session.DispatchOp(&ski.OpArgs{
+            OpName: ski.OpGenerateKeys,
+            KeySpecs: ski.KeyBundle{
+                CommunityId: commID[:],
+                Keys: []*ski.KeyEntry{
+                    &ski.KeyEntry{
+                        KeyType: ski.KeyType_ASYMMETRIC_KEY,
+                        KeyDomain: ski.KeyDomain_PERSONAL,
+                    },
+                    &ski.KeyEntry{
+                        KeyType: ski.KeyType_SIGNING_KEY,
+                        KeyDomain: ski.KeyDomain_PERSONAL,
+                    },
+                },
+            },
+        },
+        func(inResults *plan.Block, inErr *plan.Perror) {
+            if inErr == nil {
+                bundleBuf := inResults.GetContentWithCodec(ski.KeyBundleProtobufCodec, 0)
+                keyBundle := ski.KeyBundle{}
+                err := keyBundle.Unmarshal(bundleBuf)
+                if err != nil {
+                    gTesting.Fatal(err)
+                } 
+                for i := 0; i < len(keyBundle.Keys); i++ {
+                    switch keyBundle.Keys[i].KeyType {
+                        case ski.KeyType_ASYMMETRIC_KEY:
+                            ts.encryptPubKey = keyBundle.Keys[i].PubKey
+
+                        case ski.KeyType_SIGNING_KEY:
+                            ts.signingPubKey = keyBundle.Keys[i].PubKey
+                    }
+                }
+            } else {
+                gTesting.Fatal(inErr)
+            }
+
+            ts.blocker <- 1
+        },
+    )
+
+    <- ts.blocker
+
+
+
+    return ts
+}
+
+
+
+func (ts *testSession) endSession(inReason string) {
+
+    ts.session.EndSession(inReason, func(inParam interface{}, inErr *plan.Perror) {
+        if inErr != nil {
+            gTesting.Fatal(inErr)
+        }
+        ts.blocker <- 1
+    })
+
+    <- ts.blocker
+
+}
+
+
+
+
+func doCoreTests(A, B *testSession) {
+
+    time.Sleep(2000 * time.Millisecond)
+
+}
+
+/*
 
 func doCoreTests(A, B *testSession) {
 
@@ -151,19 +308,6 @@ func doCoreTests(A, B *testSession) {
 
 
 
-type testSession struct {
-    name        string
-    session     ski.Session
-    blocker     chan int   
-    signingKeyID plan.KeyID
-
-    encryptPubKeyID plan.KeyID 
-    encryptPubKey   []byte
-}
-
-
-
-
 func (ts *testSession) doOp(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
 
     var outErr *plan.Perror
@@ -235,3 +379,4 @@ func newSession(inInvocation plan.Block, inName string) *testSession {
 }
 
 
+*/

@@ -4,8 +4,12 @@ package fs
 import (
     //"encoding/json"
     "log"
+    "path"
+    "io/ioutil"
+    "os"
+    "time"
     //io"
-    //"sync"
+    "sync"
 	crypto_rand "crypto/rand"
 
 	"github.com/plan-systems/go-plan/ski"
@@ -17,10 +21,10 @@ import (
 const (
 
     // KeysCodec is used to express the format in each KeyEntry
-    KeysCodec = "/plan/ski/KeyEntry/1"
+    //KeysCodec = "/plan/ski/KeyEntry/1"
 
-    // ProviderInvocation should be passed for inInvocation when calling SKI.fsProvider.StartSession()
-    providerInvocation = "/plan/ski/Provider/fsProvider/1"
+    // ProviderInvocation should be passed for inInvocation when calling SKI.fileRepo.StartSession()
+    providerInvocation = "/plan/ski/Provider/fileRepo/1"
 
 
 )
@@ -30,7 +34,7 @@ const (
 var (
 
     // Provider is the primary "entry" point
-    Provider = newfsProvider()
+    Provider = newfileRepo()
 
 
 
@@ -40,15 +44,15 @@ var (
 
 
 
-// fsProvider is a local implemention of SKI.Provider
-type fsProvider struct {
+// fileRepo is a local implemention of SKI.Provider
+type fileRepo struct {
     sessions            []*fsSession
 }
 
 
-func newfsProvider() *fsProvider {
+func newfileRepo() *fileRepo {
 
-    var provider = &fsProvider{
+    var provider = &fileRepo{
         nil,
     }
 
@@ -56,42 +60,51 @@ func newfsProvider() *fsProvider {
 }
 
 // NewSession initializes the SKI's keyring.
-func (provider *fsProvider) NewSession(
-    inPB ski.StartSessionPB,
+func (provider *fileRepo) NewSession(
+    inPB ski.SessionParams,
 ) *fsSession {
 	session := &fsSession{
-        provider,
-        inPB,
-        &ski.KeyRepo{},
-        [ski.NumKeyDomains]map[string]bool{},
-        nil,
+        parentProvider: provider,
+        Params: inPB,
+        nextAutoSave: time.Now(),
+        //fsStatus: 0,
+        keyRepo: ski.NewkeyRepo(),
+        allowedOps: [ski.NumKeyDomains]map[string]bool{},
     }
 	return session
 }
 
-func (provider *fsProvider) InvocationStr() string {
+    
+
+func (provider *fileRepo) InvocationStr() string {
     return providerInvocation
 }
 
 // StartSession starts a new SKI session
-func (provider *fsProvider) StartSession(
-    inPB ski.StartSessionPB,
+func (provider *fileRepo) StartSession(
+    inPB ski.SessionParams,
 ) (ski.Session, *plan.Perror) {
 
     if inPB.Invocation.Label != provider.InvocationStr() {
-        panic("ski invocation does not match")
+        return nil, plan.Errorf(nil, plan.InvocationNotAvailable,  "ski invocation does not match (%s != %s)", inPB.Invocation.Label, provider.InvocationStr())
     }
 
     session := provider.NewSession(inPB)
     session.onSessionEnded = inPB.OnSessionEnded
     session.parentProvider = provider
 
-    // Bind the request op scope
+    // Bind the request op scope -- TODO
+    /*
     for i, domain := range inPB.AccessScopes {
         allowedOpsForDomain := session.allowedOps[i]
         for _, opName := range domain {
             allowedOpsForDomain[opName] = true
         }
+    } */
+
+    err := session.loadFromFile()
+    if err != nil {
+        return nil, err
     }
 
     provider.sessions = append(provider.sessions, session)
@@ -99,16 +112,11 @@ func (provider *fsProvider) StartSession(
     return session, nil
 }
 
-// RegisterForInvocation is how outside packages make this SKI implementation available to be invoked
-func RegisterForInvocation() {
-    ski.RegisterProvider(Provider)
-}
 
 
 
 
-
-func (provider *fsProvider) EndSession(inSession *fsSession, inReason string) *plan.Perror {
+func (provider *fileRepo) EndSession(inSession *fsSession, inReason string) *plan.Perror {
     for i, session := range provider.sessions {
         if session == inSession {
             n := len(provider.sessions)-1
@@ -124,24 +132,129 @@ func (provider *fsProvider) EndSession(inSession *fsSession, inReason string) *p
     return plan.Error(nil, plan.InvalidSKISession, "ski session not found")
 }
 
-
-
-
+/*
+type fsStatus int32
+const (
+	LoadedFromStore        fsStatus = 1 << iota
+)
+*/
 
 // fsSession represents a local implementation of the SKI
 type fsSession struct {
+    autoSaveMutex       sync.Mutex
 
     // TODO: put in mutex!?
-    parentProvider      *fsProvider
-    sessionPB           ski.StartSessionPB
+    parentProvider      *fileRepo
+    Params              ski.SessionParams
+    nextAutoSave        time.Time
+    //fsStatus            fsStatus
 
-    //KeyRepos            map[plan.CommunityID]KeyRepo
-    KeyRepo             *ski.KeyRepo
+    //keyRepos            map[plan.CommunityID]keyRepo
+    keyRepo             *ski.keyRepo
     allowedOps          [ski.NumKeyDomains]map[string]bool
     onSessionEnded      func(inReason string)
+
+    autoSave            *time.Ticker
 }
 
 
+
+func (session *fsSession) dbPathname() string {
+    /*
+    fsNameEncoding := base64.RawURLEncoding
+
+    CS.channelDir = path.Join(
+        session.Params.BaseDir, 
+        "ski/Providers/fs", 
+        base64.RawURLEncoding.EncodeToString(session.Params.UserID[:])*/
+
+    return path.Join(session.Params.BaseDir, "fsKeyTome.pb")
+}
+
+
+
+
+func (session *fsSession) loadFromFile() *plan.Perror {
+
+    session.autoSaveMutex.Lock()
+    defer session.autoSaveMutex.Unlock()
+
+    session.resetAutoSave()
+
+    session.keyRepo.Clear()
+
+    pathname := session.dbPathname()
+    buf, ferr := ioutil.ReadFile(pathname)
+    if ferr != nil {
+
+        // If file doesn't exist, don't consider it an error
+        if os.IsNotExist(ferr) {
+            return nil
+        }
+        return plan.Errorf(ferr, plan.KeyTomeFailedToLoad, "Failed to load key tome file '%v'", pathname)
+    }
+
+    var err *plan.Perror
+
+    // TODO: decrypt file buf!
+    {
+
+    }
+
+    if err == nil {
+        err = session.keyRepo.Unmarshal(buf)
+    }
+
+    // Zero out sensitive bytes
+    for i := range buf {
+        buf[i] = 0
+    }
+
+    return err
+}
+
+
+
+func (session *fsSession) saveToFile() *plan.Perror {
+
+    session.autoSaveMutex.Lock()
+    defer session.autoSaveMutex.Unlock()
+
+    if session.autoSave != nil {
+  
+        buf, err := session.keyRepo.Marshal()
+        if err != nil {
+            return err
+        }
+
+        // TODO: encrypt file buf!
+        {
+
+        }
+
+        ferr := ioutil.WriteFile(session.dbPathname(), buf, os.FileMode(0775))
+        if ferr != nil {
+        return plan.Errorf(ferr, plan.KeyTomeFailedToWrite, "Failed to write key tome file")
+        }
+
+        session.resetAutoSave()
+    }
+
+    return nil
+}
+
+
+func (session *fsSession) resetAutoSave() {
+
+    // When we save out successfully, stop the autosave gor outine
+    {
+        if session.autoSave != nil {
+            session.autoSave.Stop()
+            session.autoSave = nil
+        }
+    }
+
+}
 
 
 
@@ -149,6 +262,8 @@ type fsSession struct {
 // EndSession ends this SKI session
 func (session *fsSession) EndSession(inReason string, inOnCompletion plan.Action) {
     err := session.parentProvider.EndSession(session, inReason)
+
+    session.saveToFile()
 
     inOnCompletion(nil, err)
     return
@@ -195,7 +310,15 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
         return
     }
 
-    keyringSet, err := session.KeyRepo.FetchKeyringSet(session.sessionPB.CommunityID)
+    mutates := false
+    switch inArgs.OpName {
+        case 
+        ski.OpGenerateKeys,
+        ski.OpImportKeys:
+            mutates = true
+    }
+
+    keyringSet, err := session.keyRepo.FetchKeyringSet(session.Params.CommunityID, mutates)
     if err != nil {
         inOnCompletion(nil, err)
         return
@@ -205,6 +328,27 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
         keyringSet,
         *inArgs,
     )
+
+    if mutates {
+        session.autoSaveMutex.Lock()
+        session.nextAutoSave = time.Now().Add(1600 * time.Millisecond)
+        if session.autoSave == nil {
+            session.autoSave = time.NewTicker(500 * time.Millisecond)
+            go func() {
+                for t := range session.autoSave.C {
+                    session.autoSaveMutex.Lock()
+                    saveNow := t.After(session.nextAutoSave)
+                    session.autoSaveMutex.Unlock()
+                    if saveNow {
+                        session.saveToFile()
+                        break
+                    }
+                }
+            }()
+        }
+        session.autoSaveMutex.Unlock()
+    }
+
     inOnCompletion(results, err)
 }
 
@@ -237,8 +381,9 @@ func doOp(
 
 
     // ====================================
-    // 2) LOAD OP CRYPTO KEY
+    // 2) LOAD OP CRYPTO KEY & KIT
     var cryptoKey *ski.KeyEntry
+    var cryptoPkg *ski.CryptoKit
 
     {
         switch opArgs.OpName {
@@ -258,19 +403,22 @@ func doOp(
         if err != nil {
             return nil, err
         }
-    }
+
+        if cryptoKey != nil {
+            cryptoPkg, err = ski.GetCryptoKit(cryptoKey.CryptoKitId)
+        }
     
-    var cryptoPkg *ski.CryptoKit
-    cryptoPkg, err = ski.GetCryptoKit(cryptoKey.CryptoKitId)
-    if err != nil {
-        return nil, err
+        if err != nil {
+            return nil, err
+        }
     }
+
 
     // ====================================
     // 3) DO OP (fill msg, using privateKey)
     var msg []byte
     {
-        switch opArgs.OpName{
+        switch opArgs.OpName {
 
             case 
             ski.OpSign:
