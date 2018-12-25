@@ -1,12 +1,14 @@
 package main
 
 import (
-	//"bytes"
-    //"math/rand"
-    //"fmt"
+	"bytes"
+    "math/rand"
+    "fmt"
 	"os/user"
     "path"
-    "time"
+    //"time"
+    "os"
+    "crypto/md5"
     //"ioutil"
 
     "testing"
@@ -14,7 +16,7 @@ import (
 	"github.com/plan-systems/go-plan/ski"
 	"github.com/plan-systems/go-plan/plan"
 
-    "github.com/plan-systems/go-plan/ski/Providers/fileRepo"
+    "github.com/plan-systems/go-plan/ski/Providers/filesys"
 
 	"github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 
@@ -22,38 +24,42 @@ import (
 
 
 
-
-
 var gTesting *testing.T
+var gCommunityID = [4]byte{0, 1, 2, 3}
+var gDefaulFileMode = os.FileMode(0775)
 
-
-func getTmpDir() string {
+func getTmpDir(inSubDir string) string {
 
 	usr, err := user.Current()
 	if err != nil {
 		gTesting.Fatal(err)
 	}
 
-	return path.Join(usr.HomeDir, "plan-testing")
+	tmpDir := path.Join(usr.HomeDir, "_plan-testing")
+    if len(inSubDir) > 0 {
+        tmpDir = path.Join(tmpDir, inSubDir)
+    }
+
+    err = os.MkdirAll(tmpDir, gDefaulFileMode)
+	if err != nil {
+		gTesting.Fatal(err)
+	}
+
+    return tmpDir
 }
 
 
 func TestFileSysSKI(t *testing.T) {
 
-
     gTesting = t
-
-
    
-    ski.RegisterProvider(fs.Provider)
-    ski.RegisterCryptoKit(&nacl.CryptoKit)
-    ski.RegisterCryptoKit(&nacl.CryptoKit)
+    ski.RegisterProvider(filesys.Provider)
     ski.RegisterCryptoKit(&nacl.CryptoKit)
 
     // Register providers to test 
     providersToTest := []string{}
     providersToTest = append(providersToTest, 
-        fs.Provider.InvocationStr(),
+        filesys.Provider.InvocationStr(),
     )
 
     for _, invocationStr := range providersToTest {
@@ -63,17 +69,122 @@ func TestFileSysSKI(t *testing.T) {
         }
 
         A := newSession(invocation, "Alice")
-        //B := newSession(invocation, "Bob")
+        B := newSession(invocation, "Bob")
 
-        doCoreTests(A, A) //B)
+        doCoreTests(A, B)
 
         A.endSession("done A")
-        //B.endSession("done B")
+        B.endSession("done B")
     }
 
 
 }
 
+
+
+
+
+
+
+func doCoreTests(A, B *testSession) {
+
+    fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
+    fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
+
+    // 1) Generate a new community key (on A)
+    communityKey := A.generateNewKey(ski.KeyType_SYMMETRIC_KEY, ski.KeyDomain_COMMUNITY)
+	
+    // 2) generate a xfer community key msg from A
+    opResults := A.doOp(ski.OpArgs{
+        OpName: ski.OpExportNamedKeys,
+        CryptoKey: ski.KeyEntry{
+            KeyDomain: ski.KeyDomain_PERSONAL,
+            PubKey: A.encryptPubKey,
+        },
+        KeySpecs: ski.KeyBundle{
+            CommunityId: gCommunityID[:],
+            Keys: []*ski.KeyEntry{
+                &ski.KeyEntry{
+                    KeyDomain: ski.KeyDomain_COMMUNITY,
+                    PubKey: communityKey.PubKey,
+                },
+            },
+        },
+        PeerPubKey: B.encryptPubKey,
+    })
+
+    // 3) insert the new community key into B
+    opResults = B.doOp(ski.OpArgs{
+        OpName: ski.OpImportKeys,
+        Msg: opResults.Content,
+        CryptoKey: ski.KeyEntry{
+            KeyDomain: ski.KeyDomain_PERSONAL,
+            PubKey: B.encryptPubKey,
+        },
+        KeySpecs: ski.KeyBundle{
+            CommunityId: gCommunityID[:],
+        },
+        PeerPubKey: A.encryptPubKey,
+    })
+
+
+	clearMsg := []byte("hello, PLAN community!")
+
+    // 4) Encrypt a new community msg (sent from A)
+	opResults = A.doOp(ski.OpArgs{
+        OpName: ski.OpEncrypt,
+        CryptoKey: ski.KeyEntry{
+            KeyDomain: ski.KeyDomain_COMMUNITY,
+            PubKey: communityKey.PubKey,
+        },
+        KeySpecs: ski.KeyBundle{
+            CommunityId: gCommunityID[:],
+        },
+        Msg: clearMsg,
+    })
+
+    encryptedMsg := opResults.Content
+
+    // 5) Send the encrypted community message to B
+	opResults = B.doOp(ski.OpArgs{
+        OpName: ski.OpDecrypt,
+        CryptoKey: ski.KeyEntry{
+            KeyDomain: ski.KeyDomain_COMMUNITY,
+            PubKey: communityKey.PubKey,
+        },
+        KeySpecs: ski.KeyBundle{
+            CommunityId: gCommunityID[:],
+        },
+        Msg: encryptedMsg,
+    })
+
+	if ! bytes.Equal(clearMsg, opResults.Content) {
+		gTesting.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Content)
+    }
+
+    badMsg := make([]byte, len(encryptedMsg))
+
+    // Vary the data slightly to test 
+    for i := 0; i < 1000; i++ {
+
+        rndPos := rand.Int31n(int32(len(encryptedMsg)))
+        rndAdj := 1 + byte(rand.Int31n(254))
+        copy(badMsg, encryptedMsg)
+        badMsg[rndPos] += rndAdj
+
+        _, opErr := B.doOpWithErr(ski.OpArgs{
+            OpName: ski.OpDecrypt,
+            CryptoKey: *communityKey,
+            KeySpecs: ski.KeyBundle{
+                CommunityId: gCommunityID[:],
+            },
+            Msg: badMsg,
+        })
+        if opErr == nil {
+            gTesting.Fatal("there should have been a decryption error!")
+        }
+    }
+}
 
 
 
@@ -90,7 +201,20 @@ type testSession struct {
 
 
 
-func (ts *testSession) doOp(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
+func (ts *testSession) doOp(inOpArgs ski.OpArgs) *plan.Block {
+
+
+    results, err := ts.doOpWithErr(inOpArgs)
+
+    if err != nil {
+        gTesting.Fatal(err)
+    }
+    return results
+}
+
+
+
+func (ts *testSession) doOpWithErr(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
 
     var outErr *plan.Perror
     var outResults *plan.Block
@@ -104,8 +228,10 @@ func (ts *testSession) doOp(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
 
     <- ts.blocker
 
+
     return outResults, outErr
 }
+
 
 
 
@@ -119,57 +245,46 @@ func newSession(inInvocation plan.Block, inName string) *testSession {
         blocker:make(chan int, 100),
     }
 
-
-    userID := [6]byte{0, 1, 2, 3, 4, 5}
-    commID := [6]byte{0, 0, 1, 1, 2, 2}
+    userID := md5.Sum([]byte(inName))
 
     var err *plan.Perror
     ts.session, err = ski.StartSession(ski.SessionParams{
         Invocation: inInvocation,
         UserID: userID[:],
-        CommunityID: commID[:],
-        BaseDir: getTmpDir(),
+        BaseDir: getTmpDir(inName),
     })
 
     if err != nil {
         gTesting.Fatal(err)
     }
 
-    ts.session.DispatchOp(&ski.OpArgs{
-            OpName: ski.OpGenerateKeys,
-            KeySpecs: ski.KeyBundle{
-                CommunityId: commID[:],
-                Keys: []*ski.KeyEntry{
-                    &ski.KeyEntry{
-                        KeyType: ski.KeyType_ASYMMETRIC_KEY,
-                        KeyDomain: ski.KeyDomain_PERSONAL,
-                    },
-                    &ski.KeyEntry{
-                        KeyType: ski.KeyType_SIGNING_KEY,
-                        KeyDomain: ski.KeyDomain_PERSONAL,
-                    },
-                },
+    ts.encryptPubKey = ts.generateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL).PubKey
+    ts.signingPubKey = ts.generateNewKey(ski.KeyType_SIGNING_KEY,    ski.KeyDomain_PERSONAL).PubKey
+
+    return ts
+}
+
+func (ts *testSession) generateNewKey(
+    inKeyType ski.KeyType,
+    inKeyDomain ski.KeyDomain,
+) *ski.KeyEntry {
+
+    var keyEntry *ski.KeyEntry
+
+    ski.GenerateKeys(
+        ts.session, 
+        gCommunityID[:], 
+        []*ski.KeyEntry{
+            &ski.KeyEntry{
+                KeyType: inKeyType,
+                KeyDomain: inKeyDomain,
             },
         },
-        func(inResults *plan.Block, inErr *plan.Perror) {
-            if inErr == nil {
-                bundleBuf := inResults.GetContentWithCodec(ski.KeyBundleProtobufCodec, 0)
-                keyBundle := ski.KeyBundle{}
-                err := keyBundle.Unmarshal(bundleBuf)
-                if err != nil {
-                    gTesting.Fatal(err)
-                } 
-                for i := 0; i < len(keyBundle.Keys); i++ {
-                    switch keyBundle.Keys[i].KeyType {
-                        case ski.KeyType_ASYMMETRIC_KEY:
-                            ts.encryptPubKey = keyBundle.Keys[i].PubKey
-
-                        case ski.KeyType_SIGNING_KEY:
-                            ts.signingPubKey = keyBundle.Keys[i].PubKey
-                    }
-                }
-            } else {
+        func(inKeys []*ski.KeyEntry, inErr *plan.Perror) {
+            if inErr != nil {
                 gTesting.Fatal(inErr)
+            } else {
+                keyEntry = inKeys[0]
             }
 
             ts.blocker <- 1
@@ -178,9 +293,8 @@ func newSession(inInvocation plan.Block, inName string) *testSession {
 
     <- ts.blocker
 
+    return keyEntry
 
-
-    return ts
 }
 
 
@@ -201,182 +315,3 @@ func (ts *testSession) endSession(inReason string) {
 
 
 
-func doCoreTests(A, B *testSession) {
-
-    time.Sleep(2000 * time.Millisecond)
-
-}
-
-/*
-
-func doCoreTests(A, B *testSession) {
-
-    // 1) make a new community key
-	opResults, err := A.doOp(ski.OpArgs{
-        OpName: ski.OpCreateSymmetricKey,
-    })
-	if err != nil {
-		gTesting.Fatal(err)
-    }
-    communityKeyID := plan.GetKeyID(opResults.Content)
-
-    fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
-    fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
-
-    // 2) generate a xfer community key msg from A
-    opResults, err = A.doOp(ski.OpArgs{
-        OpName: ski.OpSendKeys,
-        OpKeyIDs: []plan.KeyID{communityKeyID},
-        PeerPubKey: B.encryptPubKey,
-        CryptoKeyID: A.encryptPubKeyID,
-    })
-    if err != nil {
-        gTesting.Fatal(err)
-    }
-    
-    // 3) insert the new community key into B
-    opResults, err = B.doOp(ski.OpArgs{
-        OpName: ski.OpAcceptKeys,
-        Msg: opResults.Content,
-        PeerPubKey: A.encryptPubKey,
-        CryptoKeyID: B.encryptPubKeyID,
-    })
-    if err != nil {
-        gTesting.Fatal(err)
-    }
-
-	clearMsg := []byte("hello, PLAN community!")
-
-    // Encrypt a new community msg on A
-	opResults, err = A.doOp(ski.OpArgs{
-        OpName: ski.OpEncrypt,
-        CryptoKeyID: communityKeyID,
-        Msg: clearMsg,
-    })
-	if err != nil {
-		gTesting.Fatal(err)
-	}
-
-    encryptedMsg := opResults.Content
-
-    // Send the encrypted community message to B
-	opResults, err = B.doOp(ski.OpArgs{
-        OpName: ski.OpDecrypt,
-        CryptoKeyID: communityKeyID,
-        Msg: encryptedMsg,
-    })
-	if err != nil {
-		gTesting.Fatal(err)
-    }
-
-	if ! bytes.Equal(clearMsg, opResults.Content) {
-		gTesting.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Content)
-    }
-    
-
-    badMsg := make([]byte, len(encryptedMsg))
-
-    // Vary the data slightly to test 
-    for i := 0; i < 1000; i++ {
-
-        rndPos := rand.Int31n(int32(len(encryptedMsg)))
-        rndAdj := 1 + byte(rand.Int31n(254))
-        copy(badMsg, encryptedMsg)
-        badMsg[rndPos] += rndAdj
-
-        _, err = B.doOp(ski.OpArgs{
-            OpName: ski.OpDecrypt,
-            CryptoKeyID: communityKeyID,
-            Msg: badMsg,
-        })
-        if err == nil {
-            gTesting.Fatal("there should have been a decryption error!")
-        }
-    }
-    
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-func (ts *testSession) doOp(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
-
-    var outErr *plan.Perror
-    var outResults *plan.Block
-
-    ts.session.DispatchOp(&inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
-        outErr = inErr
-        outResults = opResults
-
-        ts.blocker <- 1
-    })
-
-    <- ts.blocker
-
-    return outResults, outErr
-}
-
-
-
-
-func (ts *testSession) endSession(inReason string) {
-
-    ts.session.EndSession(inReason, func(inParam interface{}, inErr *plan.Perror) {
-        if inErr != nil {
-            gTesting.Fatal(inErr)
-        }
-        ts.blocker <- 1
-    })
-
-    <- ts.blocker
-
-}
-
-
-
-// test setup helper
-func newSession(inInvocation plan.Block, inName string) *testSession {
-
-    ts := &testSession{
-        name:inName,
-        blocker:make(chan int, 100),
-    }
-
-    var err *plan.Perror
-    ts.session, err = ski.StartSession(
-        inInvocation,
-        ski.GatewayRWAccess,
-        nil,
-    )
-    if err != nil {
-        gTesting.Fatal(err)
-    }
-
-    identityResults, err := ts.doOp(
-        ski.OpArgs{
-            OpName: ski.OpNewIdentityRev,
-        })
-    if err != nil {
-        gTesting.Fatal(err)
-    }
-
-
-    ts.signingKeyID = plan.GetKeyID( identityResults.GetContentWithLabel(ski.PubSigningKeyName) )
-
-    ts.encryptPubKey = identityResults.GetContentWithLabel(ski.PubCryptoKeyName)
-    ts.encryptPubKeyID = plan.GetKeyID( ts.encryptPubKey )
-
-    return ts
-}
-
-
-*/
