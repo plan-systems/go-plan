@@ -41,7 +41,7 @@ enum  CryptoKitID {
 // KeyEntry is used in 3 ways:
 //    1) Storage/Export mode: KeyEntry used to store all fields of a fully generated key 
 //         a) KeyEntry.PrivKey != nil
-//    2) Ref mode: KeyEntry used to reference/specifiy an existing key somewhere else 
+//    2) Ref/Spec mode: KeyEntry used to reference/specifiy an existing key somewhere else 
 //         a) KeyEntry.PrivKey == nil
 //         b) Fields used: KeyType, KeyDomain, PubKey (other fields ignored)
 //    3) KeyGen mode: KeyEntry used to generate a new key
@@ -74,9 +74,8 @@ message KeyEntry {
 
 
 
-// KeyBundle packages a set of KeyEntry structs (for one of the above three generally prescibed purposes).
-// When a KeyBundle is serialized, it's identified by the codec name ski.KeyBundleProtobufCodec
-// See KeyEntry mode comments.
+// KeyBundle packages a set of KeyEntry structs (for one of the above three prescribed purposes).
+// When a KeyBundle is serialized, it's identified by the codec name ski.KeyBundleProtobufCodec.
 message KeyBundle {
 
     // The community associated with the keys in this bundle
@@ -87,5 +86,14 @@ message KeyBundle {
 }
 
 
+
+message KeyTome {
+
+    // Unix timestamp of when this was last modified (or 0 if not set)
+                int64           lastModified            = 1;
+
+    // Key storage
+    repeated    KeyBundle       bundles                 = 2;
+}
 
 
