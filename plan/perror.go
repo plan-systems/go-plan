@@ -170,6 +170,9 @@ const (
 	// KeyDomainNotFound means the KeyDomain given was not known (and out of range)
 	KeyDomainNotFound
 
+    // CommunityNotSpecified means inArgs.KeySpecs.CommunityID was not set (and so the op can't proceed)
+    CommunityNotSpecified
+
 	// UnknownSKIOpName means the given SKI op name was not recognized
 	UnknownSKIOpName
 
