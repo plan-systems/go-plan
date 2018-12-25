@@ -28,11 +28,11 @@ type Session interface {
 ** ski.Provider
 **/
 
-// StartSessionPB is a convenience struct used for ski.Provider.StartSession()
-type StartSessionPB struct {
+// SessionParams is a convenience struct used for ski.Provider.StartSession()
+type SessionParams struct {
 	Invocation     plan.Block
-	CommunityID    []byte
-	AccessScopes   [NumKeyDomains]AccessScopes
+    UserID         []byte
+	//AccessScopes   [NumKeyDomains]AccessScopes
 	BaseDir        string
 	OnSessionEnded func(inReason string)
 }
@@ -45,7 +45,7 @@ type Provider interface {
 
 	// StartSession starts a new session SKI.session.  In general, you should only start one session
 	StartSession(
-		inPB StartSessionPB,
+		inPB SessionParams,
 	) (Session, *plan.Perror)
 }
 
@@ -68,7 +68,7 @@ func RegisterProvider(inProvider Provider) error {
 
 // StartSession returns a provider implementation given an invocation block
 func StartSession(
-	inPB StartSessionPB,
+	inPB SessionParams,
 ) (Session, *plan.Perror) {
 
 	provider := gProviderRegistry[inPB.Invocation.Label]
@@ -124,7 +124,8 @@ type OpArgs struct {
 	// Key spec to used for encrypting/decrypting/signing
 	CryptoKey KeyEntry
 
-	// A list of key specs that the Op does something with
+	// A list of key specs that the Op does something with.  
+    // Note: KeySpecs.CommunityID specifies the community ID/scope and must be set for all ops!
 	KeySpecs KeyBundle
 
 	// Sender/Recipient publicly available key -- a public address in the community key space
@@ -178,7 +179,7 @@ const (
 	OpGenerateKeys = "generate_keys"
 
 	// OpExportNamedKeys exports the KeyEntry for each corresponding element in OpArgs.KeySpecs into a ski.KeyBundle.  
-    //     This KeyBundle is then marshaled and encrypted using the asymmetric key specified by OpArgs.CryptoKey, 
+    //     This KeyBundle is then marshalled and encrypted using the asymmetric key specified by OpArgs.CryptoKey, 
     //     and than returned in OpArgs.Msg.Content.
 	// Note: if a key is not found (or is invalidly specified), this entire op will error out.
 	OpExportNamedKeys = "export_named_keys"
@@ -206,7 +207,7 @@ const (
 
 const (
 
-	// KeyBundleProtobufCodec names the serialization codec for ski.KeyList (implemented via compilation of ski.proto)
+	// KeyBundleProtobufCodec names the serialization codec for ski.KeyBundle (implemented via compilation of ski.proto)
 	KeyBundleProtobufCodec = "/plan/ski/KeyBundle/1"
 
     // KeysNotImportedLabel is the label used for a serialized KeyBundle when OpImportKeys encounters keys it couldn't import.
