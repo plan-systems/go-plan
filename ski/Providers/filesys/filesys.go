@@ -1,5 +1,5 @@
-// Package fs implements ski.Provider for keys stored on the local file system (via encrypted file)
-package fs
+// Package filesys implements ski.Provider for keys stored on the local file system (via encrypted file)
+package filesys
 
 import (
     //"encoding/json"
@@ -24,7 +24,7 @@ const (
     //KeysCodec = "/plan/ski/KeyEntry/1"
 
     // ProviderInvocation should be passed for inInvocation when calling SKI.fileRepo.StartSession()
-    providerInvocation = "/plan/ski/Provider/fileRepo/1"
+    providerInvocation = "/plan/ski/Provider/filesys/1"
 
 
 )
@@ -68,7 +68,7 @@ func (provider *fileRepo) NewSession(
         Params: inPB,
         nextAutoSave: time.Now(),
         //fsStatus: 0,
-        keyRepo: ski.NewkeyRepo(),
+        KeyRepo: ski.NewKeyRepo(),
         allowedOps: [ski.NumKeyDomains]map[string]bool{},
     }
 	return session
@@ -149,8 +149,8 @@ type fsSession struct {
     nextAutoSave        time.Time
     //fsStatus            fsStatus
 
-    //keyRepos            map[plan.CommunityID]keyRepo
-    keyRepo             *ski.keyRepo
+    //KeyRepos            map[plan.CommunityID]KeyRepo
+    KeyRepo             *ski.KeyRepo
     allowedOps          [ski.NumKeyDomains]map[string]bool
     onSessionEnded      func(inReason string)
 
@@ -181,7 +181,7 @@ func (session *fsSession) loadFromFile() *plan.Perror {
 
     session.resetAutoSave()
 
-    session.keyRepo.Clear()
+    session.KeyRepo.Clear()
 
     pathname := session.dbPathname()
     buf, ferr := ioutil.ReadFile(pathname)
@@ -202,7 +202,7 @@ func (session *fsSession) loadFromFile() *plan.Perror {
     }
 
     if err == nil {
-        err = session.keyRepo.Unmarshal(buf)
+        err = session.KeyRepo.Unmarshal(buf)
     }
 
     // Zero out sensitive bytes
@@ -222,7 +222,7 @@ func (session *fsSession) saveToFile() *plan.Perror {
 
     if session.autoSave != nil {
   
-        buf, err := session.keyRepo.Marshal()
+        buf, err := session.KeyRepo.Marshal()
         if err != nil {
             return err
         }
@@ -269,9 +269,13 @@ func (session *fsSession) EndSession(inReason string, inOnCompletion plan.Action
     return
 }
 
-func (session *fsSession) CheckPermissionsForOp(
+func (session *fsSession) CheckOpParamsAndPermissions(
     inArgs *ski.OpArgs,
     ) *plan.Perror {
+
+    if len(inArgs.KeySpecs.CommunityId) < 4 {
+        return plan.Errorf(nil, plan.CommunityNotSpecified, "community ID must be specified for SKI op %v", inArgs.OpName)
+    }
 
     /*
     for i, keySpec := inKeySpecs {
@@ -304,7 +308,7 @@ func (session *fsSession) CheckPermissionsForOp(
 
 func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
 
-    err := session.CheckPermissionsForOp(inArgs)
+    err := session.CheckOpParamsAndPermissions(inArgs)
     if err != nil {
         inOnCompletion(nil, err)
         return
@@ -318,11 +322,13 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
             mutates = true
     }
 
-    keyringSet, err := session.keyRepo.FetchKeyringSet(session.Params.CommunityID, mutates)
+    keyringSet, err := session.KeyRepo.FetchKeyringSet(inArgs.KeySpecs.CommunityId, mutates)
     if err != nil {
         inOnCompletion(nil, err)
         return
     }
+
+    plan.Assert(keyringSet != nil, "expected keyringSet for non-nil error!")
 
     results, err := doOp(
         keyringSet,
@@ -364,24 +370,10 @@ func doOp(
 
     var err *plan.Perror
 
-    // ====================================
-    // 1) PRE-OP
-    {
-        switch opArgs.OpName {
 
-            case ski.OpExportNamedKeys:
-                opArgs.Msg, err = exportKeysIntoMsg(ioKeyringSet, opArgs.KeySpecs.Keys)
-    
-        }
-
-        if err != nil {
-            return nil, err
-        }
-    }
-
-
-    // ====================================
-    // 2) LOAD OP CRYPTO KEY & KIT
+    /*****************************************************
+    ** 1) LOAD OP CRYPTO KEY & KIT
+    **/
     var cryptoKey *ski.KeyEntry
     var cryptoPkg *ski.CryptoKit
 
@@ -414,8 +406,26 @@ func doOp(
     }
 
 
-    // ====================================
-    // 3) DO OP (fill msg, using privateKey)
+    /*****************************************************
+    ** 2) PRE-OP
+    **/
+    {
+        switch opArgs.OpName {
+
+            case ski.OpExportNamedKeys:
+                opArgs.Msg, err = exportKeysIntoMsg(ioKeyringSet, opArgs.KeySpecs.Keys)
+    
+        }
+
+        if err != nil {
+            return nil, err
+        }
+    }
+
+
+    /*****************************************************
+    ** 3) DO OP
+    **/
     var msg []byte
     {
         switch opArgs.OpName {
@@ -475,8 +485,9 @@ func doOp(
 
 
 
-    // ====================================
-    // 4) POST OP
+    /*****************************************************
+    ** 4) POST OP
+    **/
     if err == nil {
         switch opArgs.OpName {
             case ski.OpImportKeys:

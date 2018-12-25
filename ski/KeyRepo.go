@@ -8,25 +8,24 @@ import (
 
 )
 
-// keyRepo is a memory-resident data structure that stores KeyEntry, placed in a hierarchy of data structures, indexed by:
+// KeyRepo is a memory-resident data structure that stores KeyEntry, placed in a hierarchy of data structures, indexed by:
 //    CommunityID => KeyDomain => KeyEntry.PubKey
-type keyRepo struct {
+type KeyRepo struct {
     sync.RWMutex
 
     ByCommunity   map[plan.CommunityID]*KeyringSet
 }
 
 
-
-func newKeyRepo() *keyRepo {
-    return &keyRepo{
+// NewKeyRepo creates a newly initialized KeyRepo
+func NewKeyRepo() *KeyRepo {
+    return &KeyRepo{
         ByCommunity: map[plan.CommunityID]*KeyringSet{},
     }
 }
 
-
-func (KR *keyRepo) Clear() {
-
+// Clear resets the given KeyRepo as if NewKeyRepo() was called instead.
+func (KR *KeyRepo) Clear() {
 
     // TODO: zero out each key entry to protect private keys
     KR.RLock()
@@ -39,7 +38,7 @@ func (KR *keyRepo) Clear() {
 
 
 // FetchKeyringSet returns the KeyringSet associated with the given community ID 
-func (KR *keyRepo) FetchKeyringSet(
+func (KR *KeyRepo) FetchKeyringSet(
     inCommunityID []byte,
     inAutoCreate bool,
 ) (*KeyringSet, *plan.Perror) {
@@ -72,8 +71,9 @@ func (KR *keyRepo) FetchKeyringSet(
 
 
 
-
-func (KR *keyRepo) Marshal() ([]byte, *plan.Perror) {
+// Marshal writes out entire state to a given buffer.
+// Warning: the return buffer is not encrypted and contains private key data!
+func (KR *KeyRepo) Marshal() ([]byte, *plan.Perror) {
 
     KR.RLock()
 
@@ -116,8 +116,8 @@ func (KR *keyRepo) Marshal() ([]byte, *plan.Perror) {
 }
 
 
-
-func (KR *keyRepo) Unmarshal(dAtA []byte) *plan.Perror {
+// Unmarshal resets this KeyRepo from the state data written out by Marshal()
+func (KR *KeyRepo) Unmarshal(dAtA []byte) *plan.Perror {
 
     keyTome := KeyTome{}
 
