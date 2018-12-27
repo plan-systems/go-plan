@@ -1,10 +1,206 @@
-// See plan-systems/plan-protobuf/README.md
+// See http://github.com/plan-systems/plan-protobufs/
 
 syntax = "proto3";
 
 package pdi;
 
 import "github.com/plan-systems/go-plan/plan/plan.proto";
+import "github.com/plan-systems/go-plan/ski/ski.proto";
+
+
+
+
+
+service StorageProvider {
+
+    // Session start:
+    //    0) On StorageProvider node initial setup, it holds a pub/private key pair plus certificate from the identity of the owner 
+    //    1) When a client connects, it can check the provider node UUID is ok (not backlisted, etc) 
+    //    2) When the client submits a txn:
+    //        a) the client sends it via SubmitTxn()
+    //        b) the SP preps and stages the txn, and sends back a sig request via ListenToHost()/HostMsg
+    //        c) the client uses their SP identity and signs it using the appropriate CryptoKit 
+    ///       d) the client sends the sig via CommitTxn()
+    // Returns a continuous stream of msgs indicating server health, connectivity, sig requests, etc. 
+    rpc         StartSession(SessionRequest)                    returns (stream HostMsg);
+
+    // A signature response from the client (a response to AwaitHostMsg.HostMsg)
+    rpc         PostResponse(HostMsg)                           returns (plan.Status);
+
+    // Requests a sequence of txns starting with the specified time, txn name, or other query criteria.
+    rpc         Query(QueryTxns)                                returns (stream TxnBundle);
+
+    // Submits a given plan.Block to this SP.  Upon receipt, the SP will marshal the submitted txn body
+    //    into an internal/native txn(s) that can be written to the actual SP implementation.
+    rpc         SubmitTxn(SubmitTxnPB)                          returns (StagedTxnPB);
+
+    // Supplies the sig(s) needed to finish and commit the current txn to the SP's permanent record.
+    rpc         CommitTxn(StagedTxnPB)                          returns (stream StorageTxn);
+
+}
+
+
+message SessionRequest {
+
+    // Normally the empty string, this is used when an existing token is req'd
+                bytes           session_token           = 1;
+
+    // Which community this session wants to access (a pnode hosts multiple communities)
+                bytes           community_id            = 2;
+
+    // Identifies who is requesting the session (via pubkey)
+                ski.PubKey      client_id               = 3;
+
+    // Submits an authentication challenge to the host, so that the host can be validated.
+                ski.SigRequest  challenge               = 4;
+
+}
+
+message SessionInfo {
+                string          session_token           = 1;
+}
+
+
+message SubmitTxnPB {
+
+    // ID/address/pubkey that will posting the to-be txn.  
+                ski.PubKey      from                    = 1;
+
+    // This will become the txn body -- sent via SubmitTxn()
+    // This can be anything, but in practice it typically contains one or more serialized pdi.EntryCrypt.
+                plan.Block      body                    = 2;
+
+}
+
+message StagedTxnPB {
+
+    // Reports any error/state condition.
+                plan.Status     status                  = 1;
+                
+    // Once the SP prepares/processes the txn body from SubmitTxn() into a native SP txn internally, 
+    //    the native txn(s) needs to be signed since the ledger/authority it's using presumably requires that.
+    // This happens by the SP handing back digest(s) for the client to sign.
+                ski.SigRequest  sig_request             = 2;
+
+}
+
+
+
+message HostMsg {
+
+    // A signature request/response from the host/server (typically a request to the client to sign something)
+                ski.SigRequest  sig_request             = 2;
+}
+
+
+
+message QueryTxns {
+
+    // If set, unix timestamp in secs of the commit time of txn(s) to be read
+                int64           time_committed              = 1;
+
+   // If set, this is the txn name to be fetched.  
+   // If omitted, all txns with the matching time committed. 
+                bytes           txn_name                    = 2;
+
+    // If true, StorageTxn.Body will be set/sent for each txn returned.
+    // If false, StorageTxn.Body == nil for each txn returned (saving bandwidth)
+                bool            include_body                = 3;
+
+    // If > 0, this caps the the number of txns returned until the requested is considered complete.
+                uint64          max_txns                    = 4;
+
+    // If set, this specifies a state "bookmark" for the StorageProvider to resume reading from.
+                plan.Block      bookmark                    = 5;
+}
+
+
+
+message TxnBundle {
+
+    // Zero or more StorageTxns being returned
+    repeated    StorageTxn      txns                        = 1;
+
+    // Intended to be passed in pdi.Query in order for a client to resume a txn stream/sequence -- optional.  
+    // This Block is intended to be used by the originating StorageProvider, so it's opaque as far as the client is concerned.
+                plan.Block      bookmark                    = 2;
+
+}
+
+
+
+
+// TxnStatus describes how far along a StorageTxn is on being stored on a PDI StorageProvider.
+// Note: odd values reflect an error state
+enum TxnStatus {
+
+    // The txn is yet to be committed to storage
+    AWAITING_COMMIT             = 0;
+
+    // The txn has been submitted and is awaiting the client to sign the txn digest (so it can be internally submitted)
+    AWAITING_SIG                = 1;
+
+    // The txn has been committed and is in the process of being stored
+    COMMITTING                  = 2;
+
+    // The txn is yet to be committed to storage
+    INVALID_TXN                 = 3;
+
+    // This txn was lost or is otherwise not available 
+    LOST                        = 5;
+
+    // This txn has failed to commit because of an error (or the storage provider rejected it for some reason) 
+    FAILED_TO_COMMIT            = 7;
+
+    // The txn has been committed and has been confirmed as stored (but could still potentially be reverted)
+    COMMITTED                   = 8;
+
+    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equivalent state to AWAITING_COMMIT)
+    REVOKED                     = 9;
+
+    // The txn has been committed, confirmed as stored, and faces no possibility of being reverted.
+    FINALIZED                   = 16;
+
+}
+
+
+
+message StorageTxn {
+
+    // Issued by the storage layer (not storage clients) some time after StorageSession.Commit()
+    // Since a StorageProvider creates/assigns txn names, they can be any length (typically 8 to 32 bytes),
+    //    but the length is *never* changes when a StorageProvider inits a new repo.
+                bytes           txn_name                    = 1;
+
+    // Unix timestamp of when this txn was committed for storage (0 if not committed)
+                int64           time_committed              = 2;
+
+    // Consensus-based unix timestamp for this txn (or 0 if not available).  
+    // If txn_status == FINALIZED, then this timestamp:
+    //      - won't ever change, 
+    //      - is universal across storage peers
+    //      - is trustworthy
+                int64           time_consensus              = 3;
+
+    // Describes the state of this txn segment number
+                TxnStatus       txn_status                  = 4;
+
+    // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
+                plan.Block      body                        = 5;
+
+    // Set to 0 if n/a or no alert set
+                uint64          alert_code                  = 6;
+
+    // Human-readable amplifying information for AlertCode.
+                string          alert_msg                   = 7; 
+
+                
+}
+
+
+
+
+
 
 
 /**********************************************************************************************************************
@@ -293,124 +489,3 @@ message EntryHeader {
 
 
 
-
-
-/*
-enum TxnDataDesc {
-
-    // The txn data has been omitted 
-    DATA_OMITTED                = 0;
-
-    // The segments, when reassembled together, form EntryCrypt.Marshal()
-    PDI_ENTRY_CRYPT             = 1;
-
-}
-*/
-
-
-// TxnStatus describes how far along a StorageTxn is on being stored on a PDI StorageProvider.
-// Note: odd values reflect an error state
-enum TxnStatus {
-
-    // The txn is yet to be committed to storage
-    AWAITING_COMMIT             = 0;
-
-    // The txn has been submitted and is awaiting the client to sign the txn digest (so it can be internally submitted)
-    AWAITING_SIG                = 1;
-
-    // The txn has been committed and is in the process of being stored
-    COMMITTING                  = 2;
-
-    // The txn is yet to be committed to storage
-    INVALID_TXN                 = 3;
-
-    // This txn was lost or is otherwise not available 
-    LOST                        = 5;
-
-    // This txn has failed to commit because of an error (or the storage provider rejected it for some reason) 
-    FAILED_TO_COMMIT            = 7;
-
-    // The txn has been committed and has been confirmed as stored (but could still potentially be reverted)
-    COMMITTED                   = 8;
-
-    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equivalent state to AWAITING_COMMIT)
-    REVOKED                     = 9;
-
-    // The txn has been committed, confirmed as stored, and faces no possibility of being reverted.
-    FINALIZED                   = 16;
-
-}
-
-
-
-message StorageTxn {
-
-    // Issued by the storage layer (not storage clients) some time after StorageSession.Commit()
-    // Since a StorageProvider creates/assigns txn names, they can be any length (typically 8 to 32 bytes),
-    //    but the length is *never* changes when a StorageProvider inits a new repo.
-                bytes           txn_name                    = 1;
-
-    // Unix timestamp of when this txn was committed for storage (0 if not committed)
-                int64           time_committed              = 2;
-
-    // Consensus-based unix timestamp for this txn (or 0 if not available).  
-    // If txn_status == FINALIZED, then this timestamp:
-    //      - won't ever change, 
-    //      - is universal across storage peers
-    //      - is trustworthy
-                int64           time_consensus              = 3;
-
-    // Describes the state of this txn segment number
-                TxnStatus       txn_status                  = 4;
-
-    // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
-                plan.Block      body                        = 5;
-
-    // Set to 0 if n/a or no alert set
-                uint64          alert_code                  = 6;
-
-    // Human-readable amplifying information for AlertCode.
-                string          alert_msg                   = 7; 
-
-                
-}
-
-
-
-
-
-
-
-
-message QueryTxns {
-
-    // If set, unix timestamp in secs of the commit time of txn(s) to be read
-                int64           time_committed              = 1;
-
-   // If set, this is the txn name to be fetched.  
-   // If omitted, all txns with the matching time committed. 
-                bytes           txn_name                    = 2;
-
-    // If true, StorageTxn.Body will be set/sent for each txn returned.
-    // If false, StorageTxn.Body == nil for each txn returned (saving bandwidth)
-                bool            include_body                = 3;
-
-    // If > 0, this caps the the number of txns returned until the requested is considered complete.
-                uint64          max_txns                    = 4;
-
-    // If set, this specifies a state "bookmark" for the StorageProvider to resume reading from.
-                plan.Block      bookmark                    = 5;
-}
-
-
-
-message TxnBundle {
-
-    // Zero or more StorageTxns being returned
-    repeated    pdi.StorageTxn      txns                        = 1;
-
-    // Intended to be passed in pdi.QueryTxns in order for a client to resume txn reporting -- optional.  
-    // This Block is intended to be used by the originating StorageProvider, so it's opaque as far as the client is concerned.
-                plan.Block          bookmark                    = 2;
-
-}
