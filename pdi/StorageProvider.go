@@ -39,7 +39,7 @@ type StorageSession interface {
 	GetOutgoingChan() <-chan *StorageMsg
 
 	// RequestTxns requests that the given txn names to be added to the msg stream.  If a txn name is unknown or invalid, then StorageTxn.TxnStatus is set to INVALID_TXN.
-	RequestTxns(inTxnRequests []TxnRequest) (RequestID, error)
+	RequestTxns(inQueryTxns []QueryTxns) (RequestID, error)
 
 	// ReportFromBookmark sets the session's "read head position" based on state information returned via GetBookmark() from this or a previous session.
 	ReportFromBookmark(inFromBookmark *plan.Block) (RequestID, error)

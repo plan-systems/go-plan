@@ -3,7 +3,6 @@ package main
 import (
 	"math"
 	"math/rand"
-	"os"
 	"os/user"
 	"path"
 	"testing"
@@ -40,7 +39,7 @@ func Test1(t *testing.T) {
 
 	provider := bolt.NewProvider(
 		getTmpDir(),
-		os.FileMode(0775),
+		plan.DefaultFileMode,
 	)
 
 	var err error
@@ -148,8 +147,8 @@ func Test1(t *testing.T) {
 
 								go func() {
 									for _, txn := range msg.Txns {
-										pb.session.RequestTxns([]pdi.TxnRequest{
-											pdi.TxnRequest{
+										pb.session.RequestTxns([]pdi.QueryTxns{
+											pdi.QueryTxns{
 												TxnName:       txn.TxnName,
 												TimeCommitted: txn.TimeCommitted,
 												IncludeBody:   true,

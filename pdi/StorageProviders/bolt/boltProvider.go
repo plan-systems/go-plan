@@ -159,7 +159,7 @@ func (provider *boltProvider) endSession(
 type txnBatch struct {
     next            *txnBatch
 	requestID     pdi.RequestID
-	txnsRequested []pdi.TxnRequest
+	txnsRequested []pdi.QueryTxns
 
 	txnsToCommit  []pdi.StorageTxn // nil if n/a
 }
@@ -290,7 +290,7 @@ func (session *boltSession) readerStep(tx *bolt.Tx, bucket *bolt.Bucket) []pdi.S
 }
 
 
-func (session *boltSession) readTxns(tx *bolt.Tx, bucket *bolt.Bucket, txnsRequested []pdi.TxnRequest) []pdi.StorageTxn {
+func (session *boltSession) readTxns(tx *bolt.Tx, bucket *bolt.Bucket, txnsRequested []pdi.QueryTxns) []pdi.StorageTxn {
 
     N := len(txnsRequested)
     txns := make([]pdi.StorageTxn, N)
@@ -797,7 +797,7 @@ func (session *boltSession) GetOutgoingChan() <-chan *pdi.StorageMsg {
 
 
 func (session *boltSession) RequestTxns(
-	inTxnRequests []pdi.TxnRequest,
+	inQueryTxnss []pdi.QueryTxns,
     ) (pdi.RequestID, error) {
 
     if ! session.IsReady() {
@@ -805,7 +805,7 @@ func (session *boltSession) RequestTxns(
     }
   
     batch := session.startNewRequest()
-    batch.txnsRequested = append(batch.txnsRequested, inTxnRequests[:]...)
+    batch.txnsRequested = append(batch.txnsRequested, inQueryTxnss[:]...)
     
     session.txnBatchInbox <- batch
     
