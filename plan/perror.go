@@ -20,17 +20,20 @@ func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 // GUI error philosophy: errors can be suppressed by type or by item that they are for.
 
 // Perror is PLAN's common error struct.  Perror.Code allows easy matching while allowing error strings to contain useful contextual information.
-type Perror struct {    
-	Code int32
-	Msg  string
+type Perror struct {  
+    Status  
+
 	Err  error
 }
 
 // Error create a new PError
 func Error(inErr error, inCode int32, inMsg string) *Perror {
 	return &Perror{
-		inCode,
-		inMsg,
+		Status{
+            inCode,
+            inMsg,
+            nil,
+        },
 		inErr,
 	}
 }
@@ -38,8 +41,11 @@ func Error(inErr error, inCode int32, inMsg string) *Perror {
 // Errorf is a convenience function of Error() that uses a string formatter.
 func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *Perror {
 	return &Perror{
-		inCode,
-		fmt.Sprintf(inFormat, inArgs),
+		Status{
+            inCode,
+            fmt.Sprintf(inFormat, inArgs),
+            nil,
+        },
 		inErr,
 	}
 }

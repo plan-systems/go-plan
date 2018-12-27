@@ -57,3 +57,41 @@ message Block {
     //    can be interpreted or employed any way a client or protocol sees fit.
     repeated    Block           subs                    = 5;
 }
+
+
+enum ValType {
+    NONE                        = 0;
+    INT                         = 1;
+    FLOAT                       = 2;
+    STR                         = 3;
+    BLOCK                       = 4;
+}
+
+
+
+message Val {
+    
+    // The value's name/label/key
+                string          name                    = 1;
+
+    // Specifies which of the below are set/valid
+                ValType         val_type                = 2;
+
+                int64           int                     = 3;
+                double          float                   = 4;
+                string          str                     = 5;
+                Block           block                   = 6; 
+}
+
+message Status {
+
+    // Information code
+                int32           code                    = 1;
+
+    // Information msg
+                string          msg                     = 2;
+
+    // An unordered list of arbitrary fields/params associated with this error
+    repeated    Val             params                  = 3;
+
+}
