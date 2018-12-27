@@ -3,7 +3,7 @@ package filesys
 
 import (
     //"encoding/json"
-    "log"
+    log "github.com/sirupsen/logrus"
     "path"
     "io/ioutil"
     "os"
@@ -161,7 +161,7 @@ func (session *fsSession) dbPathname() string {
         "ski/Providers/fs", 
         base64.RawURLEncoding.EncodeToString(session.Params.UserID[:])*/
 
-    return path.Join(session.Params.BaseDir, "fsKeyTome.pb")
+    return path.Join(session.Params.BaseDir, "filesysKeyTome.pb")
 }
 
 
@@ -323,10 +323,21 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
 
     plan.Assert(keyringSet != nil, "expected keyringSet for non-nil error!")
 
+    logE := log.WithFields(log.Fields{ 
+        "desc": "ski.Provider.filesys.DispatchOp()",
+        "OpName": inArgs.OpName,
+    })
+    logE.Trace( "doOp()" )
+
     results, err := doOp(
         keyringSet,
         *inArgs,
     )
+ 
+    if err != nil {
+        logE.WithError(err)
+        logE.Info("doOp() returned ERROR")
+    }
 
     if mutates {
         session.autoSaveMutex.Lock()
@@ -362,7 +373,6 @@ func doOp(
     outResults := &plan.Block{}
 
     var err *plan.Perror
-
 
     /*****************************************************
     ** 1) LOAD OP CRYPTO KEY & KIT
@@ -572,10 +582,10 @@ func importKeysFromMsg(
 
     keysFailed := ioKeyringSet.ImportKeys(keyBundle.Keys)
     if len(keysFailed) > 0 {
-
-        // TODO: should more be done here other than print a msg?  We don't want this to be fatal
-        warn := plan.Errorf(nil, plan.KeyImportFailed, "failed to import the given keys {%v}", keysFailed)
-        log.Print(warn)
+        log.WithFields(log.Fields{
+            "code": plan.KeyImportFailed,
+            "key_failed": keysFailed,
+        }).Warn("failed to import the given keys")
     }
 
     return nil
