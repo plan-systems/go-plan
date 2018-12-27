@@ -13,6 +13,9 @@ package plan
 
 import (
 	"time"
+    "os"
+	"os/user"
+    "path"
 )
 
 // DataHandler is a deferred data handler function
@@ -115,6 +118,9 @@ var (
 		0, 0, 0, 0,
 		0, 0, 0, 3,
 	}
+
+    // DefaultFileMode is used to express the default mode of file creation.
+    DefaultFileMode = os.FileMode(0775)
 )
 
 // Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflipping
@@ -191,4 +197,27 @@ func GetChannelID(in []byte) ChannelID {
 
 	copy(out[overhang:], in)
 	return out
+}
+
+// UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
+// inSubDir can be any relative pathname
+func UseLocalDir(inSubDir string) (string, error) {
+	usr, err := user.Current()
+	if err != nil {
+        return "", err
+	}
+
+    pathname := usr.HomeDir
+    if len(inSubDir) > 0 {
+        pathname = path.Join(pathname, inSubDir)
+    }
+    pathname = path.Clean(path.Join(pathname, "_.plan"))
+
+    err = os.MkdirAll(pathname, DefaultFileMode)
+	if err != nil {
+		return "", err
+	}
+
+	return pathname, nil
+
 }
