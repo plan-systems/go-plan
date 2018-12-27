@@ -4,7 +4,7 @@ package pnode
 import (
     //"database/sql"
     //"fmt"
-    "log"
+    log "github.com/sirupsen/logrus"
     "os"
     "path"
     "io/ioutil"
@@ -14,7 +14,7 @@ import (
     //"sort"
     //"encoding/hex"
     "encoding/json"
-    "encoding/base64"
+    //"encoding/base64"
 
     //"github.com/tidwall/redcon"
 
@@ -226,7 +226,7 @@ func (CR *CommunityRepo) LoadChannelStore(
 
     CS.Lock()
 
-    CS.channelDir = path.Join(CR.AbsRepoPath, "ch", CR.ParentPnode.DirNameEncoding.EncodeToString(CS.ChannelID[:]))
+    CS.channelDir = path.Join(CR.AbsRepoPath, "ch", CR.ParentPnode.FSNameEncoding.EncodeToString(CS.ChannelID[:]))
 
     if inCreateNew {
 
@@ -321,6 +321,7 @@ func (CR *CommunityRepo) StartService() error {
     var err error
     CR.storage, err = CR.storageProvider.StartSession(
         CR.Info.CommunityID,
+        nil,
     )
     if err != nil {
         return err 
@@ -410,7 +411,7 @@ func (CR *CommunityRepo) StartService() error {
                             entryTxnIndex: eip.entryTxnIndex,
                             parentTxnName: eip.parentTxnName,
                             })
-                        log.Printf("failed to process entry: %s", inErr)
+                        log.Warn("failed to process entry: %s", inErr)
                     }
 
                     doNextEntry <-true
@@ -446,7 +447,7 @@ func (CR *CommunityRepo) ReadMemberFile(
     pathname := path.Join(
         CR.AbsRepoPath, 
         layer2Dir, 
-        CR.DirNameEncoding.EncodeToString(inMemberID[:]),
+        CR.ParentPnode.FSNameEncoding.EncodeToString(inMemberID[:]),
         inFileName)
 
     return ioutil.ReadFile(pathname)
@@ -463,7 +464,7 @@ func (CR *CommunityRepo) WriteMemberFile(
     pathname := path.Join(
         CR.AbsRepoPath, 
         layer2Dir, 
-        CR.DirNameEncoding.EncodeToString(inMemberID[:]),
+        CR.ParentPnode.FSNameEncoding.EncodeToString(inMemberID[:]),
         inFileName)
 
     return ioutil.WriteFile(pathname, inData, CR.DefaultFileMode)
@@ -575,7 +576,7 @@ func (eip *entryInProcess) unpackHeader(
 
         &ski.OpArgs {
             OpName: ski.OpDecrypt,
-            CryptoKeyID: plan.GetKeyID(eip.entry.CommunityKeyId),
+            CryptoKey: plan.GetKeyID(eip.entry.CommunityKeyId),
             Msg: eip.entry.HeaderCrypt,
         }, 
 

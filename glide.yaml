@@ -7,3 +7,4 @@ import:
 - package: golang.org/x/crypto/nacl/box
 - package: golang.org/x/crypto/nacl/secretbox
 - package: golang.org/x/crypto/nacl/sign
+- package: github.com/sirupsen/logrus
