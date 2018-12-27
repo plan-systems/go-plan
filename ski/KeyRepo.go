@@ -78,7 +78,8 @@ func (KR *KeyRepo) Marshal() ([]byte, *plan.Perror) {
     KR.RLock()
 
     keyTome := KeyTome {
-        make([]*KeyBundle, 0, len(KR.ByCommunity)),
+        TimeCreated: plan.Now().UnixSecs,
+        Bundles: make([]*KeyBundle, 0, len(KR.ByCommunity)),
     }
 
     for _, krSet := range KR.ByCommunity {
