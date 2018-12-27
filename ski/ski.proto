@@ -43,7 +43,7 @@ enum  CryptoKitID {
 //         a) KeyEntry.PrivKey != nil
 //    2) Ref/Spec mode: KeyEntry used to reference/specifiy an existing key somewhere else 
 //         a) KeyEntry.PrivKey == nil
-//         b) Fields used: KeyType, KeyDomain, PubKey (other fields ignored)
+//         b) Fields used: KeyDomain, PubKey (other fields ignored)
 //    3) KeyGen mode: KeyEntry used to generate a new key
 //         a) Fields used: KeyType, KeyDomain, CryptoKitID (other fields ignored)
 message KeyEntry {
@@ -89,11 +89,30 @@ message KeyBundle {
 
 message KeyTome {
 
-    // Unix timestamp of when this was last modified (or 0 if not set)
-                int64           lastModified            = 1;
+    // Unix timestamp in secs of when this was created (or 0 if not set)
+                int64           time_created            = 1;
 
     // Key storage
     repeated    KeyBundle       bundles                 = 2;
 }
 
 
+
+
+
+message SigRequest {
+
+    // A reference value specified by the originator for internal use.  Greater than 0 and is always unique.
+                int64               id                  = 1;
+
+    // Used to specify an explicit key to sign the given digest.
+    // Can be underspecified indicating that the signer know the right signing key to use.
+                KeyEntry            key_spec            = 2;
+
+    // Digest(s) to be signed
+    repeated    bytes               digests             = 3;
+
+    // A signature corresponding to each digest stored in digests
+    repeated    bytes               sigs                = 4;
+                
+}
