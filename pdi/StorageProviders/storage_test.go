@@ -221,7 +221,7 @@ func getTmpDir() string {
 		gTesting.Fatal(err)
 	}
 
-	return path.Join(usr.HomeDir, "plan-testing")
+	return path.Join(usr.HomeDir, "_plan-testing")
 
 }
 
