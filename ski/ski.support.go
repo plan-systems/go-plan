@@ -71,3 +71,85 @@ func GenerateNewKeys(
 
     return newKeys, nil
 }
+
+
+// GenerateKeys is a convenience function that generates and returns keys via an open SKI session 
+func GenerateKeys(
+    skiSession Session,
+    inCommunityID []byte,
+    inKeySpecs []*KeyEntry,
+    inOnCompletion func(inKeys []*KeyEntry, inErr *plan.Perror),
+) {
+
+    skiSession.DispatchOp(&OpArgs{
+            OpName: OpGenerateKeys,
+            KeySpecs: KeyBundle{
+                CommunityId: inCommunityID,
+                Keys: inKeySpecs,
+            },
+        }, 
+        func (inResults *plan.Block, err *plan.Perror) {
+            var newKeys []*KeyEntry
+
+            if err == nil {
+                bundleBuf := inResults.GetContentWithCodec(KeyBundleProtobufCodec, 0)
+                keyBundle := KeyBundle{}
+                merr := keyBundle.Unmarshal(bundleBuf)   
+                if merr != nil {
+                    err = plan.Error(merr, plan.FailedToUnmarshal, "failed to unmarshal KeyBundle from OpGenerateKeys")
+                } else {
+                    newKeys = keyBundle.Keys
+
+                    N := len(keyBundle.Keys)
+                    plan.Assert(N == len(inKeySpecs), "number of keys returned from GenerateKeys() does not match input")
+
+                    for i := 0; i < N; i++ {
+                        plan.Assert(keyBundle.Keys[i].KeyType == inKeySpecs[i].KeyType, "keys generated from GenerateKeys() don't match request")
+                    }
+                }
+            }
+
+            inOnCompletion(newKeys, err)
+        },
+    )
+
+
+}
+
+/*
+    results := ts.doOp(ski.OpArgs{
+            OpName: ski.OpGenerateKeys,
+            KeySpecs: ski.KeyBundle{
+                CommunityId: gCommunityID[:],
+                Keys: []*ski.KeyEntry{
+                    &ski.KeyEntry{
+                        KeyType: ski.KeyType_ASYMMETRIC_KEY,
+                        KeyDomain: ski.KeyDomain_PERSONAL,
+                    },
+                    &ski.KeyEntry{
+                        KeyType: ski.KeyType_SIGNING_KEY,
+                        KeyDomain: ski.KeyDomain_PERSONAL,
+                    },
+                },
+            },
+        })
+
+
+    {
+        bundleBuf := results.GetContentWithCodec(ski.KeyBundleProtobufCodec, 0)
+        keyBundle := ski.KeyBundle{}
+        err := keyBundle.Unmarshal(bundleBuf)
+        if err != nil {
+            gTesting.Fatal(err)
+        } 
+        for i := 0; i < len(keyBundle.Keys); i++ {
+            switch keyBundle.Keys[i].KeyType {
+                case ski.KeyType_ASYMMETRIC_KEY:
+                    ts.encryptPubKey = keyBundle.Keys[i].PubKey
+
+                case ski.KeyType_SIGNING_KEY:
+                    ts.signingPubKey = keyBundle.Keys[i].PubKey
+            }
+        }
+    }
+*/
