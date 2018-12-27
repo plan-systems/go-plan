@@ -7,7 +7,7 @@ syntax = "proto3";
 package pservice;
 
 import "github.com/plan-systems/go-plan/pdi/pdi.proto";
-//import "github.com/plan-systems/go-plan/ski/ski.proto";
+import "github.com/plan-systems/go-plan/ski/ski.proto";
 import "github.com/plan-systems/go-plan/plan/plan.proto";
 
 
@@ -124,43 +124,65 @@ message MemberInfoResponse {
 service StorageProvider {
 
     // Session start:
-    //    0) On StorageProvider node initial setup, it hold a pub/private key pair.  
-    //    1) When a client connects, it encrypts the member's storage txn signing key with the StorageProvider's pub key.
-    //    2) The node decrypts the challenge using its private key, and now has the ability to sign new txns.
+    //    0) On StorageProvider node initial setup, it holds a pub/private key pair plus certificate from the identity of the owner 
+    //    1) When a client connects, it can check the provider node UUID is ok (not backlisted, etc) 
+    //    2) When the client submits a txn:
+    //        a) the client sends it via SubmitTxn()
+    //        b) the SP preps and stages the txn, and sends back a sig request
+    //        c) the client uses their SP identity and signs it using the appropriate CryptoKit 
+    ///       d) the client sends the sig via CommitTxn()
     rpc         StartSession(SessionRequest)                    returns (SessionInfo);
 
-    // Requests a sequence of txns starting with the specified time or txn name.
-    rpc         RequestTxns(pdi.TxnRequest)                     returns (stream pdi.StorageTxn);
+    // Requests a sequence of txns starting with the specified time, txn name, or other query criteria.
+    rpc         QueryTxns(pdi.QueryTxns)                        returns (stream pdi.TxnBundle);
 
-    // Commits the given txn body to this storage, using the signing key obtained from step (2) of StartSession().
-    rpc         CommitTxn(CommitRequest)                        returns (stream pdi.StorageTxn);
+    // Submits the given block to this SP.  Upon receipt, the SP will marshal the submitted txn body
+    //    into an internal/native txn that can be written to the actual SP implementation.
+    rpc         SubmitTxn(SubmitTxnPB)                          returns (StagedTxnPB);
 
-    // Returns a continuous stream of status reports indicating server health, connectivity, stats, etc. 
-    rpc         ReportStatus(StatusRequest)                    returns (stream StatusReport);
+    // Supplies the sig(s) needed to finish and commit the current txn to the permanent record.
+    rpc         CommitTxn(StagedTxnPB)                          returns (stream pdi.StorageTxn);
+
+    // Returns a continuous stream of status reports indicating server health, connectivity, sig requests, etc. 
+    rpc         ReportStatus(ReportStatusPB)                    returns (stream StatusReport);
+
+    // A signature response from the client (a response to StatusReport.SigRequest)
+    rpc         PostSigResponse(ski.SigRequest)                 returns (plan.Status);
 
 }
 
 
 
-message CommitRequest {
+message SubmitTxnPB {
 
-    // This will become the txn body
+    // This will become the txn body -- sent via SubmitTxn()
+    // This can be anything, but in practice it typically contains one or more serialized pdi.EntryCrypt.
                 plan.Block          body                    = 1;
+}
 
-    // This is a signature for CommitRequest.Body, using the signing key associated with the client of the current session.
-    // Before a StorageProvider will generate a txn, it will first verify the author of who's doing the commit is a
-    //    valid and legit community member.  
-    //            bytes               body_sig                = 2;
+message StagedTxnPB {
+
+    // Reports any error/state condition.
+                plan.Status         status                  = 1;
+                
+    // Once the SP prepares/processes the txn body from SubmitTxn() into a native SP txn internally, 
+    //    the native txn(s) needs to be signed since the ledger/authority it's using presumably requires that.
+    // This happens by the SP handing back digest(s) for the client to sign.
+                ski.SigRequest      sig_request             = 2;
 
 }
 
 
-message StatusRequest {
+message ReportStatusPB {
 
 }
+
 
 message StatusReport {
 
+
+    // A signature request/response from the host/server (typically a request to the client to sign something)
+                ski.SigRequest      sig_request             = 2;
 }
 
 service Pnode {
