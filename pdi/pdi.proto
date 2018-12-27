@@ -315,6 +315,9 @@ enum TxnStatus {
     // The txn is yet to be committed to storage
     AWAITING_COMMIT             = 0;
 
+    // The txn has been submitted and is awaiting the client to sign the txn digest (so it can be internally submitted)
+    AWAITING_SIG                = 1;
+
     // The txn has been committed and is in the process of being stored
     COMMITTING                  = 2;
 
@@ -368,6 +371,8 @@ message StorageTxn {
 
     // Human-readable amplifying information for AlertCode.
                 string          alert_msg                   = 7; 
+
+                
 }
 
 
@@ -377,9 +382,9 @@ message StorageTxn {
 
 
 
-message TxnRequest {
+message QueryTxns {
 
-    // Unix timestamp of the commit time of txn(s) to be read
+    // If set, unix timestamp in secs of the commit time of txn(s) to be read
                 int64           time_committed              = 1;
 
    // If set, this is the txn name to be fetched.  
@@ -392,5 +397,20 @@ message TxnRequest {
 
     // If > 0, this caps the the number of txns returned until the requested is considered complete.
                 uint64          max_txns                    = 4;
+
+    // If set, this specifies a state "bookmark" for the StorageProvider to resume reading from.
+                plan.Block      bookmark                    = 5;
 }
 
+
+
+message TxnBundle {
+
+    // Zero or more StorageTxns being returned
+    repeated    pdi.StorageTxn      txns                        = 1;
+
+    // Intended to be passed in pdi.QueryTxns in order for a client to resume txn reporting -- optional.  
+    // This Block is intended to be used by the originating StorageProvider, so it's opaque as far as the client is concerned.
+                plan.Block          bookmark                    = 2;
+
+}
