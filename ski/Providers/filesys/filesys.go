@@ -335,7 +335,7 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
     )
  
     if err != nil {
-        logE.WithError(err)
+        logE := logE.WithError(err)
         logE.Info("doOp() returned ERROR")
     }
 
