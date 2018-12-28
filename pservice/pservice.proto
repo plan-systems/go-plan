@@ -1,5 +1,5 @@
 
-// See plan-protobuf/README.md
+// See http://github.com/plan-systems/plan-protobufs/
 
 
 syntax = "proto3";
@@ -7,7 +7,6 @@ syntax = "proto3";
 package pservice;
 
 import "github.com/plan-systems/go-plan/pdi/pdi.proto";
-import "github.com/plan-systems/go-plan/ski/ski.proto";
 import "github.com/plan-systems/go-plan/plan/plan.proto";
 
 
@@ -121,73 +120,9 @@ message MemberInfoResponse {
 }
 
 
-service StorageProvider {
-
-    // Session start:
-    //    0) On StorageProvider node initial setup, it holds a pub/private key pair plus certificate from the identity of the owner 
-    //    1) When a client connects, it can check the provider node UUID is ok (not backlisted, etc) 
-    //    2) When the client submits a txn:
-    //        a) the client sends it via SubmitTxn()
-    //        b) the SP preps and stages the txn, and sends back a sig request
-    //        c) the client uses their SP identity and signs it using the appropriate CryptoKit 
-    ///       d) the client sends the sig via CommitTxn()
-    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
-
-    // Requests a sequence of txns starting with the specified time, txn name, or other query criteria.
-    rpc         QueryTxns(pdi.QueryTxns)                        returns (stream pdi.TxnBundle);
-
-    // Submits the given block to this SP.  Upon receipt, the SP will marshal the submitted txn body
-    //    into an internal/native txn that can be written to the actual SP implementation.
-    rpc         SubmitTxn(SubmitTxnPB)                          returns (StagedTxnPB);
-
-    // Supplies the sig(s) needed to finish and commit the current txn to the permanent record.
-    rpc         CommitTxn(StagedTxnPB)                          returns (stream pdi.StorageTxn);
-
-    // Returns a continuous stream of status reports indicating server health, connectivity, sig requests, etc. 
-    rpc         ReportStatus(ReportStatusPB)                    returns (stream StatusReport);
-
-    // A signature response from the client (a response to StatusReport.SigRequest)
-    rpc         PostSigResponse(ski.SigRequest)                 returns (plan.Status);
-
-}
-
-
-
-message SubmitTxnPB {
-
-    // This will become the txn body -- sent via SubmitTxn()
-    // This can be anything, but in practice it typically contains one or more serialized pdi.EntryCrypt.
-                plan.Block          body                    = 1;
-}
-
-message StagedTxnPB {
-
-    // Reports any error/state condition.
-                plan.Status         status                  = 1;
-                
-    // Once the SP prepares/processes the txn body from SubmitTxn() into a native SP txn internally, 
-    //    the native txn(s) needs to be signed since the ledger/authority it's using presumably requires that.
-    // This happens by the SP handing back digest(s) for the client to sign.
-                ski.SigRequest      sig_request             = 2;
-
-}
-
-
-message ReportStatusPB {
-
-}
-
-
-message StatusReport {
-
-
-    // A signature request/response from the host/server (typically a request to the client to sign something)
-                ski.SigRequest      sig_request             = 2;
-}
-
 service Pnode {
 
-    // StartSession() is the first call a client makes to a pnode daemon once a GRPC channel  
+    // StartSession() is the first call a client makes to a pnode daemon once a gRPC channel  
     //    connection is established.  It returns an auth/session token that the client must inject into
     //    channel's metadata as "session_token" in order for all the other rpc calls.
     rpc         StartSession(SessionRequest)                    returns (SessionInfo);
@@ -307,18 +242,6 @@ message EntryOpStatus {
                 map<string, 
                     bytes>      status_data             = 3;
 
-}
-
-
-
-
-
-
-
-
-message Perror {
-                int32           code                    = 1;
-                string          msg                     = 2;
 }
 
 
