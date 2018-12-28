@@ -1,4 +1,4 @@
-// See plan-protobuf/README.md
+// See http://github.com/plan-systems/plan-protobufs/
 
 syntax = "proto3";
 
