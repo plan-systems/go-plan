@@ -35,6 +35,12 @@ var (
 )
 
 
+func init() {
+    ski.RegisterCryptoKit(&CryptoKit)
+}
+
+
+
 
 // CryptoKit is used with ski.RegisterCryptoKit() so it is freely available.
 var CryptoKit = ski.CryptoKit{

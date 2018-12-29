@@ -18,7 +18,7 @@ import (
 
     "github.com/plan-systems/go-plan/ski/Providers/filesys"
 
-	"github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
+	_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 
 )
 
@@ -52,9 +52,6 @@ func getTmpDir(inSubDir string) string {
 func TestFileSysSKI(t *testing.T) {
 
     gTesting = t
-   
-    ski.RegisterProvider(filesys.Provider)
-    ski.RegisterCryptoKit(&nacl.CryptoKit)
 
     // Register providers to test 
     providersToTest := []string{}

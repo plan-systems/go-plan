@@ -22,7 +22,6 @@ const (
 
     // ProviderInvocation should be passed for inInvocation when calling SKI.fileRepo.StartSession()
     providerInvocation = "/plan/ski/Provider/filesys/1"
-
 )
 
 
@@ -31,8 +30,12 @@ var (
 
     // Provider is the primary "entry" point
     Provider = newfileRepo()
-    
 )
+
+
+func init() {
+    ski.RegisterProvider(Provider)
+}
 
 
 
