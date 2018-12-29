@@ -78,7 +78,7 @@ type CommunityRepo struct {
     ParentPnode             *Pnode
 
     // Newly authored entries from active sessions on this pnode that are using this CommunityRepo.
-    // These entries are first validated/processed as if they came off the wire, merged with the local db, and commited to the active storage sessions.
+    // These entries are first validated/processed as if they came off the wire, merged with the local db, and committed to the active storage sessions.
     authoredInbox           chan *pdi.EntryCrypt
 
     // deamonSKIs makes it possible for community public encrypted data to be decrypted, even when there are NO
@@ -294,7 +294,7 @@ New txns appear in 1 of 2 possible ways to a pnode:
             - dupes are ignored
             - illegal/invalid entries are dropped or logged into a reject pool
         - For each channel all an active session has a query open for, send out new entries on that queru
-    (2) An active community memebr session on a pnode submits a newly authored and signed EntryCrypt
+    (2) An active community member session on a pnode submits a newly authored and signed EntryCrypt
         - *same* exact steps above AND a new StorageTxn is submitted to the community's active StorageSession(s)
         - The listening channels get entry txn status as it updates.
         
@@ -306,7 +306,7 @@ Given that Block's codec info, it's expands into a sequence of zero or more Entr
     - Every entry would have *two* separate hashnames (the parent StorageTxn hashname and one to identify the entry)
         => Two BSTs would be needed, yikes
 If one entry (max) per StorageTxn
-    + An entry's hashname + commit time could be used universially and uniquely
+    + An entry's hashname + commit time could be used universally and uniquely
     + An EntryCrypt's hash could be used as the txn hashname
 */
 

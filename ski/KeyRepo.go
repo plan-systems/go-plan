@@ -124,7 +124,7 @@ func (KR *KeyRepo) Unmarshal(dAtA []byte) *plan.Perror {
 
     merr := keyTome.Unmarshal(dAtA)
     if merr != nil {
-        return plan.Errorf(merr, plan.FailedToUnmarshal, "Unexpected error unmarshaing KeyTome")
+        return plan.Errorf(merr, plan.FailedToUnmarshal, "Unexpected error unmarshalling KeyTome")
     }
 
     for _, bundle := range keyTome.Bundles {

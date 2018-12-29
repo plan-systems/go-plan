@@ -187,9 +187,6 @@ func NewPnode(inParams PnodeParams) *Pnode {
 // Startup does basic loading from disk etc
 func (pn *Pnode) Startup(inFullInit bool) error {
 
-    ski.RegisterProvider(nacl.Provider)
-    ski.RegisterCryptoKit(nacl.CryptoKit)
-
     var err error
 
     if inFullInit {
@@ -314,7 +311,7 @@ func (pn *Pnode) WriteConfigOut() error {
         return err
     }
 
-    err = ioutil.WriteFile(pn.GetConfigPathname(), buf, pn.Config.DefaultFileMode )
+    err = ioutil.WriteFile(pn.GetConfigPathname(), buf, pn.Config.DefaultFileMode)
 
     return err
 
@@ -392,20 +389,6 @@ func (pn *Pnode) CreateNewCommunity( inCommunityName string ) *CommunityRepo {
 }
 
 
-
-func NewClientSession(in *pservice.SessionRequest) *ClientSession {
-
-    session := &ClientSession{
-        AuthToken: GenRandomSessionToken(32),
-        PrevActivityTime: plan.Now(),
-        SessionRequest: in,
-    }
-
-
-    return session
-}
-
-
 const (
     UnlockPersonalKeyring = "/plan/SKI/local/1"
 )
@@ -413,7 +396,7 @@ const (
 // StartSession implements pservice.PserviceServer
 func (pn *Pnode) StartSession(
     ctx context.Context,
-    in *pservice.SessionRequest,
+    inSessionReq *pservice.SessionRequest,
     ) (*pservice.SessionInfo, error) {
 
     communityID := plan.GetCommunityID(in.CommunityId)
@@ -430,10 +413,15 @@ func (pn *Pnode) StartSession(
 */  //
 
     // See https://github.com/melvincarvalho/gold for TLS in Go 
+
     clientDir := SetupDirForClient(in.ClientId)
 
+    ski.StartSession(ski.SessionParams{
+    })
+
+    /*
     skiSession, err := ski.StartSession( 
-        *in.SKIInvocation,
+        *inSessionReq.SKIInvocation,
         ski.GatewayRWAccess,
         clientDir,
         nil,
@@ -443,12 +431,10 @@ func (pn *Pnode) StartSession(
     }
 
     skiSession.DispatchOp(OpArgs{
-        ski.OpAcceptKeys,
+        ski.OpAcceptKeys, */
 
 
-
-
-    session := NewClientSession(in)
+    session := NewClientSession(inSessionReq)
 
     // TODO security checks to prevent DoS
     pn.ActiveSessions.InsertSession(session)
