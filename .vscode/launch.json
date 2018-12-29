@@ -8,15 +8,15 @@
             "name": "Launch",
             "type": "go",
             "request": "launch",
-            "mode": "debug",
+            "mode": "auto",
             "remotePath": "",
             "port": 2345,
             "host": "127.0.0.1",
-            "program": "${workspaceFolder}/cmd/pnode",
+            "program": "${fileDirname}",
             "env": {},
-            //"args": [],
-              "args": [ "-datadir", "${env:HOME}/PLAN/pnode_test/" ],
-            //"args": [ "-datadir", "${env:HOME}/_pnode-datadir/", "-init", ],
+            "args": [],
+            //"args": [ "-datadir", "${env:HOME}/PLAN/pnode_test/", "-init" ],
+            //"args": [ "-init" ],
             "showLog": true
         }
     ]
