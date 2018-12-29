@@ -1,5 +1,72 @@
 package main
 
+
+
+
+/**********************************************************************************************************************
+
+A PLAN pnode runs in one of 3 modes, each layer-mode implying a set of services made available.
+
+Each successive layer-mode requires use of the preceding layer (or access to another same-community pnode
+offer that lower service layer available). Each set of services are made available to PLAN clients (or other pnodes) 
+via either gRPC+protobufs or direct embedding.  
+
+To start session with a pnode, the client must present credentials that confirm that the client is a member of the community
+that she is requesting access to. This means a community's channel traffic patterns and organization 
+is completely inaccessible to non-community members.  This is in contrast to systems where "the world"
+has access to your traffic where an adversary could conduct correlation analysis (despite all traffic being encrypted).  
+
+    1) Layer 1 -- Storage/Replication service layer
+        - The pnode is running without any community or personal keys in hand.
+        - Lowest security liability in this layer-mode since the pnode doesn't have any keys to lose and 
+            all data stored is already all encrypted.
+        - Storage and replication operates w/o restriction (though none of the newly arriving entries can be merged into the community's repo)
+        - This layer is characterized by the storage/replication implementation with the L1 service implementation on top.
+            (e.g local db, [matrix], DFINITY, Ethereum)
+
+    2) Layer 2 -- Community service layer
+        - When a L3 client starts a session, and after the challenge/response phase, the client gives the pnode 
+            the community keyring for the duration of that session. 
+        - With the community keyring in hand, L2 can now decrypt community data, making it possible to process community L1 entries.
+        - Newly arriving entries from the repo's active pdi.StorageProvider(s) in L1 are validated then merged into the community's repo
+        - The pnode serves sessions for community members:
+            - requests/queries against channels and search params return encrypted entries (for the client to decrypt)
+            - newly authored entries are encrypted by the client, sent over session to the pnode, and are:
+                a) merged into the local community repo
+                b) committed to the repo's active pdi.StorageProvider(s)
+        - Web services can be attached to pnode, allowing a pnode with Layer II to serve outside-community requests
+            (e.g. file/media serving services, html-based viewing of channels made public by community admins)
+        - When there are no longer any member sessions active, the pnode burns the community keyring.
+        - If the given pnode is to remain in active community service, then it retains the community keyring. 
+        - When a pnode no longer has the community keyring (either because no no member sessions are open and it has been set to not
+            retain the community keyring), then it only only offer L1 services (by definition).
+        - In the event of a L2 security breach (and an adversary has the community keyring):
+            a)  The adversary never has the ability to author community entries since he does not have a community member's personal keyring, 
+                which is needed in order to sign/authenticate any such authored entries.  
+            b)  The adversary's ability to decrypt newly authored community entries goes away once a community member 
+                initiates a new community key epoch (and a new community key is reissued via the community's 
+                community key distribution channel) 
+
+    3) Layer 3 -- Gateway service layer
+        - After the challenge/response phase, the client gives the pnode the community keyring AND the member's personal keyring.
+        - For security, pnodes in this mode are typically on the same device as the client or a trusted LAN.
+        - With the community keyring in hand, Layer II is activated
+        - With the personal keyring in hand:
+            a) newly authored entries from the client can be encrypted, signed and submitted to Layer II.
+            b) newly received entries from Layer 2 are decrypted and passed back the client
+
+This system multiple configurations based on device and security constraints.  
+    - A pnode running on a public rackspace would likely be setup to only run in Layer 1 mode (to avert any security risk)
+    - A pnode running on a lightweight machine (e.g. laptop) would connect to and use a pnode offering Layer 1 services.
+    - A pnode running on a mobile device would run in a proxy-like mode, would start a session with a pnode that offers Layer 2 services.
+
+PLAN's "community-private" compartmentalization is a major feature of PLAN that serves community privacy.
+
+*/
+
+
+
+
 /**********************************************************************************************************************
 
 The purpose of this exe is to be a test/demo stand-in for the full PLAN Unity-based client.
@@ -62,11 +129,5 @@ Maybe pnode and pgateway are fused and it's storage layer this is remote (or is 
 3) newly authored entries are authored in the client and sent to pgateway
 4) new entries are encrypted and signed with the gateway's keys
 5) new entries are packaged into a plan.Block and committed to the StorageProvider. 
+
 */
-
-
-
-func main() {
-
-
-}
