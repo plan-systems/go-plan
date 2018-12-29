@@ -3,7 +3,6 @@
 package pdi
 
 import (
-    "sync"
 
 	"github.com/plan-systems/go-plan/plan"
 
@@ -186,6 +185,7 @@ func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {
 ** Support
 **/
 
+/*
 var storageMsgPool = sync.Pool{
     New: func() interface{} {
         return new(StorageMsg)
@@ -230,7 +230,7 @@ func NewStorageAlert(
 }
 
 
-/*
+
 // SegmentIntoTxnsForMaxSize is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxnsForMaxSize(
 	inData []byte,
