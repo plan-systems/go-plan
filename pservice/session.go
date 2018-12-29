@@ -1,5 +1,4 @@
-
-package pnode
+package pservice
 
 
 import (
@@ -18,11 +17,7 @@ import (
     //"github.com/tidwall/redcon"
 
     "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/pservice"
 
-    // This inits in with sql, so no named import is needed
-    _ "github.com/mattn/go-sqlite3"
-    
     //"crypto/md5"
     //"hash"
 
@@ -40,8 +35,7 @@ import (
 
 
 
-
-// ClientSession represents a client session over GRPC
+// ClientSession represents a client session over gRPC
 type ClientSession struct {         
 
     // AuthToken is handed back to remote pnode clients during authentication and used to retrieve a ClientSession
@@ -51,8 +45,10 @@ type ClientSession struct {
     // PrevActivityTime says when this session was last accessed, used to know how long a session has been idle.
     PrevActivityTime        plan.Time
 
+    MsgOutlet               chan Msg
+
     // Client session request that initiated this session
-    SessionRequest          *pservice.SessionRequest
+    SessionRequest          *SessionRequest
 
 
     //SKI                     SecureKeyInterface      // SKI allows pnode to encrypt/decrypt for the given user
@@ -67,6 +63,9 @@ const (
 
     // HostShuttingDown means that a client session is ending because the host machine/server is shutting down.
     HostShuttingDown        = "host shutting down"
+
+    // SessionTokenKey is the string name used to key the session token string (i.e. "session_token")
+    SessionTokenKey         = "session_token"
 )
 
 
@@ -91,13 +90,21 @@ func GenRandomSessionToken(N int) string {
 
 
 
+
+
+
+
+
+
 // EndSession performs any closing/cleanup associated with the given session.  inWasInactive is true if this
 //    func is being invoked because the session has been inactive.  Otherwise, the session is ending
 //    for another reason (e.g. local shutdown).  
 // Note: this is called via goroutine, so concurrency considerations should be made.
-func (session *ClientSession) EndSession( inReason string ) {
+func (session *ClientSession) EndSession(inReason string) {
 
 }
+
+
 
 
 // SessionGroup takes a session token (a string) and hands back a ClientSession while ensuring concurrency safety.
@@ -106,6 +113,13 @@ type SessionGroup struct {
 
     table                   map[string]*ClientSession
 
+}
+
+
+// Init resets and internally sets up this SessionGroup for use
+func (group *SessionGroup) Init() {
+
+    group.table = map[string]*ClientSession{}
 }
 
 
@@ -147,28 +161,30 @@ func (group *SessionGroup) Pop() interface{} {
 
 
 
-
+// FetchSession extracts the session token string from the context, performs a session lookup, and returns the ClientSession object.
 func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, error) {
 
-    md, ok := metadata.FromIncomingContext( ctx )
+    md, ok := metadata.FromIncomingContext(ctx)
     if ! ok {
-        return nil, grpc.Errorf( codes.NotFound, "metadata not found" )
+        return nil, grpc.Errorf(codes.NotFound, "metadata not found")
     }
 
-    token := md["session_token"][0]
+    token := md[SessionTokenKey][0]
     if len( token ) == 0 {
-        return nil, grpc.Errorf( codes.NotFound, "session_token not defined" )
+        return nil, grpc.Errorf(codes.NotFound, "%s not defined", SessionTokenKey)
     }
 
     session := group.LookupSession(token, true)
     if session == nil {
-        return nil, grpc.Errorf( codes.NotFound, "invalid session token" )
+        return nil, grpc.Errorf(codes.NotFound, "invalid %s", SessionTokenKey)
     }
-
-
 
     return session, nil
 }
+
+
+
+
 
 
 func (group *SessionGroup) LookupSession(inAuthToken string, inBumpActivity bool) *ClientSession {
@@ -190,6 +206,26 @@ func (group *SessionGroup) LookupSession(inAuthToken string, inBumpActivity bool
     }
 }
 
+
+
+// NewSession creates a new ClientSession and inserts the session token into the given context
+func (group *SessionGroup) NewSession(
+    ctx context.Context,
+    inReq *SessionRequest,
+) *ClientSession {
+
+    session := &ClientSession{
+        AuthToken: GenRandomSessionToken(32),
+        MsgOutlet: make(chan Msg, 16),
+        SessionRequest: inReq,
+    }
+
+    group.InsertSession(session)
+
+    metadata.AppendToOutgoingContext(ctx, SessionTokenKey, session.AuthToken)
+
+    return session
+}
 
 
 func (group *SessionGroup) InsertSession(inSession *ClientSession) {
