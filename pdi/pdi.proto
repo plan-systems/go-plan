@@ -6,6 +6,7 @@ package pdi;
 
 import "github.com/plan-systems/go-plan/plan/plan.proto";
 import "github.com/plan-systems/go-plan/ski/ski.proto";
+import "github.com/plan-systems/go-plan/pservice/pservice.proto";
 
 
 
@@ -15,53 +16,34 @@ service StorageProvider {
 
     // Session start:
     //    0) On StorageProvider node initial setup, it holds a pub/private key pair plus certificate from the identity of the owner 
-    //    1) When a client connects, it can check the provider node UUID is ok (not backlisted, etc) 
+    //    1) When a client connects, it can check the provider node UUID is ok (not blacklisted, etc) 
     //    2) When the client submits a txn:
     //        a) the client sends it via SubmitTxn()
-    //        b) the SP preps and stages the txn, and sends back a sig request via ListenToHost()/HostMsg
+    //        b) the SP preps and stages the txn, and sends back a sig request via StartSession()/pservice.Msg
     //        c) the client uses their SP identity and signs it using the appropriate CryptoKit 
     ///       d) the client sends the sig via CommitTxn()
     // Returns a continuous stream of msgs indicating server health, connectivity, sig requests, etc. 
-    rpc         StartSession(SessionRequest)                    returns (stream HostMsg);
+    rpc         StartSession(pservice.SessionRequest)           returns (stream pservice.Msg);
 
-    // A signature response from the client (a response to AwaitHostMsg.HostMsg)
-    rpc         PostResponse(HostMsg)                           returns (plan.Status);
+    // Posts a signature response from the client back to the server (a response to Msg)
+    rpc         PostResponse(pservice.Msg)                      returns (plan.Status);
 
-    // Requests a sequence of txns starting with the specified time, txn name, or other query criteria.
+    // Requests a sequence of txns starting with the specified time, txn name, bookmark, or other query criteria.
     rpc         Query(QueryTxns)                                returns (stream TxnBundle);
 
     // Submits a given plan.Block to this SP.  Upon receipt, the SP will marshal the submitted txn body
     //    into an internal/native txn(s) that can be written to the actual SP implementation.
-    rpc         SubmitTxn(SubmitTxnPB)                          returns (StagedTxnPB);
+    rpc         SubmitTxn(TxnCandidate)                         returns (StagedTxn);
 
     // Supplies the sig(s) needed to finish and commit the current txn to the SP's permanent record.
-    rpc         CommitTxn(StagedTxnPB)                          returns (stream StorageTxn);
+    rpc         CommitTxn(StagedTxn)                            returns (stream StorageTxn);
 
 }
 
 
-message SessionRequest {
-
-    // Normally the empty string, this is used when an existing token is req'd
-                bytes           session_token           = 1;
-
-    // Which community this session wants to access (a pnode hosts multiple communities)
-                bytes           community_id            = 2;
-
-    // Identifies who is requesting the session (via pubkey)
-                ski.PubKey      client_id               = 3;
-
-    // Submits an authentication challenge to the host, so that the host can be validated.
-                ski.SigRequest  challenge               = 4;
-
-}
-
-message SessionInfo {
-                string          session_token           = 1;
-}
 
 
-message SubmitTxnPB {
+message TxnCandidate {
 
     // ID/address/pubkey that will posting the to-be txn.  
                 ski.PubKey      from                    = 1;
@@ -72,7 +54,7 @@ message SubmitTxnPB {
 
 }
 
-message StagedTxnPB {
+message StagedTxn {
 
     // Reports any error/state condition.
                 plan.Status     status                  = 1;
@@ -85,33 +67,24 @@ message StagedTxnPB {
 }
 
 
-
-message HostMsg {
-
-    // A signature request/response from the host/server (typically a request to the client to sign something)
-                ski.SigRequest  sig_request             = 2;
-}
-
-
-
 message QueryTxns {
 
     // If set, unix timestamp in secs of the commit time of txn(s) to be read
-                int64           time_committed              = 1;
+                int64           time_committed          = 1;
 
    // If set, this is the txn name to be fetched.  
    // If omitted, all txns with the matching time committed. 
-                bytes           txn_name                    = 2;
+                bytes           txn_name                = 2;
 
     // If true, StorageTxn.Body will be set/sent for each txn returned.
     // If false, StorageTxn.Body == nil for each txn returned (saving bandwidth)
-                bool            include_body                = 3;
+                bool            include_body            = 3;
 
     // If > 0, this caps the the number of txns returned until the requested is considered complete.
-                uint64          max_txns                    = 4;
+                uint64          max_txns                = 4;
 
     // If set, this specifies a state "bookmark" for the StorageProvider to resume reading from.
-                plan.Block      bookmark                    = 5;
+                plan.Block      bookmark                = 5;
 }
 
 
@@ -185,15 +158,14 @@ message StorageTxn {
     // Describes the state of this txn segment number
                 TxnStatus       txn_status                  = 4;
 
+    // Originator of this transaction
+                ski.PubKey      from                        = 5;
+
     // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
-                plan.Block      body                        = 5;
+                plan.Block      body                        = 6;
 
-    // Set to 0 if n/a or no alert set
-                uint64          alert_code                  = 6;
-
-    // Human-readable amplifying information for AlertCode.
-                string          alert_msg                   = 7; 
-
+    // If set, specifies a message or alert about this txn
+                plan.Status     alert                       = 7;
                 
 }
 
