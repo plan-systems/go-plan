@@ -1,4 +1,4 @@
-// See plan-protobuf/README.md
+// See http://github.com/plan-systems/plan-protobufs/
 
 syntax = "proto3";
 
@@ -36,6 +36,25 @@ enum  CryptoKitID {
     NaCl                = 1;
 }
 
+
+message PubKey {
+
+    // Specifies what type of KeyType this is (or NOT_SET)
+                KeyType         key_type                = 1;
+
+    // Specifies which CryptoKit handles this key
+                CryptoKitID     crypto_kit_id           = 2;
+
+    // Specifies the data encoding format of PubKey.encoded
+    // See https://github.com/multiformats/multibase/blob/master/multibase.csv 
+                int32           encoding                = 3;
+                
+    // Key data stored in the form specified by PubKey.multibase_code
+                bytes           encoded                 = 4;
+
+}
+
+
  
 
 // KeyEntry is used in 3 ways:
@@ -51,7 +70,7 @@ message KeyEntry {
     // Specifies what type of KeyType this is (or NOT_SET)
                 KeyType         key_type                = 1;
 
-    // Specifies which domaon/area this key is used in
+    // Specifies which domain/area this key is used in
                 KeyDomain       key_domain              = 2;
 
     // Specifies which CryptoKit handles this key's ops
@@ -106,8 +125,8 @@ message SigRequest {
                 int64               id                  = 1;
 
     // Used to specify an explicit key to sign the given digest.
-    // Can be underspecified indicating that the signer know the right signing key to use.
-                KeyEntry            key_spec            = 2;
+    // Can be underspecified indicating that the signer knows which key to use.
+                PubKey              pub_key             = 2;
 
     // Digest(s) to be signed
     repeated    bytes               digests             = 3;
