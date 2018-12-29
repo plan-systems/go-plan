@@ -6,268 +6,46 @@ syntax = "proto3";
 
 package pservice;
 
-import "github.com/plan-systems/go-plan/pdi/pdi.proto";
 import "github.com/plan-systems/go-plan/plan/plan.proto";
+import "github.com/plan-systems/go-plan/ski/ski.proto";
 
 
 
-enum EntryOp {
-    PUBLISH_ENTRY               = 0;
-}   
 
 
-
-enum PserviceScope {
-    REPLICATION_GET             = 0;        // Can query for already-encrypted community entries
-    REPLICATION_POST            = 1;        // Can post already-encrypted community entries
-
-    COMMUNITY_READ              = 2;        // Can decrypt community data
-    COMMUNITY_WRITE             = 3;        // Can encrypt community data
-
-    PERSONAL_READ               = 4;        // Can decrypt personal data
-    PERSONAL_WRITE              = 5;        // Can encrypt personal data
-}
-
-
-enum QueryOption {
-    DECRYPT_PDI_HEADER          = 0;
-    DECRYPT_PDI_BODY            = 1;
-}
-
-
-
-/**********************************************************************************************************************
-
-A PLAN pnode runs in one of 3 modes, each layer-mode implying a set of services made available.
-
-Each successive layer-mode requires use of the preceding layer (or access to another same-community pnode
-offer that lower service layer available). Each set of services are made available to PLAN clients (or other pnodes) 
-via either gRPC+protobufs or direct embedding.  
-
-To start session with a pnode, the client must present credentials that confirm that the client is a member of the community
-that she is requesting access to. This means a community's channel traffic patterns and organization 
-is completely inaccessible to non-community members.  This is in contrast to systems where "the world"
-has access to your traffic where an adversary could conduct correlation analysis (despite all traffic being encrypted).  
-
-    1) Layer 1 -- Storage/Replication service layer
-        - The pnode is running without any community or personal keys in hand.
-        - Lowest security liability in this layer-mode since the pnode doesn't have any keys to lose and 
-            all data stored is already all encrypted.
-        - Storage and replication operates w/o restriction (though none of the newly arriving entries can be merged into the community's repo)
-        - This layer is characterized by the storage/replication implementation with the L1 service implementation on top.
-            (e.g local db, [matrix], DFINITY, Ethereum)
-
-    2) Layer 2 -- Community service layer
-        - When a L3 client starts a session, and after the challenge/response phase, the client gives the pnode 
-            the community keyring for the duration of that session. 
-        - With the community keyring in hand, L2 can now decrypt community data, making it possible to process community L1 entries.
-        - Newly arriving entries from the repo's active pdi.StorageProvider(s) in L1 are validated then merged into the community's repo
-        - The pnode serves sessions for community members:
-            - requests/queries against channels and search params return encrypted entries (for the client to decrypt)
-            - newly authored entries are encrypted by the client, sent over session to the pnode, and are:
-                a) merged into the local community repo
-                b) committed to the repo's active pdi.StorageProvider(s)
-        - Web services can be attached to pnode, allowing a pnode with Layer II to serve outside-community requests
-            (e.g. file/media serving services, html-based viewing of channels made public by community admins)
-        - When there are no longer any member sessions active, the pnode burns the community keyring.
-        - If the given pnode is to remain in active community service, then it retains the community keyring. 
-        - When a pnode no longer has the community keyring (either because no no member sessions are open and it has been set to not
-            retain the community keyring), then it only only offer L1 services (by definition).
-        - In the event of a L2 security breach (and an adversary has the community keyring):
-            a)  The adversary never has the ability to author community entries since he does not have a community member's personal keyring, 
-                which is needed in order to sign/authenticate any such authored entries.  
-            b)  The adversary's ability to decrypt newly authored community entries goes away once a community member 
-                initiates a new community key epoch (and a new community key is reissued via the community's 
-                community key distribution channel) 
-
-    3) Layer 3 -- Gateway service layer
-        - After the challenge/response phase, the client gives the pnode the community keyring AND the member's personal keyring.
-        - For security, pnodes in this mode are typically on the same device as the client or a trusted LAN.
-        - With the community keyring in hand, Layer II is activated
-        - With the personal keyring in hand:
-            a) newly authored entries from the client can be encrypted, signed and submitted to Layer II.
-            b) newly received entries from Layer 2 are decrypted and passed back the client
-
-This system multiple configurations based on device and security constraints.  
-    - A pnode running on a public rackspace would likely be setup to only run in Layer 1 mode (to avert any security risk)
-    - A pnode running on a lightweight machine (e.g. laptop) would connect to and use a pnode offering Layer 1 services.
-    - A pnode running on a mobile device would run in a proxy-like mode, would start a session with a pnode that offers Layer 2 services.
-
-PLAN's "community-private" compartmentalization is a major feature of PLAN that serves community privacy.
-
-*/
-
-
-
-message MemberInfoRequest {
-
-    // Identifies which community member
-                bytes               member_id               = 1;
-
-}
-
-
-
-message MemberInfoResponse {
-
-    // Identifies which community member
-                bytes               member_id               = 1;
-
-    // Identifies which community member
-                pdi.MemberEpoch     member_epoch            = 2;
-
-
-}
-
-
-service Pnode {
-
-    // StartSession() is the first call a client makes to a pnode daemon once a gRPC channel  
-    //    connection is established.  It returns an auth/session token that the client must inject into
-    //    channel's metadata as "session_token" in order for all the other rpc calls.
-    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
-
-    rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
-
-    //rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
-    //rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
-
-    //rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfoResponse);
-}
-
-
-service Pgateway {
-
-    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
-
-    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
-
-/*
-    rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
-
-
-    // RrE, CrE, CrD
-    rpc         StartEntryQuery(EntryQuery)                     returns (stream EntryResponse);
-
-    // CrE
-    rpc         ListChannels(ChannelSearchParams)               returns (pdi.ChannelList);
-
-    // RwE, CwD
-    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
-    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);*/
-    
-}
-
-message CommunitySessionRequest {
-
-    // Which community this session wants to access (a pnode hosts multiple communities)
-                bytes           community_id            = 2;
-
-    // Specifies which scopes are being requested 
-    repeated    PserviceScope   service_scopes          = 4;
-
-    // Keys, tokens, info, params passed to ski.Provider.StartSession()
-                plan.Block      SKI_invocation          = 5;
-}
-
-
-
-/***   StartSession(SessionRequest) --->  SessionInfo   ***/
 
 message SessionRequest {
 
-    // Normally the empty string, this is used when an existing session_token needs to be included.
-    // Initially, it's the salt of the data encrypted with the user's passphrase (which is compared t
+    // Normally the empty string, this is used when an existing token is req'd
                 bytes           session_token           = 1;
 
-    // Which community this session wants to access (a pnode hosts multiple communities)
+    // Which community this session wants to access
                 bytes           community_id            = 2;
 
-    // Identifies who is requesting the session.
-                bytes           client_id               = 3;
+    // Identifies who is requesting the session (via pubkey)
+                ski.PubKey      client_id               = 3;
 
-    // Specifies which scopes are being requested 
-    repeated    PserviceScope   service_scopes          = 4;
+    // Submits an authentication challenge for the host (so that the host can be validated).
+                ski.SigRequest  challenge               = 4;
 
-    // Keys, tokens, info, params passed to ski.Provider.StartSession()
-                plan.Block      SKI_invocation          = 5;
-
-}
-
-message SessionInfo {
-                string          session_token           = 1;
+    // Additional keys, tokens, info, params
+                plan.Block      params                  = 5;
 }
 
 
 
+message Msg {
 
-/***   StartEntryQuery(EntryQuery)  --->  EntryResponse   ***/
+    // Describes this msg in some way (optional)
+                string          label                   = 1;
 
-// Starts a new query that returns an ongoing stream of PDI entries.  
-// The query criteria are highly limited to timestamp and hashname since PDI entries are community private
-message EntryQuery {
-                QueryOption     query_options           = 1;
-                bytes           channel_id              = 2;
-                uint64          timestamp_min           = 3;
-                uint64          timestamp_max           = 4;
-    repeated    bytes           entry_hashnames         = 5;
+    // Holds arbitrary information/data
+                plan.Block      body                    = 2;
+
+    // A signature request/response from the host/server (typically a request to the client to sign something)
+                ski.SigRequest  sig_request             = 3;
 }
 
-message EntryResponse {
-    repeated    pdi.Entry       entries                 = 1;
-}
-
-
-
-
-
-/***   DoEntryOp(EntryOpArgs)  --->  EntryOpStatus   ***/
-
-// EntryOpArgs is an open-ended invocation for the given encrypted PDI entry.
-message EntryOpArgs {
-                int32           id                      = 1;
-
-                EntryOp         entry_op                = 2;
-
-                map<string, 
-                    bytes>      op_args                 = 3;
-
-                pdi.Entry       entry                   = 4;
-}
-
-message EntryOpStatus {
-                int32           id                      = 1;
-
-                int32           status_code             = 2;
-                map<string, 
-                    bytes>      status_data             = 3;
-
-}
-
-
-
-
-message StatusQuery {
-                string          test_greeting           = 1;
-}
-
-
-message StatusReply {
-                string          test_reply              = 1;
-}
-
-
-
-
-
-
-message ChannelSearchParams {
-                int32           flags                   = 1;   
-}
-
-message ChannelEntryQuery {
-                int32           flags                   = 1;   
-}
 
 
 

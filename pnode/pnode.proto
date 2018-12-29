@@ -1,0 +1,165 @@
+
+
+
+enum EntryOp {
+    PUBLISH_ENTRY               = 0;
+}   
+
+
+
+enum PserviceScope {
+    REPLICATION_GET             = 0;        // Can query for already-encrypted community entries
+    REPLICATION_POST            = 1;        // Can post already-encrypted community entries
+
+    COMMUNITY_READ              = 2;        // Can decrypt community data
+    COMMUNITY_WRITE             = 3;        // Can encrypt community data
+
+    PERSONAL_READ               = 4;        // Can decrypt personal data
+    PERSONAL_WRITE              = 5;        // Can encrypt personal data
+}
+
+
+enum QueryOption {
+    DECRYPT_PDI_HEADER          = 0;
+    DECRYPT_PDI_BODY            = 1;
+}
+
+
+
+
+message MemberInfoRequest {
+
+    // Identifies which community member
+                bytes               member_id               = 1;
+
+}
+
+
+
+message MemberInfoResponse {
+
+    // Identifies which community member
+                bytes               member_id               = 1;
+
+    // Identifies which community member
+                pdi.MemberEpoch     member_epoch            = 2;
+
+
+}
+
+
+service Pnode {
+
+    // StartSession() is the first call a client makes to a pnode daemon once a gRPC channel  
+    //    connection is established.  It returns an auth/session token that the client must inject into
+    //    channel's metadata as "session_token" in order for all the other rpc calls.
+    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
+
+    rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
+
+    //rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
+    //rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);
+
+    //rpc         LookupMember(MemberInfoRequest)                 returns (MemberInfoResponse);
+}
+
+
+service Pgateway {
+
+    rpc         StartSession(SessionRequest)                    returns (SessionInfo);
+
+    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
+
+/*
+    rpc         ReportStatus(StatusQuery)                       returns (StatusReply);
+
+
+    // RrE, CrE, CrD
+    rpc         StartEntryQuery(EntryQuery)                     returns (stream EntryResponse);
+
+    // CrE
+    rpc         ListChannels(ChannelSearchParams)               returns (pdi.ChannelList);
+
+    // RwE, CwD
+    rpc         DoEntryOp(EntryOpArgs)                          returns (stream EntryOpStatus);
+    rpc         DoEntryOpStream(stream EntryOpArgs)             returns (stream EntryOpStatus);*/
+    
+}
+
+
+
+
+/***   StartEntryQuery(EntryQuery)  --->  EntryResponse   ***/
+
+// Starts a new query that returns an ongoing stream of PDI entries.  
+// The query criteria are highly limited to timestamp and hashname since PDI entries are community private
+message EntryQuery {
+                QueryOption     query_options           = 1;
+                bytes           channel_id              = 2;
+                uint64          timestamp_min           = 3;
+                uint64          timestamp_max           = 4;
+    repeated    bytes           entry_hashnames         = 5;
+}
+
+message EntryResponse {
+    repeated    pdi.Entry       entries                 = 1;
+}
+
+
+
+
+
+
+
+/***   DoEntryOp(EntryOpArgs)  --->  EntryOpStatus   ***/
+
+// EntryOpArgs is an open-ended invocation for the given encrypted PDI entry.
+message EntryOpArgs {
+                int32           id                      = 1;
+
+                EntryOp         entry_op                = 2;
+
+                map<string, 
+                    bytes>      op_args                 = 3;
+
+                pdi.Entry       entry                   = 4;
+}
+
+message EntryOpStatus {
+                int32           id                      = 1;
+
+                int32           status_code             = 2;
+                map<string, 
+                    bytes>      status_data             = 3;
+
+}
+
+
+
+
+message StatusQuery {
+                string          test_greeting           = 1;
+}
+
+
+message StatusReply {
+                string          test_reply              = 1;
+}
+
+
+
+
+
+
+message ChannelSearchParams {
+                int32           flags                   = 1;   
+}
+
+message ChannelEntryQuery {
+                int32           flags                   = 1;   
+}
+
+
+
+
+
