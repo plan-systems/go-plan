@@ -30,7 +30,6 @@ import (
     "google.golang.org/grpc/metadata"
     "golang.org/x/net/context"
 	"google.golang.org/grpc"
-    "google.golang.org/grpc/codes"
 )
 
 
@@ -38,20 +37,19 @@ import (
 // ClientSession represents a client session over gRPC
 type ClientSession struct {         
 
-    // AuthToken is handed back to remote pnode clients during authentication and used to retrieve a ClientSession
+    // SessionToken is handed back to remote pnode clients during authentication and used to retrieve a ClientSession
     //     in O(1) given a matching token string at later times.
-    AuthToken               string
+    SessionToken            string
 
     // PrevActivityTime says when this session was last accessed, used to know how long a session has been idle.
     PrevActivityTime        plan.Time
 
-    MsgOutlet               chan Msg
+    // OnEndSession performs any closing/cleanup associated with the given session.  
+    // Note: this is called via goroutine, so concurrency considerations should be made.
+    OnEndSession            func(session *ClientSession, reason string)
 
-    // Client session request that initiated this session
-    SessionRequest          *SessionRequest
-
-
-    //SKI                     SecureKeyInterface      // SKI allows pnode to encrypt/decrypt for the given user
+    // Used to store an impl specific info
+    Cookie                 interface{}
 }
 
 
@@ -72,7 +70,7 @@ const (
 
 
 
-func GenRandomSessionToken(N int) string {
+func genRandomSessionToken(N int) string {
 
     const vocab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
@@ -80,7 +78,7 @@ func GenRandomSessionToken(N int) string {
 
     rand.Read( buf )
     for i := 0; i < N; i++ {
-        buf[i] = vocab[ buf[i] & 0x3F ]
+        buf[i] = vocab[buf[i] & 0x3F]
     }
     
     return string( buf )
@@ -91,18 +89,6 @@ func GenRandomSessionToken(N int) string {
 
 
 
-
-
-
-
-
-// EndSession performs any closing/cleanup associated with the given session.  inWasInactive is true if this
-//    func is being invoked because the session has been inactive.  Otherwise, the session is ending
-//    for another reason (e.g. local shutdown).  
-// Note: this is called via goroutine, so concurrency considerations should be made.
-func (session *ClientSession) EndSession(inReason string) {
-
-}
 
 
 
@@ -161,22 +147,53 @@ func (group *SessionGroup) Pop() interface{} {
 
 
 
-// FetchSession extracts the session token string from the context, performs a session lookup, and returns the ClientSession object.
-func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, error) {
+// ExtractSessionToken extracts the session_token from the given context
+func ExtractSessionToken(ctx context.Context) (string, *plan.Perror) {
 
     md, ok := metadata.FromIncomingContext(ctx)
-    if ! ok {
-        return nil, grpc.Errorf(codes.NotFound, "metadata not found")
+    if ! ok || md == nil {
+        return "", plan.Errorf(nil, plan.SessionTokenMissing, "no context metadata (or %v) found", SessionTokenKey)
     }
 
-    token := md[SessionTokenKey][0]
-    if len( token ) == 0 {
-        return nil, grpc.Errorf(codes.NotFound, "%s not defined", SessionTokenKey)
+    strList := md[SessionTokenKey]; 
+    if len(strList) < 1 {
+        return "", plan.Errorf(nil, plan.SessionTokenMissing, "%v key not found", SessionTokenKey)
     }
 
+    return strList[0], nil
+}
+
+
+// TransferSessionToken extracts and transfers the session token from the given context and returns a replacement with it appended to the metadata
+func TransferSessionToken(ctx context.Context, md metadata.MD) (context.Context, *plan.Perror) {
+
+    if md == nil {
+        return nil, plan.Errorf(nil, plan.SessionTokenMissing, "no header/trailer (or %v) found", SessionTokenKey)
+    }
+
+    strList := md[SessionTokenKey]; 
+    if len(strList) < 1 {
+        return nil, plan.Errorf(nil, plan.SessionTokenMissing, "%v key not found", SessionTokenKey)
+    }
+
+    ctx2 := metadata.AppendToOutgoingContext(ctx, SessionTokenKey, strList[0])
+
+    return ctx2, nil
+}
+
+
+
+// FetchSession extracts the session token string from the context, performs a session lookup, and returns the ClientSession object.
+func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, *plan.Perror) {
+
+    token, err := ExtractSessionToken(ctx)
+    if err != nil {
+        return nil, err
+    }
+  
     session := group.LookupSession(token, true)
     if session == nil {
-        return nil, grpc.Errorf(codes.NotFound, "invalid %s", SessionTokenKey)
+        return nil, plan.Errorf(nil, plan.SessionTokenNotValid, "%s not valid", SessionTokenKey)
     }
 
     return session, nil
@@ -186,13 +203,13 @@ func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, er
 
 
 
-
-func (group *SessionGroup) LookupSession(inAuthToken string, inBumpActivity bool) *ClientSession {
+// LookupSession returns the ClientSession having the given session token.
+func (group *SessionGroup) LookupSession(inSessionToken string, inBumpActivity bool) *ClientSession {
    
-    if len(inAuthToken) > 0 {
+    if len(inSessionToken) > 0 {
 
         group.RLock()
-        session := group.table[inAuthToken]
+        session := group.table[inSessionToken]
         group.RUnlock()
 
         if inBumpActivity && session != nil {
@@ -201,9 +218,9 @@ func (group *SessionGroup) LookupSession(inAuthToken string, inBumpActivity bool
 
         return session
 
-    } else {
-        return nil
     }
+    
+    return nil
 }
 
 
@@ -211,18 +228,17 @@ func (group *SessionGroup) LookupSession(inAuthToken string, inBumpActivity bool
 // NewSession creates a new ClientSession and inserts the session token into the given context
 func (group *SessionGroup) NewSession(
     ctx context.Context,
-    inReq *SessionRequest,
 ) *ClientSession {
 
     session := &ClientSession{
-        AuthToken: GenRandomSessionToken(32),
-        MsgOutlet: make(chan Msg, 16),
-        SessionRequest: inReq,
+        SessionToken: genRandomSessionToken(32),
+        OnEndSession: func(*ClientSession, string) { },
     }
 
     group.InsertSession(session)
 
-    metadata.AppendToOutgoingContext(ctx, SessionTokenKey, session.AuthToken)
+    trailer := metadata.Pairs(SessionTokenKey, session.SessionToken)
+    grpc.SetTrailer(ctx, trailer)
 
     return session
 }
@@ -233,22 +249,22 @@ func (group *SessionGroup) InsertSession(inSession *ClientSession) {
     inSession.PrevActivityTime = plan.Now()
 
     group.Lock()
-    group.table[inSession.AuthToken] = inSession
+    group.table[inSession.SessionToken] = inSession
     group.Unlock()
 
 }
 
-func (group *SessionGroup) EndSession(inAuthToken string, inReason string) {
+func (group *SessionGroup) EndSession(inSessionToken string, inReason string) {
 
     group.Lock()
-    session := group.table[inAuthToken]
+    session := group.table[inSessionToken]
     if session != nil {
-        delete(group.table, inAuthToken)
+        delete(group.table, inSessionToken)
     }
     group.Unlock()
 
     if session != nil {
-        go session.EndSession(inReason)
+        go session.OnEndSession(session, inReason)
     }
 
 }
@@ -271,12 +287,12 @@ func (group *SessionGroup) EndInactiveSessions( inExpiration plan.Time ) {
     if len(expired) > 0 {
         group.Lock()
         for _, session := range expired {
-            delete(group.table, session.AuthToken)
+            delete(group.table, session.SessionToken)
         }
         group.Unlock()
 
         for _, i := range expired {
-            go i.EndSession(ClientInactive)
+            go i.OnEndSession(i, ClientInactive)
         }
     }
 }
@@ -290,7 +306,7 @@ func (group *SessionGroup) EndAllSessions(inReason string) {
     group.Unlock()
 
     for _, session := range oldTable {
-        go session.EndSession(inReason)
+        go session.OnEndSession(session, inReason)
     }
 
 }
