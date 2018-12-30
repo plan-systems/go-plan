@@ -18,12 +18,12 @@ import (
 
     log "github.com/sirupsen/logrus"
 
-    ds "github.com/ipfs/go-datastore"
-    badger "github.com/ipfs/go-ds-badger"
+
 
     //"github.com/tidwall/redcon"
 
     "github.com/plan-systems/go-plan/plan"
+    ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
     //github.com/plan-systems/go-plan/ski"
     _ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 
@@ -37,6 +37,7 @@ import (
     "crypto/rand"
 
     //"github.com/stretchr/testify/assert"
+    "github.com/ethereum/go-ethereum/common/hexutil"
 
 
     "github.com/plan-systems/go-plan/pdi"
@@ -47,7 +48,6 @@ import (
 	"google.golang.org/grpc/reflection"
 
     //"github.com/ethereum/go-ethereum/rlp"
-    "github.com/ethereum/go-ethereum/common/hexutil"
 
     "golang.org/x/net/context"
 
@@ -63,7 +63,7 @@ const (
     DefaultGrpcNetworkName      = "tcp"
 
     // DefaultGrpcNetworkAddr is the default net.Listen() local network address
-    DefaultGrpcNetworkAddr      = ":50051"
+    DefaultGrpcNetworkAddr      = ":50053"
 
     // CurrentSnodeVersion specifies the Snode version 
     CurrentSnodeVersion         = "0.1"
@@ -75,91 +75,21 @@ const (
 
 
 
-// CStorage wraps a PLAN community UUID and a datastore
-type CStorage struct {
-    CommunityID                 plan.CommunityID
-    
-    Snode                       *Snode
-
-    Info                        *CStorageInfo
-
-    ds                          ds.Datastore
-
-    AbsPath                     string
-
-    msgOutbox                   chan *pservice.Msg
-    msgInbox                    chan *pservice.Msg
-
-    DefaultFileMode             os.FileMode
-
-}
-
-
-
-func newCStorage(
-    inInfo *CStorageInfo,
-    inParent *Snode,
-) *CStorage {
-
-    CS := &CStorage{
-        Snode: inParent,
-        Info: inInfo,
-        DefaultFileMode: inParent.Config.DefaultFileMode,
-        msgOutbox: make(chan *pservice.Msg, 16),
-        msgInbox: make(chan *pservice.Msg, 16),
-    }
-
-    if path.IsAbs(CS.Info.HomePath) {
-        CS.AbsPath = CS.Info.HomePath
-    } else {
-        CS.AbsPath = path.Clean(path.Join(inParent.BasePath, CS.Info.HomePath))
-    }
-
-    return CS
-}
-
-
-// OnServiceStarting should be once CStorage is preprared and ready to invoke the underlying implementation.
-func (CS *CStorage) OnServiceStarting() error {
-
-    logE := log.WithFields(log.Fields{ 
-        "impl": CS.Info.ImplName,
-        "path": CS.AbsPath,
-    })
-    logE.Info( "OnServiceStarting()" )
-
-    var err error
-
-    switch CS.Info.ImplName {
-        case "badger":
-            CS.ds, err = badger.NewDatastore(CS.AbsPath, nil)
-        default:
-            err = plan.Errorf(nil, plan.StorageImplNotFound, "storage implementation for '%s' not found", CS.Info.ImplName)
-    }
-
-    if err != nil {
-        logE := logE.WithError(err)
-        logE.Warn("OnServiceStarting() ERROR")
-    }
-
-    return err
-}
-
-
-
-
-
-
 // Snode represents an instance of a running Snode daemon.  Multiple disk-independent instances
 //     can be instantiated and offer service in parallel, this is not typical operation. Rather,
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
-    Stores                      map[plan.CommunityID]*CStorage
+    Stores                      map[plan.CommunityID]*ds.Store
 
     ActiveSessions              pservice.SessionGroup
 
     BasePath                    string
     Config                      Config
+
+    grpcServer                  *grpc.Server
+    listener                    net.Listener
+    serverDone                  chan struct{}
+    ShuttingDown                chan struct{}
 
     FSNameEncoding              *base64.Encoding
 }
@@ -168,17 +98,6 @@ type Snode struct {
 // RuntimeSettings specifies settings that are solely associated with system load, performance, and resource allocation.
 type RuntimeSettings struct {
 
-}
-
-
-// CStorageInfo contains core info about a db/store
-type CStorageInfo struct {
-    CommunityName           string                  `json:"community_name"`
-    CommunityID             hexutil.Bytes           `json:"community_id"`
-    HomePath                string                  `json:"home_path"`
-    TimeCreated             plan.Time               `json:"time_created"`  
-    ImplName                string                  `json:"impl_name"`
-    ImplParams              map[string]string       `json:"impl_params"`
 }
 
 
@@ -191,7 +110,7 @@ type Config struct {
     Name                        string                          `json:"node_name"`
     NodeID                      hexutil.Bytes                   `json:"node_id"`
 
-    Stores                      []CStorageInfo                  `json:"node_info"`
+    Stores                      []ds.StorageInfo                `json:"node_info"`
 
     RuntimeSettings             RuntimeSettings                 `json:"runtime_settings"`
 
@@ -253,9 +172,11 @@ func (config *Config) WriteToFile(inPathname string) error {
 func NewSnode(inBasePath *string) *Snode {
     sn := &Snode{
         FSNameEncoding: base64.RawURLEncoding,
+        ShuttingDown: make(chan struct{}),
+        serverDone: make(chan struct{}),
     }
 
-    sn.Stores = map[plan.CommunityID]*CStorage{}
+    sn.Stores = map[plan.CommunityID]*ds.Store{}
     sn.ActiveSessions.Init()
 
     var err error
@@ -317,9 +238,9 @@ func (sn *Snode) WriteConfig() error {
 
 
 // CreateNewStore creates a new data store and adds it to this nodes list of stores (and updates the config on disk)
-func (sn *Snode) CreateNewStore(CSInfo *CStorageInfo) error {
+func (sn *Snode) CreateNewStore(inInfo *ds.StorageInfo) error {
 
-    sn.Config.Stores = append(sn.Config.Stores, *CSInfo)
+    sn.Config.Stores = append(sn.Config.Stores, *inInfo)
 
     return nil
 }
@@ -328,15 +249,15 @@ func (sn *Snode) CreateNewStore(CSInfo *CStorageInfo) error {
 func (sn *Snode) Startup() error {
 
     for i := range sn.Config.Stores {
-        CSInfo := &sn.Config.Stores[i]
+        info := &sn.Config.Stores[i]
         
-        CS := newCStorage(CSInfo, sn)
+        S := ds.NewStore(info, sn.BasePath)
 
-        sn.registerCStore(CS)
+        sn.registerStore(S)
     }
 
-    for _, CS := range sn.Stores {
-        err := CS.OnServiceStarting()
+    for _, S := range sn.Stores {
+        err := S.OnServiceStarting()
         if err != nil {
             return err
         }
@@ -347,37 +268,67 @@ func (sn *Snode) Startup() error {
 
 
 
-func (sn *Snode) registerCStore(CS *CStorage) {
+func (sn *Snode) registerStore(S *ds.Store) {
 
-    communityID := plan.GetCommunityID(CS.Info.CommunityID)
+    communityID := plan.GetCommunityID(S.Info.CommunityID)
     //var communityID plan.CommunityID
     //copy(communityID[:], CS.Info.CommunityID)
 
     // TODO: add mutex!
-    sn.Stores[communityID] = CS
+    sn.Stores[communityID] = S
 
 }
 
 
 
 
-// Run is used like main()
-func (sn *Snode) Run() {
+// StartServer is used like main()
+func (sn *Snode) StartServer() {
+    var err error
 
-    {
-        lis, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
-        if err != nil {
-            log.Fatalf( "failed to listen: %v", err )
-        }
-        grpcServer := grpc.NewServer()
-        pdi.RegisterStorageProviderServer(grpcServer, sn)
-        
-        // Register reflection service on gRPC server.
-        reflection.Register(grpcServer)
-        if err := grpcServer.Serve( lis ); err != nil {
-            log.Fatalf( "failed to serve: %v", err )
-        }
+    log.Infof("Starting StorageProvider service on %v, %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+    sn.listener, err = net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+    if err != nil {
+        log.WithError(err).Error("net.Listen()")
     }
+
+    // TODO: turn off compression since we're dealing w/ encrypted data
+    sn.grpcServer = grpc.NewServer()
+    pdi.RegisterStorageProviderServer(sn.grpcServer, sn)
+    
+    // Register reflection service on gRPC server.
+    reflection.Register(sn.grpcServer)
+    go func() {
+
+        if err := sn.grpcServer.Serve(sn.listener); err != nil {
+            log.WithError(err).Warn("grpcServer.Serve()")
+        }
+        
+        sn.listener.Close()
+        sn.listener = nil
+
+        close(sn.serverDone)
+    }()
+
+}
+
+
+// Shutdown performs a shutdown and cleanup
+func (sn *Snode) Shutdown() {
+    log.Info("Shutting down...")
+
+    if sn.grpcServer != nil {
+        sn.grpcServer.GracefulStop()
+    }
+
+    log.Info("Waiting on server")
+    <-sn.serverDone
+
+    log.Debug("Closing stores...")
+    for _, CS := range sn.Stores {
+        CS.Close()
+    }
+
 }
 
 
@@ -452,60 +403,84 @@ func (pnID SnodeID) UnmarshalJSON( inText []byte ) error {
 }
 */
 
-// StartSession -- see service StorageProvider in pdi.proto
-func (sn *Snode) StartSession(in *pservice.SessionRequest, inOutlet pdi.StorageProvider_StartSessionServer) error {
 
+// StartSession -- see service StorageProvider in pdi.proto
+func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) (*pdi.StorageSession, error) {
     cID := plan.GetCommunityID(in.CommunityId)
 
-    DS := sn.Stores[cID]
-    if DS == nil {
-        return plan.Errorf(nil, plan.CommunityNotFound, "community not found {ID:%v}", in.CommunityId)
+    S := sn.Stores[cID]
+    if S == nil {
+        return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found {ID:%v}", in.CommunityId)
     }
 
+
+    /******* gRPC Server Notes **********
+        1) An endpoint w/ a stream response sends an io.EOF once the handler proc returns (even if streamer stays open)
+    */
 
     // TODO security checks to prevent DoS
-    session :=  sn.ActiveSessions.NewSession(inOutlet.Context(), in)
+    session :=  sn.ActiveSessions.NewSession(ctx)
 
-    inOutlet.Send(&pservice.Msg{
-        Label: "SessionTokenKey",
-        Body: &plan.Block{
-            Label: pservice.SessionTokenKey,
-            Content: []byte(session.AuthToken),
-        },
-    })
-    
-    // TODO insert delay
+    session.Cookie = S
+    /*
+    go func() {
+        for i := 0; i < 10; i++ {
+            tryDesc := fmt.Sprintf("try-%v", i)
+            log.Print("sending: ", tryDesc)
 
-	return nil
-}
+            inOutlet.Send(&pservice.Msg{
+                Label: tryDesc,
+            })
 
-// PostResponse -- see service StorageProvider in pdi.proto
-func (sn *Snode) PostResponse(ctx context.Context, inMsg *pservice.Msg) (*plan.Status, error) {
+            time.Sleep(5 * time.Second)   
+        }
+    }()
 
-    session, err := sn.ActiveSessions.FetchSession(ctx)
-    if err != nil {
-        return nil, err
+    time.Sleep(60 * time.Second)   */
+
+    msg := &pdi.StorageSession{
+        AgentStr: S.AgentStr,
     }
-
-	return &plan.Status{
-        Code: 0,
-        Msg: "Hello token:"  + session.AuthToken,
-    }, nil
+	return msg, nil
 }
 
 // Query -- see service StorageProvider in pdi.proto
 func (sn *Snode) Query(inQuery *pdi.QueryTxns, inOutlet pdi.StorageProvider_QueryServer) error {
-    return nil
-}
+    session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
+    if err != nil {
+        return err
+    }
 
-// SubmitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) SubmitTxn(ctx context.Context, inTxn *pdi.TxnCandidate) (*pdi.StagedTxn, error) {
-    return nil, nil
+    job := &ds.QueryJob{
+        QueryTxns: inQuery,
+        Outlet:    inOutlet,
+        OnComplete: make(chan error, 1),
+    }
+
+    S := session.Cookie.(*ds.Store)
+    S.QueryInbox <- job
+
+    jobErr := <-job.OnComplete
+    return jobErr
 }
 
 // CommitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) CommitTxn(inTxn *pdi.StagedTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
-    return nil
+func (sn *Snode) CommitTxn(inTxn *pdi.Txn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
+    session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
+    if err != nil {
+        return err
+    }
+    job := &ds.CommitJob{
+        Txn:       inTxn,
+        Outlet:    inOutlet,
+        OnComplete: make(chan error, 1),
+    }
+
+    S := session.Cookie.(*ds.Store)
+    S.CommitInbox <- job
+
+    jobErr := <-job.OnComplete
+    return jobErr
 }
 
 
@@ -544,7 +519,7 @@ func (sn *Snode) LoadConfigIn() error {
     for i := range sn.Config.Stores {
         CSInfo := &sn.Config.Stores[i]
         
-        CS := NewCStorage(CSInfo, sn)
+        CS := NewDatastore(CSInfo, sn)
 
         sn.RegisterCStore(CS)
     }

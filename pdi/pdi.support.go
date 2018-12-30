@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 )
 
+/*
 // EntryAddr specifies the address of a PDI entry (an EntryCrypt) in a given StorageProvider.
 // Since a StorageTxn can potentially hold more than one entry, EntryIndex specifies which one (using zero-based indexing).
 type EntryAddr struct {
@@ -16,6 +17,7 @@ type EntryAddr struct {
 	TxnName      []byte
 	EntryIndex   uint16
 }
+*/
 
 // EntryVersionMask is a bit mask on EntryCrypt.CryptInfo to extract pdi.EntryVersion
 const EntryVersionMask = 0xFF
@@ -64,6 +66,7 @@ func (entry *EntryCrypt) MarshalToBlock() *plan.Block {
 ** Utils
 **/
 
+/*
 // MarshalForOptionalBody marshals txn so that it can be deserializaed via UnmarshalWithOptionalBody().
 func (txn *StorageTxn) MarshalForOptionalBody(dAtA []byte) ([]byte, error) {
 
@@ -155,7 +158,7 @@ func (txn *StorageTxn) UnmarshalEntries(ioBatch []*EntryCrypt) ([]*EntryCrypt, e
 
     return ioBatch, err
 }
-
+*/
 
 // MarshalEntries marshals the given batch of entries into a single plan.Block
 func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {

@@ -11,38 +11,115 @@ import "github.com/plan-systems/go-plan/pservice/pservice.proto";
 
 
 
+enum TxnCodec {
 
-service StorageProvider {
+    Unspecified             = 0;
 
-    // Session start:
-    //    0) On StorageProvider node initial setup, it holds a pub/private key pair plus certificate from the identity of the owner 
-    //    1) When a client connects, it can check the provider node UUID is ok (not blacklisted, etc) 
-    //    2) When the client submits a txn:
-    //        a) the client sends it via SubmitTxn()
-    //        b) the SP preps and stages the txn, and sends back a sig request via StartSession()/pservice.Msg
-    //        c) the client uses their SP identity and signs it using the appropriate CryptoKit 
-    ///       d) the client sends the sig via CommitTxn()
-    // Returns a continuous stream of msgs indicating server health, connectivity, sig requests, etc. 
-    rpc         StartSession(pservice.SessionRequest)           returns (stream pservice.Msg);
+    // A protobufs-encoded plan.Block
+    PbBlock                 = 1;
 
-    // Posts a signature response from the client back to the server (a response to Msg)
-    rpc         PostResponse(pservice.Msg)                      returns (plan.Status);
-
-    // Requests a sequence of txns starting with the specified time, txn name, bookmark, or other query criteria.
-    rpc         Query(QueryTxns)                                returns (stream TxnBundle);
-
-    // Submits a given plan.Block to this SP.  Upon receipt, the SP will marshal the submitted txn body
-    //    into an internal/native txn(s) that can be written to the actual SP implementation.
-    rpc         SubmitTxn(TxnCandidate)                         returns (StagedTxn);
-
-    // Supplies the sig(s) needed to finish and commit the current txn to the SP's permanent record.
-    rpc         CommitTxn(StagedTxn)                            returns (stream StorageTxn);
+    // A protobufs-encoded pdi.EntryCrypt
+    PbEntryCrypt            = 2;
 
 }
 
 
+/**********************************************************************************************************************
+A StorageProvider daemon sits on top or alongside a local storage system.  It serves as an access
+point to a community's shared data store. A community's member nodes use a StorageProvider to:
+    - Submit newly authored (and sealed) txns to the community's shared data store.
+    - Query and receive txns that have been newly added or in the past. 
+    
+In order to allow a StorageProvider to be implemented by an append-only distributed ledger, 
+newly submitted txns must already be ready to be committed to the the underlying storage implementation.
+This means that for every StorageProvider implementation, there is an accompanying txn marshalling agent.  
+
+See go-plan/pdi/StorageProvider.go. */
+service StorageProvider {
+
+    // Starts a new client session.
+    rpc         StartSession(pservice.SessionRequest)           returns (StorageSession);
+
+    // Requests a sequence of txns starting with the specified time, txn name, bookmark, or other query criteria.
+    rpc         Query(QueryTxns)                                returns (stream TxnBundle);
+
+    // Submits a txn ready to be written to the StorageProvider's permanent txn store.
+    rpc         CommitTxn(Txn)                                  returns (stream TxnInfo);
 
 
+}
+
+message StorageSession {
+
+    // Identifies which StorageProviderAgent should be used to encode txn submitted via CommitTxn()
+                string          agent_str               = 1;
+}
+
+
+// Txn contains a readied txn native to the StorageProvider it is being submitted to or received from.
+// A Txn can always be decoded into a TxnSegment.
+message Txn {
+
+    // Info about the native txn data contained in TxnData
+                TxnInfo         txn_info                = 3;
+
+    // Native txn data (already conforms to native txn requirements, e.g. max size)
+                bytes           txn_data                = 4;
+
+}
+
+// TxnInfo contains information derivable from a Txn or _about_ a Txn being processed.
+message TxnInfo {
+
+    // ID/address/pubkey that is posting the to-be txn.  
+                ski.PubKey      from                    = 2;
+
+    // Unique name associated with this txn (typically a hashname of TxnData and/or derivative of TxnDigest).
+    // Since a StorageProvider+Agent generates txn names, they can be any length (typically 8 to 32 bytes),
+    //    but are consistent and never change for a given StorageProvider package.
+                bytes           txn_name                = 3;
+
+    // A digest of txn_data and the corresponding signature, specific to the StorageProvider's native storage.
+                bytes           digest                  = 5;
+                bytes           sig                     = 6;
+
+    // Unix timestamp of when this txn was signed for storage (or 0 if not available)
+                int64           time_sealed             = 7;
+
+    // Consensus-based unix timestamp for this txn (or 0 if not available).  
+    // If txn_status == FINALIZED, then this timestamp:
+    //      - won't ever change, 
+    //      - is universal across storage peers
+    //      - is trustworthy
+                int64           time_consensus          = 8;
+
+    // If set, specifies a message or alert about this txn
+                plan.Status     alert                   = 9;
+
+}
+
+
+// TxnSegment represents a decoded Txn.  Although a StorageProviderAgent internally encodes a TxnSegment
+//     into a Txn to be signed, that can only happen after the agent has segmented the payload 
+//     buffer into sizes appropriate for storage medium. 
+// For example, the Ethereum agent must break the payload into 31k pieces so that the byte size of 
+//     Txn.TxnData is strictly less than 32k (Ethereum's txn size limit).  T
+message TxnSegment {
+
+    // The native txn name that this segment was decoded from.
+                bytes           txn_name                = 1;
+
+    // Info about which segment this is and how many segments there are.
+                int32           segment_num             = 2;
+                int32           num_segments            = 3;
+
+    // The original payload is reconstructed by concatenating each TxnSegment.Data together.  
+                bytes           data                    = 4;
+
+}
+
+
+/*
 message TxnCandidate {
 
     // ID/address/pubkey that will posting the to-be txn.  
@@ -59,12 +136,12 @@ message StagedTxn {
     // Reports any error/state condition.
                 plan.Status     status                  = 1;
                 
-    // Once the SP prepares/processes the txn body from SubmitTxn() into a native SP txn internally, 
+    // Once the StorageProvider prepares/processes the txn body from SubmitTxn() into a native SP txn internally, 
     //    the native txn(s) needs to be signed since the ledger/authority it's using presumably requires that.
     // This happens by the SP handing back digest(s) for the client to sign.
-                ski.SigRequest  sig_request             = 2;
+                ski.SigBlock    sig_block               = 2;
 
-}
+}*/
 
 
 message QueryTxns {
@@ -91,12 +168,12 @@ message QueryTxns {
 
 message TxnBundle {
 
-    // Zero or more StorageTxns being returned
-    repeated    StorageTxn      txns                        = 1;
+    // Zero or more txns
+    repeated    Txn             txns                    = 1;
 
     // Intended to be passed in pdi.Query in order for a client to resume a txn stream/sequence -- optional.  
     // This Block is intended to be used by the originating StorageProvider, so it's opaque as far as the client is concerned.
-                plan.Block      bookmark                    = 2;
+                plan.Block      bookmark                = 2;
 
 }
 
@@ -109,9 +186,6 @@ enum TxnStatus {
 
     // The txn is yet to be committed to storage
     AWAITING_COMMIT             = 0;
-
-    // The txn has been submitted and is awaiting the client to sign the txn digest (so it can be internally submitted)
-    AWAITING_SIG                = 1;
 
     // The txn has been committed and is in the process of being stored
     COMMITTING                  = 2;
@@ -131,42 +205,9 @@ enum TxnStatus {
     // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equivalent state to AWAITING_COMMIT)
     REVOKED                     = 9;
 
-    // The txn has been committed, confirmed as stored, and faces no possibility of being reverted.
+    // The txn has been committed, confirmed as stored, and faces no possibility of being reverted/revoked.
     FINALIZED                   = 16;
 
-}
-
-
-
-message StorageTxn {
-
-    // Issued by the storage layer (not storage clients) some time after StorageSession.Commit()
-    // Since a StorageProvider creates/assigns txn names, they can be any length (typically 8 to 32 bytes),
-    //    but the length is *never* changes when a StorageProvider inits a new repo.
-                bytes           txn_name                    = 1;
-
-    // Unix timestamp of when this txn was committed for storage (0 if not committed)
-                int64           time_committed              = 2;
-
-    // Consensus-based unix timestamp for this txn (or 0 if not available).  
-    // If txn_status == FINALIZED, then this timestamp:
-    //      - won't ever change, 
-    //      - is universal across storage peers
-    //      - is trustworthy
-                int64           time_consensus              = 3;
-
-    // Describes the state of this txn segment number
-                TxnStatus       txn_status                  = 4;
-
-    // Originator of this transaction
-                ski.PubKey      from                        = 5;
-
-    // Txn payload (in PLAN, one or more serialized pdi.EntryCrypt)
-                plan.Block      body                        = 6;
-
-    // If set, specifies a message or alert about this txn
-                plan.Status     alert                       = 7;
-                
 }
 
 

@@ -5,6 +5,11 @@ import (
     "flag"
     log "github.com/sirupsen/logrus"
 
+    "bufio"
+    "os"
+
+    ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
+
     //"github.com/plan-systems/go-plan/plan"
 
 )
@@ -20,33 +25,49 @@ func main() {
 
     flag.Parse()
 
-    sn := NewSnode(basePath)
+    {
+        sn := NewSnode(basePath)
 
-    err := sn.ReadConfig(*init)
-    if err != nil {
-        log.WithError(err).Fatalf("failed to read node config")
-    }
-
-    if len(*create) > 0 {
-        info := &CStorageInfo{
-            ImplName: *create,
-        }
-        err = sn.CreateNewStore(info)
+        err := sn.ReadConfig(*init)
         if err != nil {
-            log.WithError(err).Fatalf("failed to create '%s' datastore", *create)
+            log.WithError(err).Fatalf("failed to read node config")
+        }
+
+        if len(*create) > 0 {
+            info := &ds.StorageInfo{
+                ImplName: *create,
+            }
+            err = sn.CreateNewStore(info)
+            if err != nil {
+                log.WithError(err).Fatalf("failed to create '%s' datastore", *create)
+            } else {
+                sn.WriteConfig()
+            }
+        } else {
+
+            err = sn.Startup()
+            if err != nil {
+                log.WithError(err).Fatalf("failed to startup node")
+            }
+
+            log.Print("StartServer()")
+
+            sn.StartServer()
+
+            log.Print("StartService() COMPLETE")
+
+            {   
+                reader := bufio.NewReader(os.Stdin)
+                reader.ReadString('\n')
+
+                //fmt.Printf("Input Char Is : %v", string([]byte(input)[0]))
+            }
+
+            sn.Shutdown()
         }
     }
 
-    err = sn.Startup()
-    if err != nil {
-        log.WithError(err).Fatalf("failed to startup node")
-    }
-
-    if create != nil {
-        sn.WriteConfig()
-    }
-
-    sn.Run()
+    log.Print("Ending...")
 }
 
 
