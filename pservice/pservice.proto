@@ -26,7 +26,7 @@ message SessionRequest {
                 ski.PubKey      client_id               = 3;
 
     // Submits an authentication challenge for the host (so that the host can be validated).
-                ski.SigRequest  challenge               = 4;
+                ski.SigBlock    challenge               = 4;
 
     // Additional keys, tokens, info, params
                 plan.Block      params                  = 5;
@@ -39,11 +39,14 @@ message Msg {
     // Describes this msg in some way (optional)
                 string          label                   = 1;
 
+    // Reports any error/state condition.
+                plan.Status     status                  = 2;
+
     // Holds arbitrary information/data
-                plan.Block      body                    = 2;
+                plan.Block      body                    = 3;
 
     // A signature request/response from the host/server (typically a request to the client to sign something)
-                ski.SigRequest  sig_request             = 3;
+                ski.SigBlock    sig_block               = 4;
 }
 
 

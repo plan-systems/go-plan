@@ -119,19 +119,16 @@ message KeyTome {
 
 
 
-message SigRequest {
-
-    // A reference value specified by the originator for internal use.  Greater than 0 and is always unique.
-                int64               id                  = 1;
+message SigBlock {
 
     // Used to specify an explicit key to sign the given digest.
-    // Can be underspecified indicating that the signer knows which key to use.
-                PubKey              pub_key             = 2;
+    // Can be under-specified indicating that the signer knows which key to use.
+                PubKey              signee              = 1;
 
-    // Digest(s) to be signed
-    repeated    bytes               digests             = 3;
+    // Digest to be signed
+                bytes               digest              = 2;
 
-    // A signature corresponding to each digest stored in digests
-    repeated    bytes               sigs                = 4;
+    // Signature corresponding to the digest stored in this SigBlock
+                bytes               sig                 = 3;
                 
 }
