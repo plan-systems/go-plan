@@ -118,7 +118,7 @@ func GetCryptoKit(
 ) (*CryptoKit, *plan.Perror) {
 
 	gCryptoKitRegistry.RLock()
-    if inCryptoKitID == CryptoKitID_DEFAULT_KIT_ID {
+    if inCryptoKitID == CryptoKitID_DEFAULT_KIT {
         inCryptoKitID = gCryptoKitRegistry.DefaultKitID
     }
 	pkg := gCryptoKitRegistry.Lookup[inCryptoKitID]
@@ -135,22 +135,51 @@ func GetCryptoKit(
 //  Returns nil err if the signature of inDigest plus the signer's private key matches the given signature.
 // This function is threadsafe.
 func VerifySignature(
-	inCryptoKitID CryptoKitID,
-	inSig []byte,
-	inDigest []byte,
+	inSig          []byte,
+	inDigest       []byte,
+	inCryptoKitID  CryptoKitID,
 	inSignerPubKey []byte,
 ) *plan.Perror {
 
-	pkg, err := GetCryptoKit(inCryptoKitID)
+	kit, err := GetCryptoKit(inCryptoKitID)
 	if err != nil {
 		return err
 	}
 
-	err = pkg.VerifySignature(
+	err = kit.VerifySignature(
 		inSig,
 		inDigest,
 		inSignerPubKey,
 	)
+
+	return err
+}
+
+
+// VerifySignatureFrom is a convenience that performs signature validation for any registered CryptoKit.
+func VerifySignatureFrom(
+	inSig    []byte,
+	inDigest []byte,
+	inFrom   *PubKey,
+) *plan.Perror {
+
+    if inFrom == nil {
+    	return plan.Errorf(nil, plan.MissingParam, "missing 'from' param")    
+    }
+
+    // TODO: support key base conversion
+    if inFrom.Encoding != 0 {
+    	return plan.Errorf(nil, plan.Unimplemented, "currently only support binary keys")    
+    }
+
+    signerPubKey := inFrom.KeyBase
+
+    err := VerifySignature(
+        inSig,
+        inDigest,
+        inFrom.CryptoKitId,
+        signerPubKey,
+    )
 
 	return err
 }

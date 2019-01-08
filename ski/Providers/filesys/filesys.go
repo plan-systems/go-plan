@@ -269,7 +269,7 @@ func (session *fsSession) CheckOpParamsAndPermissions(
     inArgs *ski.OpArgs,
     ) *plan.Perror {
 
-    if len(inArgs.KeySpecs.CommunityId) < 4 {
+    if len(inArgs.CommunityID) < 4 {
         return plan.Errorf(nil, plan.CommunityNotSpecified, "community ID must be specified for SKI op %v", inArgs.OpName)
     }
 
@@ -318,7 +318,7 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
             mutates = true
     }
 
-    keyringSet, err := session.KeyRepo.FetchKeyringSet(inArgs.KeySpecs.CommunityId, mutates)
+    keyringSet, err := session.KeyRepo.FetchKeyringSet(inArgs.CommunityID, mutates)
     if err != nil {
         inOnCompletion(nil, err)
         return
@@ -395,7 +395,7 @@ func doOp(
             ski.OpExportNamedKeys,
             ski.OpExportKeyring,
             ski.OpImportKeys:
-            cryptoKey, err = ioKeyringSet.FetchKey(&opArgs.CryptoKey)
+            cryptoKey, err = ioKeyringSet.FetchKey(&opArgs.OpKeySpec)
         }
 
         if err != nil {
@@ -419,7 +419,7 @@ func doOp(
         switch opArgs.OpName {
 
             case ski.OpExportNamedKeys:
-                opArgs.Msg, err = exportKeysIntoMsg(ioKeyringSet, opArgs.KeySpecs.Keys)
+                opArgs.Msg, err = exportKeysIntoMsg(ioKeyringSet, opArgs.KeySpecs)
     
         }
 
@@ -477,9 +477,10 @@ func doOp(
 
             case 
             ski.OpGenerateKeys:{
-                err = ioKeyringSet.GenerateNewKeys(opArgs.KeySpecs.Keys)
+                kb := ski.KeyBundle{}
+                kb.Keys, err = ioKeyringSet.GenerateNewKeys(opArgs.KeySpecs)
                 if err == nil {
-                    msg, _ = opArgs.KeySpecs.Marshal()
+                    msg, _ = kb.Marshal()
                     outResults.Codec = ski.KeyBundleProtobufCodec
                 }
             }
@@ -520,7 +521,7 @@ func doOp(
 
 func exportKeysIntoMsg(
     ioKeyringSet *ski.KeyringSet,
-    inKeySpecs []*ski.KeyEntry,
+    inKeySpecs []*ski.PubKey,
 ) ([]byte, *plan.Perror) {
 
     var keysBuf []byte

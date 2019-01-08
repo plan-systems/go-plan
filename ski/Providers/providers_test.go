@@ -90,22 +90,17 @@ func doCoreTests(A, B *testSession) {
 
     // 1) Generate a new community key (on A)
     communityKey := A.generateNewKey(ski.KeyType_SYMMETRIC_KEY, ski.KeyDomain_COMMUNITY)
-	
+ 
     // 2) generate a xfer community key msg from A
     opResults := A.doOp(ski.OpArgs{
         OpName: ski.OpExportNamedKeys,
-        CryptoKey: ski.KeyEntry{
+        OpKeySpec: ski.PubKey{
             KeyDomain: ski.KeyDomain_PERSONAL,
-            PubKey: A.encryptPubKey,
+            KeyBase: A.encryptPubKey,
         },
-        KeySpecs: ski.KeyBundle{
-            CommunityId: gCommunityID[:],
-            Keys: []*ski.KeyEntry{
-                &ski.KeyEntry{
-                    KeyDomain: ski.KeyDomain_COMMUNITY,
-                    PubKey: communityKey.PubKey,
-                },
-            },
+        CommunityID: gCommunityID[:],
+        KeySpecs: []*ski.PubKey{
+            communityKey,
         },
         PeerPubKey: B.encryptPubKey,
     })
@@ -114,13 +109,11 @@ func doCoreTests(A, B *testSession) {
     opResults = B.doOp(ski.OpArgs{
         OpName: ski.OpImportKeys,
         Msg: opResults.Content,
-        CryptoKey: ski.KeyEntry{
+        OpKeySpec: ski.PubKey{
             KeyDomain: ski.KeyDomain_PERSONAL,
-            PubKey: B.encryptPubKey,
+            KeyBase: B.encryptPubKey,
         },
-        KeySpecs: ski.KeyBundle{
-            CommunityId: gCommunityID[:],
-        },
+        CommunityID: gCommunityID[:],
         PeerPubKey: A.encryptPubKey,
     })
 
@@ -130,13 +123,8 @@ func doCoreTests(A, B *testSession) {
     // 4) Encrypt a new community msg (sent from A)
 	opResults = A.doOp(ski.OpArgs{
         OpName: ski.OpEncrypt,
-        CryptoKey: ski.KeyEntry{
-            KeyDomain: ski.KeyDomain_COMMUNITY,
-            PubKey: communityKey.PubKey,
-        },
-        KeySpecs: ski.KeyBundle{
-            CommunityId: gCommunityID[:],
-        },
+        OpKeySpec: *communityKey,
+        CommunityID: gCommunityID[:],
         Msg: clearMsg,
     })
 
@@ -145,13 +133,8 @@ func doCoreTests(A, B *testSession) {
     // 5) Send the encrypted community message to B
 	opResults = B.doOp(ski.OpArgs{
         OpName: ski.OpDecrypt,
-        CryptoKey: ski.KeyEntry{
-            KeyDomain: ski.KeyDomain_COMMUNITY,
-            PubKey: communityKey.PubKey,
-        },
-        KeySpecs: ski.KeyBundle{
-            CommunityId: gCommunityID[:],
-        },
+        OpKeySpec: *communityKey,
+        CommunityID: gCommunityID[:],
         Msg: encryptedMsg,
     })
 
@@ -171,10 +154,8 @@ func doCoreTests(A, B *testSession) {
 
         _, opErr := B.doOpWithErr(ski.OpArgs{
             OpName: ski.OpDecrypt,
-            CryptoKey: *communityKey,
-            KeySpecs: ski.KeyBundle{
-                CommunityId: gCommunityID[:],
-            },
+            OpKeySpec: *communityKey,
+            CommunityID: gCommunityID[:],
             Msg: badMsg,
         })
         if opErr == nil {
@@ -255,8 +236,8 @@ func newSession(inInvocation plan.Block, inName string) *testSession {
         gTesting.Fatal(err)
     }
 
-    ts.encryptPubKey = ts.generateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL).PubKey
-    ts.signingPubKey = ts.generateNewKey(ski.KeyType_SIGNING_KEY,    ski.KeyDomain_PERSONAL).PubKey
+    ts.encryptPubKey = ts.generateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL).KeyBase
+    ts.signingPubKey = ts.generateNewKey(ski.KeyType_SIGNING_KEY,    ski.KeyDomain_PERSONAL).KeyBase
 
     return ts
 }
@@ -264,15 +245,15 @@ func newSession(inInvocation plan.Block, inName string) *testSession {
 func (ts *testSession) generateNewKey(
     inKeyType ski.KeyType,
     inKeyDomain ski.KeyDomain,
-) *ski.KeyEntry {
+) *ski.PubKey {
 
-    var keyEntry *ski.KeyEntry
+    var newKey *ski.PubKey
 
     ski.GenerateKeys(
         ts.session, 
         gCommunityID[:], 
-        []*ski.KeyEntry{
-            &ski.KeyEntry{
+        []*ski.PubKey{
+            &ski.PubKey{
                 KeyType: inKeyType,
                 KeyDomain: inKeyDomain,
             },
@@ -281,7 +262,10 @@ func (ts *testSession) generateNewKey(
             if inErr != nil {
                 gTesting.Fatal(inErr)
             } else {
-                keyEntry = inKeys[0]
+                newKey = &ski.PubKey{
+                    KeyDomain: inKeys[0].KeyDomain,
+                    KeyBase: inKeys[0].PubKey,
+                }
             }
 
             ts.blocker <- 1
@@ -290,7 +274,7 @@ func (ts *testSession) generateNewKey(
 
     <- ts.blocker
 
-    return keyEntry
+    return newKey
 
 }
 

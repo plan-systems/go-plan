@@ -31,26 +31,39 @@ enum KeyDomain {
 }
 
 enum  CryptoKitID {
-    DEFAULT_KIT_ID      = 0;
+    DEFAULT_KIT         = 0;
 
     NaCl                = 1;
 }
 
+enum  HashKitID {
+    DEFAULT_HASH_KIT    = 0;
+
+    LegacyKeccak_256    = 1;
+    LegacyKeccak_512    = 2;
+
+    SHA3_256            = 3;
+    SHA3_512            = 4;
+}
 
 message PubKey {
 
     // Specifies what type of KeyType this is (or NOT_SET)
                 KeyType         key_type                = 1;
 
-    // Specifies which CryptoKit handles this key
-                CryptoKitID     crypto_kit_id           = 2;
+   // Specifies which domain/area this key is used in (optional in some cases)
+                KeyDomain       key_domain              = 2;
 
-    // Specifies the data encoding format of PubKey.encoded
+    // Specifies which CryptoKit handles this key
+                CryptoKitID     crypto_kit_id           = 3;
+
+    // Specifies the key data encoding format of PubKey.KeyBase
+    // Default is 0, meaning binary (8-bit) encoding.
     // See https://github.com/multiformats/multibase/blob/master/multibase.csv 
-                int32           encoding                = 3;
+                int32           encoding                = 4;
                 
-    // Key data stored in the form specified by PubKey.multibase_code
-                bytes           encoded                 = 4;
+    // Key data stored in the form specified by PubKey.Encoding
+                bytes           key_base                = 5;
 
 }
 
@@ -67,19 +80,15 @@ message PubKey {
 //         a) Fields used: KeyType, KeyDomain, CryptoKitID (other fields ignored)
 message KeyEntry {
     
-    // Specifies what type of KeyType this is (or NOT_SET)
+    // See fields for PubKey
                 KeyType         key_type                = 1;
-
-    // Specifies which domain/area this key is used in
                 KeyDomain       key_domain              = 2;
-
-    // Specifies which CryptoKit handles this key's ops
                 CryptoKitID     crypto_kit_id           = 3;
 
     // Unix timestamp when this key was created (or 0 if not set)
                 int64           time_created            = 4;
 
-    // Public part of the key; how this key is also referenced publicly.
+    // Public part of the key; how this key is also referenced publicly (in base-8 form)
     // When a KeyEntry is being used to specify the generation of a new key, this field is ignored.
                 bytes           pub_key                 = 5;
 
@@ -132,3 +141,4 @@ message SigBlock {
                 bytes               sig                 = 3;
                 
 }
+

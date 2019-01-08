@@ -111,6 +111,9 @@ var (
     }
 )
 
+
+
+
 /*****************************************************
 ** ski.Session.DispatchOp() support
 **/
@@ -122,11 +125,13 @@ type OpArgs struct {
 	OpName string
 
 	// Key spec to used for encrypting/decrypting/signing
-	CryptoKey KeyEntry
+	OpKeySpec PubKey
+
+    // CommunityID specifies the community ID/scope for this op
+    CommunityID []byte
 
 	// A list of key specs that the Op does something with.  
-    // Note: KeySpecs.CommunityID specifies the community ID/scope and must be set for all ops!
-	KeySpecs KeyBundle
+	KeySpecs []*PubKey
 
 	// Sender/Recipient publicly available key -- a public address in the community key space
 	PeerPubKey []byte
@@ -146,23 +151,23 @@ const (
 	 ** Symmetric crypto support
 	 **/
 
-	// OpEncrypt encrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKey
+	// OpEncrypt encrypts OpArgs.Msg using the symmetric indexed by OpArgs.OpKeySpec
 	OpEncrypt = "encrypt_sym"
 
-	// OpDecrypt decrypts OpArgs.Msg using the symmetric indexed by OpArgs.CryptoKey
+	// OpDecrypt decrypts OpArgs.Msg using the symmetric indexed by OpArgs.OpKeySpec
 	OpDecrypt = "decrypt_sym"
 
 	/*****************************************************
 	 ** Asymmetric crypto support
 	 **/
 
-	// OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKey
+	// OpEncryptTo encrypts and seals OpArgs.Msg for a recipient associated with OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.OpKeySpec
 	OpEncryptFor = "encrypt_for"
 
-	// OpDecryptFrom decrypts OpArgs.Msg from the sender's OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.CryptoKey
+	// OpDecryptFrom decrypts OpArgs.Msg from the sender's OpArgs.PeerPubKey, using the asymmetric key indexed by OpArgs.OpKeySpec
 	OpDecryptFrom = "decrypt_from"
 
-	// OpSign creates a signature buffer for OpArgs.Msg, using the asymmetric key indexed by OpArgs.CryptoKey.
+	// OpSign creates a signature buffer for OpArgs.Msg, using the asymmetric key indexed by OpArgs.OpKeySpec.
 	// Returns: len(inResults.Parts) == 0
 	OpSign = "sign_msg"
 
@@ -179,7 +184,7 @@ const (
 	OpGenerateKeys = "generate_keys"
 
 	// OpExportNamedKeys exports the KeyEntry for each corresponding element in OpArgs.KeySpecs into a ski.KeyBundle.  
-    //     This KeyBundle is then marshalled and encrypted using the asymmetric key specified by OpArgs.CryptoKey, 
+    //     This KeyBundle is then marshalled and encrypted using the asymmetric key specified by OpArgs.OpKeySpec, 
     //     and than returned in OpArgs.Msg.Content.
 	// Note: if a key is not found (or is invalidly specified), this entire op will error out.
 	OpExportNamedKeys = "export_named_keys"
@@ -191,8 +196,8 @@ const (
 	 ** Key importing
 	 **/
 
-	// OpImportKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.CryptoKey.
-	// OpArgs.Msg.Content is first decrypted using the key referenced by OpArgs.CryptoKey.  The resulting buffer unmarshalled into a
+	// OpImportKeys adds the keys contained in OpArgs.Msg to its keyring, decrypting using the key indexed by OpArgs.OpKeySpec.
+	// OpArgs.Msg.Content is first decrypted using the key referenced by OpArgs.OpKeySpec.  The resulting buffer unmarshalled into a
 	//     ski.KeyBundle and merged with the key repo.
 	// Note if a key being imported collides with an existing key (and it isn't an exact duplicate), it's spec is added to a KeyBundle
     //    that is also returned with the label ski.KeysNotImportedLabel

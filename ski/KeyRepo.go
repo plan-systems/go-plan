@@ -160,17 +160,17 @@ type KeyringSet struct {
 
 // GenerateNewKeys generates the requested keys and adds them to this KeyringSet
 func (krSet *KeyringSet) GenerateNewKeys(
-    ioKeyReqs []*KeyEntry,
-) *plan.Perror {
+    inKeySpecs []*PubKey,
+) ([]*KeyEntry, *plan.Perror) {
 
     var err *plan.Perror
     var newKeys []*KeyEntry
 
     for {
 
-        newKeys, err = GenerateNewKeys(crypto_rand.Reader, 32, ioKeyReqs)
+        newKeys, err = GenerateNewKeys(crypto_rand.Reader, 32, inKeySpecs)
         if err != nil {
-            return err
+            return nil, err
         }
 
         // Let's all laugh and be merry at a 1:2^256 collision!  I want a pony and air-jammer-road-rammer!
@@ -182,31 +182,37 @@ func (krSet *KeyringSet) GenerateNewKeys(
     }
 
     if err == nil {
-        plan.Assert(len(newKeys) == len(ioKeyReqs), "GenerateNewKeys() key count mismatch")
+        plan.Assert(len(newKeys) == len(inKeySpecs), "GenerateNewKeys() key count mismatch")
 
-        for i, newEntry := range newKeys {
-            req := ioKeyReqs[i]
+        for i, entry := range newKeys {
+            spec := inKeySpecs[i]
+
+            // Export a dupe, sans private key
+            newKeys[i] = &KeyEntry{
+                KeyType:     entry.KeyType,
+                KeyDomain:   entry.KeyDomain,
+                CryptoKitId: entry.CryptoKitId,
+                TimeCreated: entry.TimeCreated,
+                PubKey:      entry.PubKey,
+            }
+
             plan.Assert( 
-                req.KeyType == newEntry.KeyType &&
-                req.KeyDomain == newEntry.KeyDomain &&
-                (req.CryptoKitId == CryptoKitID_DEFAULT_KIT_ID || req.CryptoKitId == newEntry.CryptoKitId),
+                spec.KeyType == entry.KeyType &&
+                spec.KeyDomain == entry.KeyDomain &&
+                (spec.CryptoKitId == CryptoKitID_DEFAULT_KIT || spec.CryptoKitId == entry.CryptoKitId),
                 "GenerateNewKeys() key param check failed")
 
-            req.CryptoKitId = newEntry.CryptoKitId
-            req.TimeCreated = newEntry.TimeCreated
-            req.PubKey = newEntry.PubKey
-            req.PrivKey = nil
         }
     }
 
-    return err
+    return newKeys, err
 }
 
 
 
 
 func (krSet *KeyringSet) getKeyEntryInternal(
-    inKeySpec *KeyEntry,
+    inKeySpec *PubKey,
 ) (*KeyEntry, *plan.Perror) {
 
     var err *plan.Perror
@@ -214,15 +220,17 @@ func (krSet *KeyringSet) getKeyEntryInternal(
 
     if inKeySpec.KeyDomain < 0 || inKeySpec.KeyDomain > NumKeyDomains {
         err = plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {KeyDomain: %v}", inKeySpec.KeyDomain)
+    } else if inKeySpec.Encoding != 0 {
+        err = plan.Errorf(nil, plan.Unimplemented, "key encoding not impmemented (encoding=%v)", inKeySpec.Encoding)
     }
     
     if err == nil {
-        keyID := plan.GetKeyID(inKeySpec.PubKey)
+        keyID := plan.GetKeyID(inKeySpec.KeyBase)
         keyEntry = krSet.ByKeyDomain[inKeySpec.KeyDomain].KeysByID[keyID]
     }
 
     if keyEntry == nil && err == nil {
-        err = plan.Errorf(nil, plan.KeyEntryNotFound, "key not found {PubKey:%v}", inKeySpec.PubKey)
+        err = plan.Errorf(nil, plan.KeyEntryNotFound, "key not found {PubKey:%v}", inKeySpec.KeyBase)
     }
    
     return keyEntry, err
@@ -234,11 +242,11 @@ func (krSet *KeyringSet) getKeyEntryInternal(
 // If a key spec IS found, the full KeyEntry ptr is appended to ioKeys.  TREAT AS READ ONLY, ESP SINCE IT CONTAINS THE PRIVATE KEY.
 // If a key spec is NOT found, the requested key spec is appended to a slice and returned.  i.e. if all keys were found, the return value is nil.
 func (krSet *KeyringSet) FetchKeys(
-    inKeySpecs []*KeyEntry,
+    inKeySpecs []*PubKey,
     ioKeyBundle *KeyBundle,
-)  []*KeyEntry {
+)  []*PubKey {
 
-    var keysNotFound []*KeyEntry
+    var keysNotFound []*PubKey
 
     keysFound := make([]*KeyEntry, 0, len(inKeySpecs))
 
@@ -263,7 +271,7 @@ func (krSet *KeyringSet) FetchKeys(
 
 // FetchKey is identical to FetchNamedKeys() except is for only one key.
 func (krSet *KeyringSet) FetchKey(
-    inKeySpec *KeyEntry,
+    inKeySpec *PubKey,
 ) (*KeyEntry, *plan.Perror) {
 
     krSet.RLock()
