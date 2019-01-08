@@ -3,9 +3,38 @@ package ski
 import (
     "io"
 	"bytes"
+    "hash"
+
+    "golang.org/x/crypto/sha3"
 
 	"github.com/plan-systems/go-plan/plan"
 )
+
+
+// HashKit is an abstraction for hash.Hash
+type HashKit struct {
+    HashKitID HashKitID
+    Hasher    hash.Hash
+}
+
+/*
+type Hasher struct {
+    kits     map[HashKitID]
+
+}
+
+
+func () ResetHashKit(inID HashKitID)  {
+
+    if ID == 0 {
+        inID = HashKitID_LegacyKeccak_256
+    }
+
+
+}
+*/
+
+
 
 
 // EqualTo compares if two key entries are identical/interchangable
@@ -24,15 +53,48 @@ func (entry *KeyEntry) GetKeyID() plan.KeyID {
 	return plan.GetKeyID(entry.PubKey)
 }
 
+// NewHashKit returns the requested HashKit.
+func NewHashKit(inID HashKitID) (HashKit, *plan.Perror) {
+
+    var kit HashKit
+
+    if inID == 0 {
+        inID = HashKitID_LegacyKeccak_256
+    }
+
+    kit.HashKitID = inID
+
+    switch inID {
+
+        case 0, HashKitID_LegacyKeccak_256:
+            kit.Hasher = sha3.NewLegacyKeccak256()
+
+        case HashKitID_LegacyKeccak_512:
+            kit.Hasher = sha3.NewLegacyKeccak512()
+
+        case HashKitID_SHA3_256:
+            kit.Hasher = sha3.New256()
+
+        case HashKitID_SHA3_512:
+            kit.Hasher = sha3.New512()
+
+        default:
+            return HashKit{}, plan.Errorf(nil, plan.HashKitNotFound, "failed to recognize HashKitID %v", inID)
+    }
+
+    return kit, nil
+}
+
+
 
 // GenerateNewKeys is a convenience bulk function for CryptoKit.GenerateNewKey()
 func GenerateNewKeys(
     inRand io.Reader,
     inRequestedKeyLen int,
-    inKeyReqs []*KeyEntry,
+    inKeySpecs []*PubKey,
 ) ([]*KeyEntry, *plan.Perror) {
 
-    N :=  len(inKeyReqs)
+    N :=  len(inKeySpecs)
 
     newKeys := make([]*KeyEntry, N)
 
@@ -41,18 +103,18 @@ func GenerateNewKeys(
 
     timeCreated := plan.Now().UnixSecs
 
-    for i, keyReq := range inKeyReqs {
+    for i, keySpec := range inKeySpecs {
 
-        if kit == nil || kit.CryptoKitID != keyReq.CryptoKitId {
-            kit, err = GetCryptoKit(keyReq.CryptoKitId)
+        if kit == nil || kit.CryptoKitID != keySpec.CryptoKitId {
+            kit, err = GetCryptoKit(keySpec.CryptoKitId)
             if err != nil {
                 return nil, err
             }
         }
 
         newKey := &KeyEntry{
-            KeyType: keyReq.KeyType,
-            KeyDomain: keyReq.KeyDomain,
+            KeyType: keySpec.KeyType,
+            KeyDomain: keySpec.KeyDomain,
             CryptoKitId: kit.CryptoKitID,
             TimeCreated: timeCreated,
         }
@@ -77,16 +139,14 @@ func GenerateNewKeys(
 func GenerateKeys(
     skiSession Session,
     inCommunityID []byte,
-    inKeySpecs []*KeyEntry,
+    inKeySpecs []*PubKey,
     inOnCompletion func(inKeys []*KeyEntry, inErr *plan.Perror),
 ) {
 
     skiSession.DispatchOp(&OpArgs{
             OpName: OpGenerateKeys,
-            KeySpecs: KeyBundle{
-                CommunityId: inCommunityID,
-                Keys: inKeySpecs,
-            },
+            CommunityID: inCommunityID,
+            KeySpecs: inKeySpecs,
         }, 
         func (inResults *plan.Block, err *plan.Perror) {
             var newKeys []*KeyEntry
