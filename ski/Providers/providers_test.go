@@ -197,7 +197,7 @@ func (ts *testSession) doOpWithErr(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perr
     var outErr *plan.Perror
     var outResults *plan.Block
 
-    ts.session.DispatchOp(&inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
+    ts.session.DispatchOp(inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
         outErr = inErr
         outResults = opResults
 
@@ -220,7 +220,7 @@ func newSession(inInvocation plan.Block, inName string) *testSession {
 
     ts := &testSession{
         name:inName,
-        blocker:make(chan int, 100),
+        blocker:make(chan int, 1),
     }
 
     userID := md5.Sum([]byte(inName))

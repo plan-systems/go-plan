@@ -12,12 +12,25 @@ const NumKeyDomains = KeyDomain_PERSONAL + 1
 ** ski.Session
 **/
 
+// Signer is a lambda-lifted interface for arbitrary signing of digests
+type Signer interface {
+
+    // Signs the given digest and calls the completion proc with the sig (or an error)
+    Sign( 
+        inSigner       *PubKey,
+        inDigest       []byte,
+        inOnCompletion func(inSig []byte, inErr *plan.Perror),
+    )
+}
+
+
+
 // Session provides lambda-lifted crypto services from an opaque service provider.
 // All calls in this interface are THREADSAFE.
 type Session interface {
 
 	// DispatchOp implements a complete set of SKI operations
-	DispatchOp(inOpArgs *OpArgs, inOnCompletion OpCompletionHandler)
+	DispatchOp(inOpArgs OpArgs, inOnCompletion OpCompletionHandler)
 
 	// EndSession ends this SKI session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
 	// Following a call to EndSession(), no more references to this session should be made.

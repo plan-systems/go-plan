@@ -576,7 +576,7 @@ func (eip *entryInProcess) unpackHeader(
 
         &ski.OpArgs {
             OpName: ski.OpDecrypt,
-            CryptoKey: plan.GetKeyID(eip.entry.CommunityKeyId),
+            OpKeySpec: plan.GetKeyID(eip.entry.CommunityKeyId),
             Msg: eip.entry.HeaderCrypt,
         }, 
 

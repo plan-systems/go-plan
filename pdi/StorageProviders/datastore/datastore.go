@@ -56,7 +56,7 @@ type Store struct {
 
     AbsPath                     string
 
-    ds                          ds.ThreadSafeDatastore
+    ds                          ds.TxnDatastore
     closeDs                     func()
 
     QueryInbox                  chan *QueryJob
@@ -145,7 +145,7 @@ type QueryJob struct {
 
 // CommitJob represents a pending CommitTxn() call to a StorageProvider
 type CommitJob struct {
-    Txn       *pdi.Txn
+    RawTxn    *pdi.RawTxn
     Outlet     pdi.StorageProvider_CommitTxnServer
     OnComplete chan error
 }
@@ -157,7 +157,23 @@ var txnPool = sync.Pool{
     },
 }
 */
+/*
+func (k *ds.Key) formKeyFromTxn()
 
+func (S *Store) writer() {
+
+    for {
+        
+        select {
+            case commitJob := S.CommitInbox:
+                S.ds.Has(
+
+    }
+
+}
+*/
+
+/*
 func (S *Store) readerWriter() {
 
     S.txnPool = sync.Pool{
@@ -201,3 +217,4 @@ func (S *Store) readerWriter() {
     
 }
 
+*/

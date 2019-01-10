@@ -53,6 +53,16 @@ func (entry *KeyEntry) GetKeyID() plan.KeyID {
 	return plan.GetKeyID(entry.PubKey)
 }
 
+// Base256 returns the pure binary representation of a key
+func (pk *PubKey) Base256() []byte {
+    if pk.Encoding == 0 {
+        return pk.KeyBase
+    }
+
+    panic("TODO unimperr")
+}
+
+
 // NewHashKit returns the requested HashKit.
 func NewHashKit(inID HashKitID) (HashKit, *plan.Perror) {
 
@@ -143,7 +153,7 @@ func GenerateKeys(
     inOnCompletion func(inKeys []*KeyEntry, inErr *plan.Perror),
 ) {
 
-    skiSession.DispatchOp(&OpArgs{
+    skiSession.DispatchOp( OpArgs{
             OpName: OpGenerateKeys,
             CommunityID: inCommunityID,
             KeySpecs: inKeySpecs,
