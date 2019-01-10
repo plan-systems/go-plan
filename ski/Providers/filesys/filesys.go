@@ -164,6 +164,10 @@ func (session *fsSession) dbPathname() string {
         "ski/Providers/fs", 
         base64.RawURLEncoding.EncodeToString(session.Params.UserID[:])*/
 
+    if len(session.Params.BaseDir) == 0 {
+        return ""
+    }
+    
     return path.Join(session.Params.BaseDir, "filesysKeyTome.pb")
 }
 
@@ -180,6 +184,9 @@ func (session *fsSession) loadFromFile() *plan.Perror {
     session.KeyRepo.Clear()
 
     pathname := session.dbPathname()
+    if len(pathname) == 0 {
+        return nil
+    }
     buf, ferr := ioutil.ReadFile(pathname)
     if ferr != nil {
 
@@ -217,22 +224,24 @@ func (session *fsSession) saveToFile() *plan.Perror {
     defer session.autoSaveMutex.Unlock()
 
     if session.autoSave != nil {
-  
-        buf, err := session.KeyRepo.Marshal()
-        if err != nil {
-            return err
+        pathname := session.dbPathname()
+        if len(pathname) > 0 {
+
+            buf, err := session.KeyRepo.Marshal()
+            if err != nil {
+                return err
+            }
+
+            // TODO: encrypt file buf!
+            {
+
+            }
+
+            ferr := ioutil.WriteFile(pathname, buf, os.FileMode(0775))
+            if ferr != nil {
+            return plan.Errorf(ferr, plan.KeyTomeFailedToWrite, "Failed to write key tome file")
+            }
         }
-
-        // TODO: encrypt file buf!
-        {
-
-        }
-
-        ferr := ioutil.WriteFile(session.dbPathname(), buf, os.FileMode(0775))
-        if ferr != nil {
-        return plan.Errorf(ferr, plan.KeyTomeFailedToWrite, "Failed to write key tome file")
-        }
-
         session.resetAutoSave()
     }
 
@@ -302,9 +311,9 @@ func (session *fsSession) CheckOpParamsAndPermissions(
     return nil
 }
 
-func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
+func (session *fsSession) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
 
-    err := session.CheckOpParamsAndPermissions(inArgs)
+    err := session.CheckOpParamsAndPermissions(&inArgs)
     if err != nil {
         inOnCompletion(nil, err)
         return
@@ -334,7 +343,7 @@ func (session *fsSession) DispatchOp(inArgs *ski.OpArgs, inOnCompletion ski.OpCo
 
     results, err := doOp(
         keyringSet,
-        *inArgs,
+        inArgs,
     )
  
     if err != nil {
