@@ -45,20 +45,21 @@ import (
 //     compatible remote StorageProvider.
 // The StorageProvider+Agent system preserves the property that a StorageProvider must operate deterministically, 
 //     and can only validate txns and maintain a ledger of which public keys can post (and how much).
+// StorageProviderAgent is NOT assumed to be threadsafes unless specified otherswise 
 type StorageProviderAgent interface {
 
     // AgentStr is human-readable string that communicates to a StorageProvider what agent encoded a txn.
+    // THREADSAFE
     AgentStr() string
-
-    // TxnNameByteLen specifies the (fixed) byte length of txn names for this StorageProvider
-    TxnNameByteLen() int
 
     // Encodes the payload and payload codec into one or more native and signed StorageProvider txns.
     EncodeToTxns(
-        inPayload []byte, 
-        inCodec   PayloadCodec, 
-        inSigner  ski.Session,
-        inFrom   *ski.PubKey,
+        inPayload     []byte, 
+        inPayloadName []byte,
+        inCodec       PayloadCodec, 
+        inSigner      ski.Session,
+        inFrom       *ski.PubKey,
+        inCommunityID []byte,
     ) ([]*Txn, error)
 
     // Decodes a raw txn to/from the StorageProvider for this agent
@@ -68,7 +69,6 @@ type StorageProviderAgent interface {
         outSegment *TxnSegment, // If non-nil, populated w/ the segment data from inTxn 
     ) error
 
-    //DecodeTxnSet([]*TxnSegment) 
 
     // Generates a txn that transfers the given amount of gas.
     //EncodeTransfer(from ski.PubKey, to ski.PubKey, gasUnits int64) (*Txn, error)
@@ -81,16 +81,16 @@ type StorageProviderAgent interface {
 
 
 
-
-
-
 /*
-func (au *AgentUtils) DecodeTxns(inTxns []*TxnSegment) ([]*Txn, []*TxnSegment) {
+func DecodeTxns(
+    agent StorageProviderAgent,
+    inTxns []*TxnSegment,
+) ([]*Txn, []*TxnSegment) {
 
 
 }
-
 */
+
 
 
 /*
