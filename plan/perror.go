@@ -93,11 +93,17 @@ const (
 	// AssertFailed means an unreachable part of code was...reached.  :\
 	AssertFailed
 
+	// MissingParam one or more params was missing, nil, or not otherwise given
+	MissingParam
+
     // FailedToMarshal means Marshal() returned an error
     FailedToMarshal
 
     // FailedToUnmarshal means Unmarshal() returned an error
     FailedToUnmarshal
+
+    // Unimplemented means flow hit a point requiring deeper implementation
+    Unimplemented
 
 	/*****************************************************
 	** PDI
@@ -145,6 +151,12 @@ const (
 	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
 	TargetChannelEpochExpired
 
+    // StorageImplNotFound means the requested storage impl is not available, etc.
+    StorageImplNotFound
+
+    // TxnPartsMissing means one or more required txn parts are not present
+    TxnPartsMissing
+
     /*****************************************************
 	** SKI / Security
 	**/
@@ -163,6 +175,9 @@ const (
 
     // CryptoKitNotFound means the requested CryptoKitID was not registered for any CryptoKitID
     CryptoKitNotFound
+
+    // HashKitNotFound means the requested HashKitID was not found
+    HashKitNotFound
 
     // KeyGenerationFailed means key generation failed
     KeyGenerationFailed
@@ -248,4 +263,18 @@ const (
 
     // SessionNotReady means the given StorageSession is not ready/open/started
     SessionNotReady
+
+	/*****************************************************
+	** Network
+	**/
+
+	// NetworkErrorFamily errors generally relate to network services and connections
+	NetworkErrorFamily = 5400 + iota
+
+	// SessionTokenMissing means a session token was not found in the request context
+	SessionTokenMissing
+
+    // SessionTokenNotValid means the session token that was supplied didn't match anything
+    SessionTokenNotValid
+
 )
