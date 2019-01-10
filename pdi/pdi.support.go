@@ -4,9 +4,13 @@ package pdi
 
 import (
 
-	"github.com/plan-systems/go-plan/plan"
+    "io"
 
-	"github.com/ethereum/go-ethereum/crypto/sha3"
+	"github.com/plan-systems/go-plan/plan"
+	//"github.com/plan-systems/go-plan/pdi"
+
+    "golang.org/x/crypto/sha3"
+
 )
 
 /*
@@ -30,7 +34,7 @@ func (entry *EntryCrypt) GetEntryVersion() EntryVersion {
 // ComputeHash hashes all fields of psi.EntryCrypt (except .EntrySig)
 func (entry *EntryCrypt) ComputeHash() []byte {
 
-	hw := sha3.NewKeccak256()
+	hw := sha3.NewLegacyKeccak256()
 
 	var scrap [16]byte
 
@@ -182,6 +186,69 @@ func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {
 }
 
 
+// WriteVarInt appends the given integer in variable length format
+func WriteVarInt(dAtA []byte, offset int, v uint64) int {
+	for v >= 1<<7 {
+		dAtA[offset] = uint8(v&0x7f | 0x80)
+		v >>= 7
+		offset++
+	}
+	dAtA[offset] = uint8(v)
+	return offset + 1
+}
+
+// AppendVarBuf appends the given buffer's length in bytes and the buffer
+func AppendVarBuf(dAtA []byte, offset int, inBuf []byte) (int, error) {
+    bufLen := len(inBuf)
+    origOffset := offset
+    offset = WriteVarInt(dAtA, offset, uint64(bufLen))
+
+    remain := len(dAtA) - offset
+    if remain < bufLen {
+        return origOffset, io.ErrUnexpectedEOF
+    }
+    copy(dAtA[offset:], inBuf)
+    return offset + bufLen, nil
+}
+
+
+
+
+// ReadVarBuf reads a buffer written by AppendVarBuf() and returns the offset
+func ReadVarBuf(dAtA []byte, offset int) (int, []byte, error) {
+	l := len(dAtA)
+    
+    var bufLen uint64
+    for shift := uint(0); ; shift += 7 {
+        if shift >= 31 {
+            return offset, nil, ErrIntOverflowPdi
+        }
+        if offset >= l {
+            return offset, nil, io.ErrUnexpectedEOF
+        }
+        b := dAtA[offset]
+        offset++
+        bufLen |= (uint64(b) & 0x7F) << shift
+        if b < 0x80 {
+            break
+        }
+    }
+
+    start := offset
+    offset += int(bufLen)
+
+   if bufLen < 0 {
+        return offset, nil, ErrInvalidLengthPdi
+    }
+
+    if offset > l {
+        return  offset, nil, io.ErrUnexpectedEOF
+    }
+
+    return offset, dAtA[start:offset], nil
+}
+
+
 
 
 /*****************************************************
@@ -233,45 +300,56 @@ func NewStorageAlert(
 }
 
 
+*/
 
-// SegmentIntoTxnsForMaxSize is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
-func SegmentIntoTxnsForMaxSize(
-	inData []byte,
-	inDataDesc TxnDataDesc,
+
+
+
+// SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
+func SegmentIntoTxns(
+	inData           []byte,
+    inPayloadName    []byte,
+    inPayloadCodec   PayloadCodec, 
 	inMaxSegmentSize int,
-) ([]*StorageTxn, error) {
+) ([]*TxnSegment, *plan.Perror) {
 
 	bytesRemain := len(inData)
 	pos := 0
 
 	N := (len(inData) + inMaxSegmentSize - 1) / inMaxSegmentSize
-	txns := make([]*StorageTxn, 0, N)
+	txns := make([]*TxnSegment, 0, N)
 
 	for bytesRemain > 0 {
 
 		segSz := bytesRemain
-		if segSz < inMaxSegmentSize {
+		if segSz > inMaxSegmentSize {
 			segSz = inMaxSegmentSize
 		}
 
-		txns = append(txns, &StorageTxn{
-			TxnStatus:   TxnStatus_AWAITING_COMMIT,
-			DataDesc:    inDataDesc,
-			SegmentData: inData[pos:segSz],
+		txns = append(txns, &TxnSegment{
+            SegInfo: &TxnSegInfo{
+                PayloadCodec: inPayloadCodec,
+                PayloadName: inPayloadName,
+                PayloadSize: int32(segSz),
+            },
+			SegData: inData[pos:pos+segSz],
 		})
 
 		pos += segSz
+        bytesRemain -= segSz
 	}
 
 	for i, txn := range txns {
-		txn.SegmentNum = uint32(i)
-		txn.TotalSegments = uint32(len(txns))
+		txn.SegInfo.SegmentNum = uint32(i)
+		txn.SegInfo.TotalSegments = uint32(len(txns))
 	}
+
+    plan.Assert(bytesRemain == 0, "assertion failed in SegmentIntoTxns {N:%d, bytesRemain:%d}", N, bytesRemain)
 
 	return txns, nil
 
-	//if bytesRemain != 0 {
-	//    return plan.Error(nil, plan.AssertFailure, "assertion failed in SegmentPayloadForSegmentSize {N:%d, bytesRemain:%d}", N, bytesRemain)
-	//}
 }
-*/
+
+
+
+//func AssembleSegments(inSegs []*TxnSegment) ([]*TxnSegment, *plan.Perror)
