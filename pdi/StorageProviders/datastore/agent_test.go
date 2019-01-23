@@ -130,7 +130,6 @@ func TestFileSysSKI(t *testing.T) {
         B.endSession("done B")
     }
 
-
 }
 
 
@@ -145,7 +144,7 @@ func doCoreTests(A, B *testSession) {
     // 1) Generate a new community key (on A)
     communityKey := A.generateNewKey(ski.KeyType_SYMMETRIC_KEY, ski.KeyDomain_COMMUNITY)
  
-    // 2) generate a xfer community key msg from A
+    // 2) export the community key from A
     opResults := A.doOp(ski.OpArgs{
         OpName: ski.OpExportNamedKeys,
         OpKeySpec: *A.encryptPubKey,
@@ -176,28 +175,47 @@ func doCoreTests(A, B *testSession) {
         Msg: clearMsg,
     })
 
-    encryptedMsg := opResults.Content
+    encryptedAtoB := opResults.Content
 
     // 5) Send the encrypted community message to B
 	opResults = B.doOp(ski.OpArgs{
         OpName: ski.OpDecrypt,
         OpKeySpec: *communityKey,
         CommunityID: gCommunityID[:],
-        Msg: encryptedMsg,
+        Msg:  encryptedAtoB,
     })
 
+    decryptedMsg := opResults.Content
+
+    // 6) Now check that B can send an encrypted community msg to A
+	opResults = B.doOp(ski.OpArgs{
+        OpName: ski.OpEncrypt,
+        OpKeySpec: *communityKey,
+        CommunityID: gCommunityID[:],
+        Msg: decryptedMsg,
+    })
+    encryptedBtoA := opResults.Content
+	opResults = A.doOp(ski.OpArgs{
+        OpName: ski.OpDecrypt,
+        OpKeySpec: *communityKey,
+        CommunityID: gCommunityID[:],
+        Msg: encryptedBtoA,
+    })
+
+    // 7) Did the round trip work?
+    //    clearMsg => A => encryptedAtoB => B => decryptedMsg => B => encryptedBtoA => A => opResults.Content
 	if ! bytes.Equal(clearMsg, opResults.Content) {
 		gTesting.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Content)
     }
 
-    badMsg := make([]byte, len(encryptedMsg))
+    badMsg := make([]byte, len(encryptedAtoB))
 
     // Vary the data slightly to test 
     for i := 0; i < 1000; i++ {
 
-        rndPos := rand.Int31n(int32(len(encryptedMsg)))
+        rndPos := rand.Int31n(int32(len(encryptedAtoB)))
         rndAdj := 1 + byte(rand.Int31n(254))
-        copy(badMsg, encryptedMsg)
+        copy(badMsg, encryptedAtoB)
         badMsg[rndPos] += rndAdj
 
         _, opErr := B.doOpWithErr(ski.OpArgs{
