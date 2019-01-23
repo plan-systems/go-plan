@@ -156,15 +156,15 @@ message TxnSegment {
 // TxnSegInfo heads each segment 
 message TxnSegInfo {
 
-    // Describes how to to decode the payload data.
+    // Describes how to to decode the payload data (this value is identical for each segment that comprises a reassembled payload)
                 PayloadCodec    payload_codec           = 1;
 
-    // Arbitrary binary name passed to StorageProviderAgent.EncodeToTxns() when this txn (and its other segments) were created.
+    // Arbitrary binary label passed to StorageProviderAgent.EncodeToTxns() when this txn (and its other segments) were created.
     // During segment reassembly, it's used to sort out which segments belong with which other segments.
-                bytes           payload_name            = 2;
+                bytes           payload_label           = 2;
 
     // Payload byte size 
-                int32           payload_size            = 3;
+                int32           seg_byte_size           = 3;
 
     // When a client payload is large, it must be split into multiple native txns.
     // This info specifies which segment this is and how many total segments there are.

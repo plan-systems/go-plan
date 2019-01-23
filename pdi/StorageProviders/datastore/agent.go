@@ -2,7 +2,7 @@ package datastore
 
 import (
 
-    //sync"
+    "sync"
     //"google.golang.org/grpc/encoding"
 
     "github.com/plan-systems/go-plan/pdi"
@@ -43,6 +43,7 @@ type Agent struct {
 
     SegmentMaxSz        int
 
+
     pdi.StorageProviderAgent
 
 
@@ -57,10 +58,10 @@ func (agent *Agent) AgentStr() string {
 
 
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
-// TODO: Use ski.Signer interface
+// TODO: Use ski.Signer interface?
 func (agent *Agent) EncodeToTxns(
     inPayload      []byte, 
-    inPayloadName  []byte,
+    inPayloadLabel []byte,
     inPayloadCodec pdi.PayloadCodec, 
     inSigner       ski.Session,
     inFrom        *ski.PubKey,
@@ -69,7 +70,7 @@ func (agent *Agent) EncodeToTxns(
 
     segs, err := pdi.SegmentIntoTxns(
         inPayload,
-        inPayloadName,
+        inPayloadLabel,
         inPayloadCodec, 
         agent.SegmentMaxSz)
 
@@ -80,8 +81,6 @@ func (agent *Agent) EncodeToTxns(
     txns := make([]*pdi.Txn, len(segs))
 
     var signErr *plan.Perror
-
-
 
     {
         // Use the same time stamp for the entire batch
@@ -94,15 +93,17 @@ func (agent *Agent) EncodeToTxns(
             OpKeySpec: *inFrom,
             CommunityID: inCommunityID,
         }
-
+        
         // TODO: redo this sync impl so we don't have to dim the channel to O(N)
-        signOpResults := make(chan *plan.Perror, len(txns))
+        signErrHandle := &signErr
+        signingDone := sync.WaitGroup{}
+        signingDone.Add(len(txns))
 
         for i := range txns {
             
-            payloadSz := len(segs[i].SegData)
+            segSz := len(segs[i].SegData)
 
-            if payloadSz != int(segs[i].SegInfo.PayloadSize) {
+            if segSz != int(segs[i].SegInfo.SegByteSize) {
                 return nil, plan.Error(nil, plan.AssertFailed, "failed SegInfo payload size check")   
             }
 
@@ -114,7 +115,7 @@ func (agent *Agent) EncodeToTxns(
             }
             
             // Add extra for length signature and len bytes
-            rawTxn := make([]byte, 500 + txnInfo.Size() + payloadSz)
+            rawTxn := make([]byte, 500 + txnInfo.Size() + segSz)
 
             // 1) Append the TxnInfo
             txnLen, err := txnInfo.MarshalTo(rawTxn[2:])
@@ -126,8 +127,8 @@ func (agent *Agent) EncodeToTxns(
             txnLen += 2
 
             // 2) Append the payload buf
-            copy(rawTxn[txnLen:txnLen+payloadSz], segs[i].SegData)
-            txnLen += payloadSz
+            copy(rawTxn[txnLen:txnLen+segSz], segs[i].SegData)
+            txnLen += segSz
         
             // 3) Calc the txn digest
             hashKit.Hasher.Reset()
@@ -158,18 +159,18 @@ func (agent *Agent) EncodeToTxns(
                         }
                     }
 
-                    signOpResults <- inErr
+                    if inErr != nil && *signErrHandle == nil {
+                        *signErrHandle = inErr
+                    }
+
+                    signingDone.Done()
                 },
             )
         }
 
         // Wait for len(txns) number of results before we're done
-        for range txns {
-            err := <- signOpResults
-            if signErr == nil {
-                signErr = err
-            }
-        }
+        signingDone.Wait()
+
     }
 
     if signErr != nil {
@@ -207,7 +208,7 @@ func (agent *Agent) EncodeToTxns(
     }
 
     // 2) Extract the payload buf
-    end := pos + int(txnInfo.SegInfo.PayloadSize)
+    end := pos + int(txnInfo.SegInfo.SegByteSize)
     if end > txnLen {
        return plan.Errorf(nil, plan.FailedToUnmarshal, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
 
