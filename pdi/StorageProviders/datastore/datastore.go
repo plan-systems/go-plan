@@ -5,9 +5,10 @@ import (
     //"fmt"
     "os"
     "path"
+    "encoding/base64"
     //"io/ioutil"
     //"strings"
-    //"sync"
+    "sync"
     //"time"
     //"hash"
     //"crypto/rand"
@@ -48,19 +49,35 @@ func SupportsStorageType(inParams map[string]string) *plan.Perror {
 
 }*/
 
+type failedJob struct {
+    Error                       *plan.Perror
+    QueryJob                    *QueryJob
+    CommitJob                   *CommitJob
+}
+
 // Store wraps a PLAN community UUID and a datastore
 type Store struct {
     CommunityID                 plan.CommunityID
-    AgentStr                    string    
+    AgentDesc                   string    
     Info                        *StorageInfo
 
     AbsPath                     string
+    keyEncoding                 base64.Encoding
 
     ds                          ds.TxnDatastore
     closeDs                     func()
 
     QueryInbox                  chan *QueryJob
     CommitInbox                 chan *CommitJob
+
+    FailedJobs                  chan failedJob    
+
+    // close when shutting down (polite shutdown)
+    shuttingDown                chan *sync.WaitGroup
+
+    Agent                       pdi.StorageProviderAgent
+
+    //throttleCommits             bool
 
     //msgOutbox                   chan *pservice.Msg
     //msgInbox                    chan *pservice.Msg
@@ -76,79 +93,239 @@ func NewStore(
     inBasePath string,
 ) *Store {
 
-    S := &Store{
+    St := &Store{
         Info: inInfo,
         DefaultFileMode: plan.DefaultFileMode,
         QueryInbox: make(chan *QueryJob),
-        CommitInbox: make(chan *CommitJob),
+        CommitInbox: make(chan *CommitJob, 16),
+        FailedJobs: make(chan failedJob, 4),
+        shuttingDown: make(chan *sync.WaitGroup),
     }
 
-    if path.IsAbs(S.Info.HomePath) {
-        S.AbsPath = S.Info.HomePath
+    St.Agent, _ = NewAgent("", 0)
+
+    if path.IsAbs(St.Info.HomePath) {
+        St.AbsPath = St.Info.HomePath
     } else {
-        S.AbsPath = path.Clean(path.Join(inBasePath, S.Info.HomePath, "yoyo"))
+        St.AbsPath = path.Clean(path.Join(inBasePath, St.Info.HomePath))
     }
 
-    return S
+    return St
 }
 
-
-// OnServiceStarting should be once Datastore is preprared and ready to invoke the underlying implementation.
-func (S *Store) OnServiceStarting() error {
+// OnServiceStarting should be called once Datastore is preprared and ready to invoke the underlying implementation.
+func (St *Store) OnServiceStarting() error {
 
     logE := log.WithFields(log.Fields{ 
-        "impl": S.Info.ImplName,
-        "path": S.AbsPath,
+        "impl": St.Info.ImplName,
+        "path": St.AbsPath,
     })
     logE.Info( "OnServiceStarting()" )
 
     var err error
 
-    switch S.Info.ImplName {
+    switch St.Info.ImplName {
         case "badger":
-            badgerDS, err := badger.NewDatastore(S.AbsPath, nil)
+            badgerDS, err := badger.NewDatastore(St.AbsPath, nil)
             if err == nil {
-                S.ds = badgerDS
-                S.AgentStr = "/datastore/badger:1"
-                S.closeDs = func() {
+                St.ds = badgerDS
+                St.closeDs = func() {
                     badgerDS.Close()
                 }
             }
         default:
-            err = plan.Errorf(nil, plan.StorageImplNotFound, "storage implementation for '%s' not found", S.Info.ImplName)
+            err = plan.Errorf(nil, plan.StorageImplNotFound, "storage implementation for '%s' not found", St.Info.ImplName)
     }
 
-    if err != nil {
+    if err == nil {
+        St.startProcessingJobs()
+    } else {
         logE := logE.WithError(err)
         logE.Warn("OnServiceStarting() ERROR")
     }
+
 
     return err
 }
 
 
-// Close closes this datastore, if open, blocking until completion.
-func (S *Store) Close() {
+// Shutdown closes this datastore, if open, blocking until completion.
+func (St *Store) Shutdown(inGroup *sync.WaitGroup) {
 
-    if S.closeDs != nil {
-        S.closeDs()
-        S.closeDs = nil
+    // Signal a shutdown
+    var waiter sync.WaitGroup
+    waiter.Add(2)
+    St.shuttingDown <- &waiter
+    St.shuttingDown <- &waiter
+    waiter.Wait()
+
+    if St.closeDs != nil {
+        St.closeDs()
+        St.closeDs = nil
     }
+
+    inGroup.Done()
 }
+
+
 
 // QueryJob represents a pending Query() call to a StorageProvider
 type QueryJob struct {
     QueryTxns *pdi.QueryTxns
     Outlet     pdi.StorageProvider_QueryServer
-    OnComplete chan error
+    OnComplete chan *plan.Perror
 }
 
 // CommitJob represents a pending CommitTxn() call to a StorageProvider
 type CommitJob struct {
     RawTxn    *pdi.RawTxn
     Outlet     pdi.StorageProvider_CommitTxnServer
-    OnComplete chan error
+    OnComplete chan *plan.Perror
 }
+
+
+
+// UTIDKeyForTxn creates a ds.Key based on the transaction's timestamp and hash.UTIDKeyForTxn
+// See comments for TxnInfo.UTID 
+func UTIDKeyForTxn(txnInfo *pdi.TxnInfo) ds.Key {
+    key := pdi.ConvertToUTID("/", txnInfo.TimeSealed, txnInfo.TxnDigest)
+    return ds.RawKey(key)
+}
+
+
+/*
+func (k ds.Key) Equals(inTime int64, inTxnName []byte) bool {
+    if len(k) != encodedKeyLen {
+        return false
+    }
+    if binary.BigEndian.Uint64(tk[0:8]) != uint64(inTime) {
+        return false
+    }
+    if bytes.Compare(tk[8:16], inTxnName) != 0 {
+        return false
+    }
+
+    return true
+}
+*/
+
+
+func (St *Store) startProcessingJobs() {
+
+    // CommitInbox processor
+    go func() {
+
+        var doneSignal *sync.WaitGroup
+
+        // TODO: add throttling?
+
+        // Don't' stop looping until the commit inbox is clear
+        for doneSignal == nil {
+
+            select {
+                case commitJob := <- St.CommitInbox:
+                    St.doCommitJob(commitJob)
+
+                case doneSignal = <-St.shuttingDown:
+            }
+        }
+
+        doneSignal.Done()
+    }()
+
+    // QueryInbox processor
+    go func() {
+
+        var doneSignal *sync.WaitGroup
+
+        for doneSignal == nil {
+
+            select {
+                case queryJob := <- St.QueryInbox:
+                    St.doQueryJob(queryJob)
+
+                case doneSignal = <-St.shuttingDown:
+            }
+        }
+
+        doneSignal.Done()
+    }()
+
+}
+
+var txnCommitting = pdi.TxnMetaInfo{
+    TxnStatus: pdi.TxnStatus_COMMITTING,
+}
+var txnFinalized = pdi.TxnMetaInfo{
+    TxnStatus: pdi.TxnStatus_FINALIZED,
+}
+
+func (St *Store) doCommitJob(commitJob *CommitJob) {
+
+    commitJob.Outlet.Send(&txnCommitting)
+
+    var txnInfo pdi.TxnInfo
+
+    err := St.Agent.DecodeRawTxn(
+        commitJob.RawTxn.TxnData,
+        &txnInfo,
+        nil,
+    )
+
+    if err == nil {
+        key := UTIDKeyForTxn(&txnInfo)
+
+        putErr := St.ds.Put(key, commitJob.RawTxn.TxnData)
+        if putErr != nil {
+            err = plan.Error(putErr, plan.FailedToCommitTxn, "datastore.Put() failed")
+        }
+    }
+
+    if err == nil {
+
+        // Since this is a centralized db, every txn committed is finalized
+        commitJob.Outlet.Send(&txnFinalized)
+
+    } else {
+
+        commitJob.Outlet.Send(&pdi.TxnMetaInfo{
+            TxnStatus: pdi.TxnStatus_FAILED_TO_COMMIT,
+            Alert: &plan.Status{
+                Code: err.Code,
+                Msg: err.Msg,
+            },
+        })
+
+        fj := failedJob{
+            Error: err,
+            CommitJob: commitJob,
+        }
+        St.FailedJobs <- fj
+    }
+
+    // This releases the GRPC handler
+    commitJob.OnComplete <- err
+}
+
+
+func (St *Store) doQueryJob(queryJob *QueryJob) {
+
+    var perr *plan.Perror
+    if perr != nil {
+
+        fj := failedJob{
+            Error: perr,
+            QueryJob: queryJob,
+        }
+        St.FailedJobs <- fj
+    }
+
+    // This releases the GRPC handler
+    queryJob.OnComplete <- perr
+
+
+}
+
 
 /*
 var txnPool = sync.Pool{
@@ -160,21 +337,14 @@ var txnPool = sync.Pool{
 /*
 func (k *ds.Key) formKeyFromTxn()
 
-func (S *Store) writer() {
+func (St *Store) writer() {
 
-    for {
-        
-        select {
-            case commitJob := S.CommitInbox:
-                S.ds.Has(
-
-    }
 
 }
 */
 
 /*
-func (S *Store) readerWriter() {
+func (St *Store) readerWriter() {
 
     S.txnPool = sync.Pool{
         New: func() interface{} {

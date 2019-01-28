@@ -232,7 +232,7 @@ func doCoreTests(A, B *testSession) {
     // Test agent encode/decode
     {
         blobBuf := make([]byte, 500000)
-        agent := NewAgent(1000)
+        agent, _ := NewAgent("", 1000)
 
         for i := 0; i < 100; i++ {
             

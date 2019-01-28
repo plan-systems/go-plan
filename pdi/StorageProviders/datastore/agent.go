@@ -17,7 +17,10 @@ var TxnNameByteLen = 24
 
 // NewAgent creates a new StorageProviderAgent for pdi-datastore. 
 // If inSegmentMaxSz == 0, then a default size is chosen
-func NewAgent(inSegmentMaxSz int) pdi.StorageProviderAgent {
+func NewAgent(
+    inAgentStr string,
+    inSegmentMaxSz int,
+) (pdi.StorageProviderAgent, *plan.Perror) {
 
     defaultKit, _ := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
 
@@ -27,11 +30,17 @@ func NewAgent(inSegmentMaxSz int) pdi.StorageProviderAgent {
         SegmentMaxSz: inSegmentMaxSz,
     }
 
-    if agent.SegmentMaxSz < 1000 {
-        agent.SegmentMaxSz = 1000
+    if agent.SegmentMaxSz <= 0 {
+        agent.SegmentMaxSz = 10000
     }
 
-    return agent
+    agent.agentStr = datastoreAgent
+
+    if inAgentStr != "" && inAgentStr != agent.agentStr {
+        return nil, plan.Errorf(nil, plan.IncompatibleAgent, "incompatible agent requested: %s, have: %s", inAgentStr, agent.agentStr)
+    }
+
+    return agent, nil
 }
 
 
@@ -42,17 +51,17 @@ type Agent struct {
     decoderHashKits     map[ski.HashKitID]ski.HashKit
 
     SegmentMaxSz        int
-
+    agentStr            string
 
     pdi.StorageProviderAgent
 
-
 }
 
+const datastoreAgent = "/plan/pdi/agent/datastore:1"
 
 // AgentStr -- See StorageProviderAgent
 func (agent *Agent) AgentStr() string {
-    return "/plan/pdi/agent/datastore:1"
+    return datastoreAgent
 }
 
 
@@ -66,7 +75,7 @@ func (agent *Agent) EncodeToTxns(
     inSigner       ski.Session,
     inFrom        *ski.PubKey,
     inCommunityID  []byte,
-) ([]*pdi.Txn, error) {
+) ([]*pdi.Txn, *plan.Perror) {
 
     segs, err := pdi.SegmentIntoTxns(
         inPayload,
@@ -84,7 +93,7 @@ func (agent *Agent) EncodeToTxns(
 
     {
         // Use the same time stamp for the entire batch
-        timeSealed := uint64(plan.Now().UnixSecs)
+        timeSealed := plan.Now().UnixSecs
 
         hashKit := agent.encoderHashKit
 
@@ -103,7 +112,7 @@ func (agent *Agent) EncodeToTxns(
             
             segSz := len(segs[i].SegData)
 
-            if segSz != int(segs[i].SegInfo.SegByteSize) {
+            if segSz != int(segs[i].SegInfo.SegmentLength) {
                 return nil, plan.Error(nil, plan.AssertFailed, "failed SegInfo payload size check")   
             }
 
@@ -118,9 +127,9 @@ func (agent *Agent) EncodeToTxns(
             rawTxn := make([]byte, 500 + txnInfo.Size() + segSz)
 
             // 1) Append the TxnInfo
-            txnLen, err := txnInfo.MarshalTo(rawTxn[2:])
-            if err != nil {
-                return nil, err
+            txnLen, merr := txnInfo.MarshalTo(rawTxn[2:])
+            if merr != nil {
+                return nil, plan.Error(merr, plan.FailedToMarshal, "failed to marshal txnInfo")
             }
             rawTxn[0] = byte((txnLen >> 8) & 0xFF)
             rawTxn[1] = byte(txnLen        & 0xFF)
@@ -188,8 +197,7 @@ func (agent *Agent) EncodeToTxns(
     rawTxn     []byte, 
     outInfo    *pdi.TxnInfo,
     outSegment *pdi.TxnSegment,
-) error {
-    var err error
+) *plan.Perror {
 
     txnLen := len(rawTxn)
     if txnLen < 50 {
@@ -199,16 +207,16 @@ func (agent *Agent) EncodeToTxns(
     // 1) Unmarshal the txn info
     var txnInfo pdi.TxnInfo
     pos := 2 + (int(rawTxn[0]) >> 8) + int(rawTxn[1])
-    err = txnInfo.Unmarshal(rawTxn[2:pos])
-    if err != nil {
-        return err
+    merr := txnInfo.Unmarshal(rawTxn[2:pos])
+    if merr != nil {
+        return plan.Error(merr, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
     }
     if txnInfo.SegInfo == nil {
         return plan.Error(nil, plan.TxnPartsMissing, "txn is missing segment info")
     }
 
     // 2) Extract the payload buf
-    end := pos + int(txnInfo.SegInfo.SegByteSize)
+    end := pos + int(txnInfo.SegInfo.SegmentLength)
     if end > txnLen {
        return plan.Errorf(nil, plan.FailedToUnmarshal, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
 
