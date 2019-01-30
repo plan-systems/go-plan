@@ -4,6 +4,8 @@ import (
     "io"
 	"bytes"
     "hash"
+    "log"
+    "crypto/rand"
 
     "golang.org/x/crypto/sha3"
 
@@ -182,44 +184,132 @@ func GenerateKeys(
             inOnCompletion(newKeys, err)
         },
     )
+}
 
+
+
+
+
+// SessionTool is a small set of util functions for creating a SKI session.
+type SessionTool struct {
+    UserName    string
+    Session     Session
+    CommunityID []byte
+
+    blocker     chan int   
+}
+
+
+
+
+
+// NewSessionTool creates a new tool for helping manage a SKI session.
+func NewSessionTool(
+    inInvocationStr string, 
+    inUserName string,
+    inCommunityID []byte,   // if len()==0, it will be auto-generated
+) (*SessionTool, *plan.Perror) {
+
+
+    st := &SessionTool{
+        UserName: inUserName,
+        CommunityID: inCommunityID,
+        blocker: make(chan int, 1),
+    }
+
+    if len(st.CommunityID) == 0 {
+        st.CommunityID = make([]byte, plan.CommunityIDSz)
+        rand.Read(st.CommunityID)
+    }
+
+    path, err := plan.UseLocalDir(inUserName)
+    if err != nil {
+        return nil, err
+    }
+
+    st.Session, err = StartSession(SessionParams{
+        Invocation: plan.Block{
+            Label: inInvocationStr,
+        },
+        BaseDir: path,
+    })
+
+    return st, err
+}
+
+
+
+// DoOp performs the given op, blocking until completion
+func (st *SessionTool) DoOp(inOpArgs OpArgs) (*plan.Block, *plan.Perror) {
+
+    var outErr *plan.Perror
+    var outResults *plan.Block
+
+    st.Session.DispatchOp(inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
+        outErr = inErr
+        outResults = opResults
+
+        st.blocker <- 1
+    })
+
+    <- st.blocker
+
+
+    return outResults, outErr
+}
+
+
+
+
+
+// GenerateNewKey creates a new key, blocking until completion
+func (st *SessionTool) GenerateNewKey(
+    inKeyType KeyType,
+    inKeyDomain KeyDomain,
+) *PubKey {
+
+    var newKey *PubKey
+
+    GenerateKeys(
+        st.Session, 
+        st.CommunityID[:], 
+        []*PubKey{
+            &PubKey{
+                KeyType: inKeyType,
+                KeyDomain: inKeyDomain,
+            },
+        },
+        func(inKeys []*KeyEntry, inErr *plan.Perror) {
+            if inErr != nil {
+                log.Fatal(inErr)
+            } else {
+                newKey = &PubKey{
+                    KeyDomain: inKeys[0].KeyDomain,
+                    KeyBase: inKeys[0].PubKey,
+                }
+            }
+
+            st.blocker <- 1
+        },
+    )
+
+    <- st.blocker
+
+    return newKey
 
 }
 
-/*
-    results := ts.doOp(ski.OpArgs{
-            OpName: ski.OpGenerateKeys,
-            KeySpecs: ski.KeyBundle{
-                CommunityId: gCommunityID[:],
-                Keys: []*ski.KeyEntry{
-                    &ski.KeyEntry{
-                        KeyType: ski.KeyType_ASYMMETRIC_KEY,
-                        KeyDomain: ski.KeyDomain_PERSONAL,
-                    },
-                    &ski.KeyEntry{
-                        KeyType: ski.KeyType_SIGNING_KEY,
-                        KeyDomain: ski.KeyDomain_PERSONAL,
-                    },
-                },
-            },
-        })
 
+// EndSession ends the current session
+func (st *SessionTool) EndSession(inReason string) {
 
-    {
-        bundleBuf := results.GetContentWithCodec(ski.KeyBundleProtobufCodec, 0)
-        keyBundle := ski.KeyBundle{}
-        err := keyBundle.Unmarshal(bundleBuf)
-        if err != nil {
-            gTesting.Fatal(err)
-        } 
-        for i := 0; i < len(keyBundle.Keys); i++ {
-            switch keyBundle.Keys[i].KeyType {
-                case ski.KeyType_ASYMMETRIC_KEY:
-                    ts.encryptPubKey = keyBundle.Keys[i].PubKey
-
-                case ski.KeyType_SIGNING_KEY:
-                    ts.signingPubKey = keyBundle.Keys[i].PubKey
-            }
+    st.Session.EndSession(inReason, func(inParam interface{}, inErr *plan.Perror) {
+        if inErr != nil {
+            log.Fatal(inErr)
         }
-    }
-*/
+        st.blocker <- 1
+    })
+
+    <- st.blocker
+
+}

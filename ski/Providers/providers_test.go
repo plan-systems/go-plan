@@ -4,11 +4,7 @@ import (
 	"bytes"
     "math/rand"
     "fmt"
-	"os/user"
-    "path"
     //"time"
-    "os"
-    "crypto/md5"
     //"ioutil"
 
     "testing"
@@ -26,27 +22,7 @@ import (
 
 var gTesting *testing.T
 var gCommunityID = [4]byte{0, 1, 2, 3}
-var gDefaulFileMode = os.FileMode(0775)
 
-func getTmpDir(inSubDir string) string {
-
-	usr, err := user.Current()
-	if err != nil {
-		gTesting.Fatal(err)
-	}
-
-	tmpDir := path.Join(usr.HomeDir, "_plan-testing")
-    if len(inSubDir) > 0 {
-        tmpDir = path.Join(tmpDir, inSubDir)
-    }
-
-    err = os.MkdirAll(tmpDir, gDefaulFileMode)
-	if err != nil {
-		gTesting.Fatal(err)
-	}
-
-    return tmpDir
-}
 
 
 func TestFileSysSKI(t *testing.T) {
@@ -61,17 +37,14 @@ func TestFileSysSKI(t *testing.T) {
 
     for _, invocationStr := range providersToTest {
 
-        invocation := plan.Block{
-            Label: invocationStr,
-        }
 
-        A := newSession(invocation, "Alice")
-        B := newSession(invocation, "Bob")
+        A := newSession(invocationStr, "Test-Alice")
+        B := newSession(invocationStr, "Test-Bob")
 
         doCoreTests(A, B)
 
-        A.endSession("done A")
-        B.endSession("done B")
+        A.EndSession("done A")
+        B.EndSession("done B")
     }
 
 
@@ -85,11 +58,11 @@ func TestFileSysSKI(t *testing.T) {
 
 func doCoreTests(A, B *testSession) {
 
-    fmt.Printf("%s's encryptPubKey %v\n", A.name, A.encryptPubKey)
-    fmt.Printf("%s's encryptPubKey %v\n", B.name, B.encryptPubKey)
+    fmt.Printf("%s's encryptPubKey %v\n", A.UserName, A.encryptPubKey)
+    fmt.Printf("%s's encryptPubKey %v\n", B.UserName, B.encryptPubKey)
 
     // 1) Generate a new community key (on A)
-    communityKey := A.generateNewKey(ski.KeyType_SYMMETRIC_KEY, ski.KeyDomain_COMMUNITY)
+    communityKey := A.GenerateNewKey(ski.KeyType_SYMMETRIC_KEY, ski.KeyDomain_COMMUNITY)
  
     // 2) generate a xfer community key msg from A
     opResults := A.doOp(ski.OpArgs{
@@ -152,7 +125,7 @@ func doCoreTests(A, B *testSession) {
         copy(badMsg, encryptedMsg)
         badMsg[rndPos] += rndAdj
 
-        _, opErr := B.doOpWithErr(ski.OpArgs{
+        _, opErr := B.DoOp(ski.OpArgs{
             OpName: ski.OpDecrypt,
             OpKeySpec: *communityKey,
             CommunityID: gCommunityID[:],
@@ -169,10 +142,8 @@ func doCoreTests(A, B *testSession) {
 
 
 type testSession struct {
-    name        string
-    session     ski.Session
-    blocker     chan int   
-    signingPubKey []byte
+    ski.SessionTool 
+
     encryptPubKey []byte
 }
 
@@ -181,8 +152,7 @@ type testSession struct {
 
 func (ts *testSession) doOp(inOpArgs ski.OpArgs) *plan.Block {
 
-
-    results, err := ts.doOpWithErr(inOpArgs)
+    results, err := ts.DoOp(inOpArgs)
 
     if err != nil {
         gTesting.Fatal(err)
@@ -192,105 +162,32 @@ func (ts *testSession) doOp(inOpArgs ski.OpArgs) *plan.Block {
 
 
 
-func (ts *testSession) doOpWithErr(inOpArgs ski.OpArgs) (*plan.Block, *plan.Perror) {
-
-    var outErr *plan.Perror
-    var outResults *plan.Block
-
-    ts.session.DispatchOp(inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
-        outErr = inErr
-        outResults = opResults
-
-        ts.blocker <- 1
-    })
-
-    <- ts.blocker
-
-
-    return outResults, outErr
-}
-
-
 
 
 
 
 // test setup helper
-func newSession(inInvocation plan.Block, inName string) *testSession {
+func newSession(inInvocationStr string, inUserName string) *testSession {
 
-    ts := &testSession{
-        name:inName,
-        blocker:make(chan int, 1),
-    }
 
-    userID := md5.Sum([]byte(inName))
-
-    var err *plan.Perror
-    ts.session, err = ski.StartSession(ski.SessionParams{
-        Invocation: inInvocation,
-        UserID: userID[:],
-        BaseDir: getTmpDir(inName),
-    })
-
+    tool, err := ski.NewSessionTool(
+        inInvocationStr,
+        inUserName,
+        gCommunityID[:],
+    )
     if err != nil {
         gTesting.Fatal(err)
     }
 
-    ts.encryptPubKey = ts.generateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL).KeyBase
-    ts.signingPubKey = ts.generateNewKey(ski.KeyType_SIGNING_KEY,    ski.KeyDomain_PERSONAL).KeyBase
+    ts := &testSession{
+        *tool,
+        nil,
+    }
+
+
+    ts.encryptPubKey = ts.GenerateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL).Base256()
 
     return ts
-}
-
-func (ts *testSession) generateNewKey(
-    inKeyType ski.KeyType,
-    inKeyDomain ski.KeyDomain,
-) *ski.PubKey {
-
-    var newKey *ski.PubKey
-
-    ski.GenerateKeys(
-        ts.session, 
-        gCommunityID[:], 
-        []*ski.PubKey{
-            &ski.PubKey{
-                KeyType: inKeyType,
-                KeyDomain: inKeyDomain,
-            },
-        },
-        func(inKeys []*ski.KeyEntry, inErr *plan.Perror) {
-            if inErr != nil {
-                gTesting.Fatal(inErr)
-            } else {
-                newKey = &ski.PubKey{
-                    KeyDomain: inKeys[0].KeyDomain,
-                    KeyBase: inKeys[0].PubKey,
-                }
-            }
-
-            ts.blocker <- 1
-        },
-    )
-
-    <- ts.blocker
-
-    return newKey
-
-}
-
-
-
-func (ts *testSession) endSession(inReason string) {
-
-    ts.session.EndSession(inReason, func(inParam interface{}, inErr *plan.Perror) {
-        if inErr != nil {
-            gTesting.Fatal(inErr)
-        }
-        ts.blocker <- 1
-    })
-
-    <- ts.blocker
-
 }
 
 
