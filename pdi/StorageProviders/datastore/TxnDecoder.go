@@ -49,7 +49,7 @@ func NewTxnDecoder() pdi.TxnDecoder {
     rawTxn     []byte, 
     outInfo    *pdi.TxnInfo,
     outSegment *pdi.TxnSegment,
-) *plan.Perror {
+) *plan.Err {
 
     txnLen := len(rawTxn)
     if txnLen < 50 {
@@ -86,7 +86,7 @@ func NewTxnDecoder() pdi.TxnDecoder {
     // 4) Prep the hasher so we can generate a digest 
     hashKit, ok := dec.hashKits[txnInfo.HashKitId]
     if ! ok {
-        var perr *plan.Perror
+        var perr *plan.Err
         hashKit, perr = ski.NewHashKit(txnInfo.HashKitId)
         if perr != nil {
             return perr

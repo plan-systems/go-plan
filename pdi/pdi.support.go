@@ -313,7 +313,7 @@ func SegmentIntoTxns(
     inPayloadLabel   []byte,
     inPayloadCodec   PayloadCodec, 
 	inMaxSegmentSize int,
-) ([]*TxnSegment, *plan.Perror) {
+) ([]*TxnSegment, *plan.Err) {
 
     payloadSz := len(inData)
 	bytesRemain := payloadSz
@@ -356,7 +356,7 @@ func SegmentIntoTxns(
 
 
 
-//func AssembleSegments(inSegs []*TxnSegment) ([]*TxnSegment, *plan.Perror)
+//func AssembleSegments(inSegs []*TxnSegment) ([]*TxnSegment, *plan.Err)
 
 
 
@@ -401,7 +401,7 @@ func ConvertToUTID(inPrefix string, inUnixSecs int64, inID []byte) string {
 
 
 // Deposit deposits the given transfer into this account
-func (acct *StorageAccount) Deposit(xfer *Transfer) *plan.Perror {
+func (acct *StorageAccount) Deposit(xfer *Transfer) *plan.Err {
 
     switch xfer.Currency {
         case Currency_Gas:
@@ -415,7 +415,7 @@ func (acct *StorageAccount) Deposit(xfer *Transfer) *plan.Perror {
 
 
 // Withdraw subtracts the given transfer amount from this account
-func (acct *StorageAccount) Withdraw(xfer *Transfer) *plan.Perror {
+func (acct *StorageAccount) Withdraw(xfer *Transfer) *plan.Err {
 
     switch xfer.Currency {
         case Currency_Gas:

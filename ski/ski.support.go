@@ -66,7 +66,7 @@ func (pk *PubKey) Base256() []byte {
 
 
 // NewHashKit returns the requested HashKit.
-func NewHashKit(inID HashKitID) (HashKit, *plan.Perror) {
+func NewHashKit(inID HashKitID) (HashKit, *plan.Err) {
 
     var kit HashKit
 
@@ -104,14 +104,14 @@ func GenerateNewKeys(
     inRand io.Reader,
     inRequestedKeyLen int,
     inKeySpecs []*PubKey,
-) ([]*KeyEntry, *plan.Perror) {
+) ([]*KeyEntry, *plan.Err) {
 
     N :=  len(inKeySpecs)
 
     newKeys := make([]*KeyEntry, N)
 
     var kit *CryptoKit 
-    var err *plan.Perror
+    var err *plan.Err
 
     timeCreated := plan.Now().UnixSecs
 
@@ -152,7 +152,7 @@ func GenerateKeys(
     skiSession Session,
     inCommunityID []byte,
     inKeySpecs []*PubKey,
-    inOnCompletion func(inKeys []*KeyEntry, inErr *plan.Perror),
+    inOnCompletion func(inKeys []*KeyEntry, inErr *plan.Err),
 ) {
 
     skiSession.DispatchOp( OpArgs{
@@ -160,7 +160,7 @@ func GenerateKeys(
             CommunityID: inCommunityID,
             KeySpecs: inKeySpecs,
         }, 
-        func (inResults *plan.Block, err *plan.Perror) {
+        func (inResults *plan.Block, err *plan.Err) {
             var newKeys []*KeyEntry
 
             if err == nil {
@@ -208,7 +208,7 @@ func NewSessionTool(
     inProvider Provider,
     inUserName string,
     inCommunityID []byte,   // if len()==0, it will be auto-generated
-) (*SessionTool, *plan.Perror) {
+) (*SessionTool, *plan.Err) {
 
 
     st := &SessionTool{
@@ -240,12 +240,12 @@ func NewSessionTool(
 
 
 // DoOp performs the given op, blocking until completion
-func (st *SessionTool) DoOp(inOpArgs OpArgs) (*plan.Block, *plan.Perror) {
+func (st *SessionTool) DoOp(inOpArgs OpArgs) (*plan.Block, *plan.Err) {
 
-    var outErr *plan.Perror
+    var outErr *plan.Err
     var outResults *plan.Block
 
-    st.Session.DispatchOp(inOpArgs, func(opResults *plan.Block, inErr *plan.Perror) {
+    st.Session.DispatchOp(inOpArgs, func(opResults *plan.Block, inErr *plan.Err) {
         outErr = inErr
         outResults = opResults
 
@@ -279,7 +279,7 @@ func (st *SessionTool) GenerateNewKey(
                 KeyDomain: inKeyDomain,
             },
         },
-        func(inKeys []*KeyEntry, inErr *plan.Perror) {
+        func(inKeys []*KeyEntry, inErr *plan.Err) {
             if inErr != nil {
                 log.Fatal(inErr)
             } else {
@@ -304,7 +304,7 @@ func (st *SessionTool) GenerateNewKey(
 // EndSession ends the current session
 func (st *SessionTool) EndSession(inReason string) {
 
-    st.Session.EndSession(inReason, func(inParam interface{}, inErr *plan.Perror) {
+    st.Session.EndSession(inReason, func(inParam interface{}, inErr *plan.Err) {
         if inErr != nil {
             log.Fatal(inErr)
         }

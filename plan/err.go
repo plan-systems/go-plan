@@ -14,21 +14,21 @@ func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 }
 
 /*****************************************************
-** Perror / plan.Error()
+** Err / plan.Error()
 **/
 
 // GUI error philosophy: errors can be suppressed by type or by item that they are for.
 
-// Perror is PLAN's common error struct.  Perror.Code allows easy matching while allowing error strings to contain useful contextual information.
-type Perror struct {  
+// Err is PLAN's common error struct.  Err.Code allows easy matching while allowing error strings to contain useful contextual information.
+type Err struct {  
     Status  
 
 	Err  error
 }
 
 // Error create a new PError
-func Error(inErr error, inCode int32, inMsg string) *Perror {
-	return &Perror{
+func Error(inErr error, inCode int32, inMsg string) *Err {
+	return &Err{
 		Status{
             inCode,
             inMsg,
@@ -39,8 +39,8 @@ func Error(inErr error, inCode int32, inMsg string) *Perror {
 }
 
 // Errorf is a convenience function of Error() that uses a string formatter.
-func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *Perror {
-	return &Perror{
+func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *Err {
+	return &Err{
 		Status{
             inCode,
             fmt.Sprintf(inFormat, inArgs...),
@@ -51,7 +51,7 @@ func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *
 }
 
 // Error implements error's Error()
-func (e *Perror) Error() string {
+func (e *Err) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
@@ -62,7 +62,7 @@ func (e *Perror) Error() string {
 	if len(e.Msg) > 0 {
 		s = append(s, e.Msg)
 	} else {
-		s = append(s, "Perror")
+		s = append(s, "Err")
 	}
 
 	// e.Code

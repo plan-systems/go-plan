@@ -64,7 +64,7 @@ func GetChannelID(in []byte) ChannelID {
 
 // UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
 // inSubDir can be any relative pathname
-func UseLocalDir(inSubDir string) (string, *Perror) {
+func UseLocalDir(inSubDir string) (string, *Err) {
 	usr, err := user.Current()
 	if err != nil {
         return "", Error(err, FileSysError, "failed to get current user dir")

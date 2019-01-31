@@ -125,7 +125,7 @@ func (storage *BoltStorage) SegmentIntoTxnsForCommit(
 func (provider *boltProvider) endSession(
     inSession *boltSession,
     msg *pdi.StorageMsg,
-    ) *plan.Perror {
+    ) *plan.Err {
 
     if inSession.status != pdi.SessionIsReady {
         return nil

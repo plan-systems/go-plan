@@ -38,7 +38,7 @@ type dsEncoder struct {
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
     inSegmentMaxSz int,
-) (pdi.TxnEncoder, *plan.Perror) {
+) (pdi.TxnEncoder, *plan.Err) {
 
     defaultKit, _ := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
 
@@ -59,7 +59,7 @@ func (enc *dsEncoder) ResetSession(
     inInvocation  string,
     inSession     ski.Session,
     inCommunityID []byte,
-) *plan.Perror {
+) *plan.Err {
 
     if inInvocation != "" && inInvocation != txnEncoderInvocation1 {
         return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inInvocation, txnEncoderInvocation1)
@@ -75,7 +75,7 @@ func (enc *dsEncoder) ResetSession(
 }
 
 
-func (enc *dsEncoder) checkReady() *plan.Perror {
+func (enc *dsEncoder) checkReady() *plan.Err {
 
     if enc.skiSession == nil {
         return plan.Errorf(nil, plan.EncoderSessionNotReady, "SKI session missing")
@@ -92,14 +92,14 @@ func (enc *dsEncoder) checkReady() *plan.Perror {
 
 // GenerateNewAccount -- See TxnEncoder
 func (enc *dsEncoder) GenerateNewAccount(
-) (*ski.PubKey, *plan.Perror) {
+) (*ski.PubKey, *plan.Err) {
 
     err := enc.checkReady()
     if err != nil {
         return nil, err
     }
 
-    blocker := make(chan *plan.Perror, 1)
+    blocker := make(chan *plan.Err, 1)
 
     var newKey *ski.PubKey
 
@@ -113,7 +113,7 @@ func (enc *dsEncoder) GenerateNewAccount(
                 KeyDomain: ski.KeyDomain_PERSONAL,
             },
         },
-        func(inKeys []*ski.KeyEntry, inErr *plan.Perror) {
+        func(inKeys []*ski.KeyEntry, inErr *plan.Err) {
             if inErr == nil {
                 newKey = &ski.PubKey{
                     KeyDomain: inKeys[0].KeyDomain,
@@ -138,7 +138,7 @@ func (enc *dsEncoder) GenerateNewAccount(
 
 func (enc *dsEncoder) ResetAuthorID(
     inFrom ski.PubKey,
-) *plan.Perror {
+) *plan.Err {
 
     enc.author = inFrom
 
@@ -155,7 +155,7 @@ func (enc *dsEncoder) EncodeToTxns(
     inPayloadLabel []byte,
     inPayloadCodec pdi.PayloadCodec, 
     inTransfers    []*pdi.Transfer, 
-) ([]*pdi.Txn, *plan.Perror) {
+) ([]*pdi.Txn, *plan.Err) {
 
     {
         err := enc.checkReady()
@@ -176,7 +176,7 @@ func (enc *dsEncoder) EncodeToTxns(
 
     txns := make([]*pdi.Txn, len(segs))
 
-    var signErr *plan.Perror
+    var signErr *plan.Err
 
     {
         // Use the same time stamp for the entire batch
@@ -241,7 +241,7 @@ func (enc *dsEncoder) EncodeToTxns(
             signOp.Msg = txnInfo.TxnHashname
             enc.skiSession.DispatchOp( 
                 signOp, 
-                func (inResults *plan.Block, inErr *plan.Perror) {
+                func (inResults *plan.Block, inErr *plan.Err) {
                     if inErr == nil {
                         sig := inResults.Content
                         sigLen := len(sig)

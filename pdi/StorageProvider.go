@@ -38,17 +38,17 @@ type TxnEncoder interface {
         inInvocation  string,
         inSession     ski.Session,
         inCommunityID []byte,
-    ) *plan.Perror
+    ) *plan.Err
 
     // GenerateNewAccount creates the necessary key(s) in the pres-et SKI session and returns a new public 
     //    key (used as an address) able to originate StorageProvider txns via EncodeToTxns().
     // Pre: ResetSession() must be successfully called.
-    GenerateNewAccount() (*ski.PubKey, *plan.Perror)
+    GenerateNewAccount() (*ski.PubKey, *plan.Err)
 
     // ResetAuthorID -- resets the current set public key used to originate (i.e. sign) txns in EncodeToTxns()
     ResetAuthorID(
         inFrom ski.PubKey,
-    ) *plan.Perror
+    ) *plan.Err
 
     // EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
     // Pre: ResetSession() *and* ResetAuthorID() must be successfully called.
@@ -57,7 +57,7 @@ type TxnEncoder interface {
         inPayloadName  []byte,
         inPayloadCodec PayloadCodec, 
         inTransfers    []*Transfer, 
-    ) ([]*Txn, *plan.Perror)
+    ) ([]*Txn, *plan.Err)
 
 
     // Generates a txn that destroys the given address from committing any further txns.
@@ -82,7 +82,7 @@ type TxnDecoder interface {
         inRawTxn   []byte,      // Raw txn to be decoded
         outInfo    *TxnInfo,    // If non-nil, populated w/ info extracted from inTxn
         outSegment *TxnSegment, // If non-nil, populated w/ the segment data from inTxn 
-    ) *plan.Perror
+    ) *plan.Err
 
 
 }

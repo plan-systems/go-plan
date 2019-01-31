@@ -156,7 +156,7 @@ ws.targetChannel, perr = ws.CR.LockChannelStoreForOp(ws.entryHeader)
 
 func (CR *CommunityRepo) LockChannelStoreForOp(
     inChannelID []byte,
-    ) (*ChannelStore, *plan.Perror) {
+    ) (*ChannelStore, *plan.Err) {
 
 */
 
@@ -166,7 +166,7 @@ func (CR *CommunityRepo) LockChannelStoreForOp(
 func (CR *CommunityRepo) LockChannelStore(
     inChannelID []byte,
     inFlags LoadChannelStoreFlags,
-    ) (*ChannelStore, *plan.Perror) {
+    ) (*ChannelStore, *plan.Err) {
 
 
     channelID := plan.GetChannelID(inChannelID)
@@ -175,7 +175,7 @@ func (CR *CommunityRepo) LockChannelStore(
     CS := CR.loadedChannels.table[channelID]
     CR.loadedChannels.RUnlock()
 
-    var err *plan.Perror
+    var err *plan.Err
     var hasWriteLock bool
 
     if CS == nil {
@@ -219,7 +219,7 @@ func (CR *CommunityRepo) LockChannelStore(
 func (CR *CommunityRepo) LoadChannelStore(
     inChannelID []byte, 
     inCreateNew bool,
-    ) (*ChannelStore, *plan.Perror) {
+    ) (*ChannelStore, *plan.Err) {
 
     CS := new( ChannelStore )
     CS.ChannelID = plan.GetChannelID(inChannelID)
@@ -279,7 +279,7 @@ func (CR *CommunityRepo) LookupMember(
     inMemberID []byte,
     inMemberEpoch plan.MemberEpoch,
     outInfo *pdi.MemberEpoch,
-    ) *plan.Perror {
+    ) *plan.Err {
 
     return nil
 }
@@ -402,7 +402,7 @@ func (CR *CommunityRepo) StartService() error {
                 eip.entryTxnIndex = i
                 eip.parentTxnName = tip.parentTxnName
 
-                eip.processAndMergeEntry(func (inErr *plan.Perror) {
+                eip.processAndMergeEntry(func (inErr *plan.Err) {
                     if inErr != nil {
                         
                         eip.failedEntries = append(eip.failedEntries, failedEntry{
@@ -500,7 +500,7 @@ func (CR *CommunityRepo) RevokeEntry( inHashnames []byte ) {
 
 
 type failedEntry struct {
-    err                     *plan.Perror
+    err                     *plan.Err
     entry                   *pdi.EntryCrypt
     entryTxnIndex           int
     parentTxnName           []byte
@@ -558,7 +558,7 @@ type entryInProcess struct {
 // internal: unpackHeader
 //   decrypts and deserializes a pdi header
 func (eip *entryInProcess) unpackHeader(
-    inOnCompletion func(*plan.Perror),
+    inOnCompletion func(*plan.Err),
     ) {
 
     eip.timeStart = plan.Now()
@@ -580,7 +580,7 @@ func (eip *entryInProcess) unpackHeader(
             Msg: eip.entry.HeaderCrypt,
         }, 
 
-        func(inRespose *plan.Block, inErr *plan.Perror) {
+        func(inRespose *plan.Block, inErr *plan.Err) {
             if inErr != nil {
                 inOnCompletion(inErr)
                 return
@@ -607,7 +607,7 @@ func (eip *entryInProcess) unpackHeader(
 //   note that because permissions are immutable at a point in time, it doesn't matter
 //   when we check permissions if they're changed later -- they'll
 //   always be the same for an entry at a specific point in time.
-func (eip *entryInProcess) validateEntry() *plan.Perror {
+func (eip *entryInProcess) validateEntry() *plan.Err {
 
     if eip.entryHeader.TimeAuthored < eip.CR.Info.TimeCreated.UnixSecs {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp earlier than community creation timestamp")
@@ -659,7 +659,7 @@ type entryAccessReqs struct {
 }
 
 
-func (eip *entryInProcess) prepChannelAccess() *plan.Perror {
+func (eip *entryInProcess) prepChannelAccess() *plan.Err {
 
     plan.Assert( eip.targetChFlags == 0 &&  eip.accessChFlags == 0, "channel store lock flags not reset" )
 
@@ -672,7 +672,7 @@ func (eip *entryInProcess) prepChannelAccess() *plan.Perror {
     }
 
     // First lock the target channel
-    var perr *plan.Perror
+    var perr *plan.Err
     eip.targetCh, perr = eip.CR.LockChannelStore(eip.entryHeader.ChannelId, targetChFlags)
     if perr != nil {
         return perr
@@ -779,7 +779,7 @@ func (eip *entryInProcess) prepChannelAccess() *plan.Perror {
 
 
 func (eip *entryInProcess) mergeEntry(
-    inOnCompletion func(*plan.Perror),
+    inOnCompletion func(*plan.Err),
     ) {
 
 
@@ -791,10 +791,10 @@ func (eip *entryInProcess) mergeEntry(
 
 
 func (eip *entryInProcess) processAndMergeEntry( 
-    inOnCompletion func(*plan.Perror),
+    inOnCompletion func(*plan.Err),
     ) {
 
-    eip.unpackHeader( func(inErr *plan.Perror) {
+    eip.unpackHeader( func(inErr *plan.Err) {
         if inErr != nil {
             inOnCompletion(inErr)
         }

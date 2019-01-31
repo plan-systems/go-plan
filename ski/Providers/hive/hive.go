@@ -70,7 +70,7 @@ func (provider *Provider) InvocationStr() string {
 // StartSession starts a new SKI session
 func (provider *Provider) StartSession(
     inPB ski.SessionParams,
-) (ski.Session, *plan.Perror) {
+) (ski.Session, *plan.Err) {
 
     if inPB.Invocation.Label != provider.InvocationStr() {
         return nil, plan.Errorf(nil, plan.InvocationNotAvailable,  "ski invocation does not match (%s != %s)", inPB.Invocation.Label, provider.InvocationStr())
@@ -103,7 +103,7 @@ func (provider *Provider) StartSession(
 
 
 // EndSession -- see interface ski.Provider
-func (provider *Provider) EndSession(inSession *Session, inReason string) *plan.Perror {
+func (provider *Provider) EndSession(inSession *Session, inReason string) *plan.Err {
     for i, session := range provider.sessions {
         if session == inSession {
             n := len(provider.sessions)-1
@@ -167,7 +167,7 @@ func (session *Session) dbPathname() string {
 
 
 
-func (session *Session) loadFromFile() *plan.Perror {
+func (session *Session) loadFromFile() *plan.Err {
 
     session.autoSaveMutex.Lock()
     defer session.autoSaveMutex.Unlock()
@@ -190,7 +190,7 @@ func (session *Session) loadFromFile() *plan.Perror {
         return plan.Errorf(ferr, plan.KeyTomeFailedToLoad, "Failed to load key tome file '%v'", pathname)
     }
 
-    var err *plan.Perror
+    var err *plan.Err
 
     // TODO: decrypt file buf!
     {
@@ -211,7 +211,7 @@ func (session *Session) loadFromFile() *plan.Perror {
 
 
 
-func (session *Session) saveToFile() *plan.Perror {
+func (session *Session) saveToFile() *plan.Err {
 
     session.autoSaveMutex.Lock()
     defer session.autoSaveMutex.Unlock()
@@ -269,7 +269,7 @@ func (session *Session) EndSession(inReason string, inOnCompletion plan.Action) 
 
 func (session *Session) checkOpParamsAndPermissions(
     inArgs *ski.OpArgs,
-    ) *plan.Perror {
+    ) *plan.Err {
 
     if len(inArgs.CommunityID) < 4 {
         return plan.Errorf(nil, plan.CommunityNotSpecified, "community ID must be specified for SKI op %v", inArgs.OpName)
@@ -375,11 +375,11 @@ func (session *Session) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompl
 func doOp(
     ioKeyringSet *ski.KeyringSet,
     opArgs ski.OpArgs,
-) (*plan.Block, *plan.Perror) {
+) (*plan.Block, *plan.Err) {
 
     outResults := &plan.Block{}
 
-    var err *plan.Perror
+    var err *plan.Err
 
     /*****************************************************
     ** 1) LOAD OP CRYPTO KEY & KIT
@@ -526,7 +526,7 @@ func doOp(
 func exportKeysIntoMsg(
     ioKeyringSet *ski.KeyringSet,
     inKeySpecs []*ski.PubKey,
-) ([]byte, *plan.Perror) {
+) ([]byte, *plan.Err) {
 
     var keysBuf []byte
     {
@@ -568,7 +568,7 @@ func exportKeysIntoMsg(
 func importKeysFromMsg(
     ioKeyringSet *ski.KeyringSet,
     inMsg []byte,
-) *plan.Perror {
+) *plan.Err {
 
     block := plan.Block{}
     err := block.Unmarshal(inMsg)

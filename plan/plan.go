@@ -17,10 +17,10 @@ import (
 )
 
 // DataHandler is a deferred data handler function
-type DataHandler func(inParam []byte, inErr *Perror)
+type DataHandler func(inParam []byte, inErr *Err)
 
 // Action is a deferred generic handler.
-type Action func(inParam interface{}, inErr *Perror)
+type Action func(inParam interface{}, inErr *Err)
 
 const (
 

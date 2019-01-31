@@ -48,7 +48,7 @@ type Provider interface {
 	// StartSession starts a new session SKI.session.  In general, you should only start one session
 	StartSession(
 		inPB SessionParams,
-	) (Session, *plan.Perror)
+	) (Session, *plan.Err)
 }
 
 /*****************************************************
@@ -72,7 +72,7 @@ func RegisterProvider(inProvider Provider) error {
 // StartSession returns a provider implementation given an invocation block
 func StartSession(
 	inPB SessionParams,
-) (Session, *plan.Perror) {
+) (Session, *plan.Err) {
 
 	provider := gProviderRegistry[inPB.Invocation.Label]
 	if provider == nil || provider.InvocationStr() != inPB.Invocation.Label {
@@ -145,7 +145,7 @@ type OpArgs struct {
 }
 
 // OpCompletionHandler handles the result of a SKI operation
-type OpCompletionHandler func(inResults *plan.Block, inErr *plan.Perror)
+type OpCompletionHandler func(inResults *plan.Block, inErr *plan.Err)
 
 // OpArgs.OpName -- these are the available operations for SKI.Session.DispatchOp()
 // Unless otherwise stated, output from an op is returned in inResults.Content

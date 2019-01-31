@@ -41,7 +41,7 @@ func (KR *KeyRepo) Clear() {
 func (KR *KeyRepo) FetchKeyringSet(
     inCommunityID []byte,
     inAutoCreate bool,
-) (*KeyringSet, *plan.Perror) {
+) (*KeyringSet, *plan.Err) {
 
     CID := plan.GetCommunityID(inCommunityID)
  
@@ -73,7 +73,7 @@ func (KR *KeyRepo) FetchKeyringSet(
 
 // Marshal writes out entire state to a given buffer.
 // Warning: the return buffer is not encrypted and contains private key data!
-func (KR *KeyRepo) Marshal() ([]byte, *plan.Perror) {
+func (KR *KeyRepo) Marshal() ([]byte, *plan.Err) {
 
     KR.RLock()
 
@@ -118,7 +118,7 @@ func (KR *KeyRepo) Marshal() ([]byte, *plan.Perror) {
 
 
 // Unmarshal resets this KeyRepo from the state data written out by Marshal()
-func (KR *KeyRepo) Unmarshal(dAtA []byte) *plan.Perror {
+func (KR *KeyRepo) Unmarshal(dAtA []byte) *plan.Err {
 
     keyTome := KeyTome{}
 
@@ -161,9 +161,9 @@ type KeyringSet struct {
 // GenerateNewKeys generates the requested keys and adds them to this KeyringSet
 func (krSet *KeyringSet) GenerateNewKeys(
     inKeySpecs []*PubKey,
-) ([]*KeyEntry, *plan.Perror) {
+) ([]*KeyEntry, *plan.Err) {
 
-    var err *plan.Perror
+    var err *plan.Err
     var newKeys []*KeyEntry
 
     for {
@@ -213,9 +213,9 @@ func (krSet *KeyringSet) GenerateNewKeys(
 
 func (krSet *KeyringSet) getKeyEntryInternal(
     inKeySpec *PubKey,
-) (*KeyEntry, *plan.Perror) {
+) (*KeyEntry, *plan.Err) {
 
-    var err *plan.Perror
+    var err *plan.Err
     var keyEntry *KeyEntry
 
     if inKeySpec.KeyDomain < 0 || inKeySpec.KeyDomain > NumKeyDomains {
@@ -272,7 +272,7 @@ func (krSet *KeyringSet) FetchKeys(
 // FetchKey is identical to FetchNamedKeys() except is for only one key.
 func (krSet *KeyringSet) FetchKey(
     inKeySpec *PubKey,
-) (*KeyEntry, *plan.Perror) {
+) (*KeyEntry, *plan.Err) {
 
     krSet.RLock()
     keyEntry, err := krSet.getKeyEntryInternal(inKeySpec)
@@ -286,7 +286,7 @@ func (krSet *KeyringSet) FetchKey(
 // GetKeyring returns an entire KeyDomain
 func (krSet *KeyringSet) GetKeyring(
     inKeyDomain KeyDomain,
-) ([]*KeyEntry, *plan.Perror) {
+) ([]*KeyEntry, *plan.Err) {
 
     if inKeyDomain < 0 || inKeyDomain > NumKeyDomains {
         return nil, plan.Errorf(nil, plan.KeyDomainNotFound, "keyring not found {KeyDomain: %v}", inKeyDomain)
@@ -312,7 +312,7 @@ func (krSet *KeyringSet) GetKeyring(
 /*
 func SerializeKeysAsBundle(
     inKeys []*KeyEntry,
-) ([]byte, *plan.Perror) {
+) ([]byte, *plan.Err) {
 
     bundle := KeyBundle{
         Keys: inKeys
@@ -413,7 +413,7 @@ func (kr *Keyring) ExportKeys(
 // MergeKeys adds a key to the keychain (ignoring collitions if the key entry is identical)
 func (kr *Keyring) MergeKeys(
     inKeyList KeyList,
-    ) *plan.Perror {
+    ) *plan.Err {
 
     var collisions []*KeyEntry
     var keyID plan.KeyID
@@ -430,7 +430,7 @@ func (kr *Keyring) MergeKeys(
     }
     kr.Unlock()
 
-    var err *plan.Perror
+    var err *plan.Err
 
     if len(collisions) > 0 {
         err = plan.Errorf(nil, plan.KeyIDCollision, "key ID collision while adding keys {keyID:%v}", collisions)
