@@ -6,72 +6,59 @@ import (
 
     //"google.golang.org/grpc/encoding"
 
-	//"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
 )
 
 /**********************************************************************************************************************
-    StorageProvider wraps a persistent storage service "producer". 
+    StorageProvider wraps a persistent storage service provider. 
 
-  
     See the service defintion for StorageProvider, located in go-plan/pdi/pdi.proto.
 
-    The StorageProvider+Agent model is designed to wrap ANY kind of append-only database, 
+    The TxnEncoder/TxnDecoder model is designed to wrap any kind of append-only database, 
         including a distributed ledger. 
         
-        
-    The general flow of posting an pdi.EntryCrypt:
-
-        1. Use the agent associated with the target StorageProvider:
-                agent := pdi.GetAgentByAgentStr(sp.AgentStr())
-
-        2. Encode and sign the finalized pdi.EntryCrypt to txns native to the target StorageProvider:
-                txns := agent.EncodeToNativeTxns(TxnCodec_PbEntryCrypt, entry.Marshal(), activeSPKey)
-
-        3. Submit the signed native txns to the StorageProvider:
-                for i := range txns {
-                    spService.CommitTxn(txns[i].RawTxn)
-                }
 */
 
 
 
 
 
-
-// StorageProviderAgent encodes and decodes storage txns native to a specific remote StorageProvider.  
-// For each StorageProvider implementation, there is a corresponding StorageProviderAgent that resides locally 
-//     on a PLAN community "repo" node, allowing native txns to be generated localled for submission to a 
-//     compatible remote StorageProvider.
-// The StorageProvider+Agent system preserves the property that a StorageProvider must operate deterministically, 
+// TxnEncoder encodes arbitrary data payloads into storage txns native to a specific StorageProvider.  
+// For each StorageProvider implementation, there is a corresponding TxnEncoder that allows 
+//     native txns to be generated locally for submission to the remote StorageProvider.
+// The StorageProvider + txn Encoder/Decoder system preserves the property that a StorageProvider must operate deterministically, 
 //     and can only validate txns and maintain a ledger of which public keys can post (and how much).
-// StorageProviderAgent is NOT assumed to be threadsafes unless specified otherswise 
-type StorageProviderAgent interface {
+// TxnEncoder is NOT assumed to be threadsafes unless specified otherswise 
+type TxnEncoder interface {
 
-    // AgentStr is human-readable string that communicates to a StorageProvider what agent encoded a txn.
-    // THREADSAFE
-    AgentStr() string
-
-    // Encodes the payload and payload codec into one or more native and signed StorageProvider txns.
-    EncodeToTxns(
-        inPayload     []byte, 
-        inPayloadName []byte,
-        inCodec       PayloadCodec, 
-        inSigner      ski.Session,
-        inFrom       *ski.PubKey,
+    // ResetSession -- resets the currently set community ID used for EncodeToTxns()
+    // This must be called before other calls into TxnEncoder.
+    ResetSession(
+        inInvocation  string,
+        inSession     ski.Session,
         inCommunityID []byte,
-    ) ([]*Txn, error)
+    ) *plan.Perror
 
-    // Decodes a raw txn to/from the StorageProvider for this agent
-    DecodeRawTxn(
-        inRawTxn   []byte,      // Raw txn to be decoded
-        outInfo    *TxnInfo,    // If non-nil, populated w/ info extracted from inTxn
-        outSegment *TxnSegment, // If non-nil, populated w/ the segment data from inTxn 
-    ) error
+    // GenerateNewAccount creates the necessary key(s) in the pres-et SKI session and returns a new public 
+    //    key (used as an address) able to originate StorageProvider txns via EncodeToTxns().
+    // Pre: ResetSession() must be successfully called.
+    GenerateNewAccount() (*ski.PubKey, *plan.Perror)
 
+    // ResetAuthorID -- resets the current set public key used to originate (i.e. sign) txns in EncodeToTxns()
+    ResetAuthorID(
+        inFrom ski.PubKey,
+    ) *plan.Perror
 
-    // Generates a txn that transfers the given amount of gas.
-    //EncodeTransfer(from ski.PubKey, to ski.PubKey, gasUnits int64) (*Txn, error)
+    // EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
+    // Pre: ResetSession() must be successfully called.
+    EncodeToTxns(
+        inPayload      []byte, 
+        inPayloadName  []byte,
+        inPayloadCodec PayloadCodec, 
+        inTransfers    []Transfer, 
+    ) ([]*Txn, *plan.Perror)
+
 
     // Generates a txn that destroys the given address from committing any further txns.
     //EncodeDestruct(from ski.PubKey) (*Txn, error)
@@ -81,15 +68,28 @@ type StorageProviderAgent interface {
 
 
 
-/*
-func DecodeTxns(
-    agent StorageProviderAgent,
-    inTxns []*TxnSegment,
-) ([]*Txn, []*TxnSegment) {
+// TxnDecoder decodes storage txns native to a specific remote StorageProvider into the original payloads.  
+// TxnDecoder is NOT assumed to be threadsafes unless specified otherswise 
+type TxnDecoder interface {
+
+    // TxnEncoderInvocation returns a string for use in TxnEncoder.ResetSession()
+    TxnEncoderInvocation() string
+
+    // Decodes a raw txn to/from a StorageProvider (from a corresponding TxnEncoderAgent)
+    // Also performs signature validation on the given txn, meaning that if no err is returned,
+    //    then the txn was indeed signed by outInfo.From.
+    DecodeRawTxn(
+        inRawTxn   []byte,      // Raw txn to be decoded
+        outInfo    *TxnInfo,    // If non-nil, populated w/ info extracted from inTxn
+        outSegment *TxnSegment, // If non-nil, populated w/ the segment data from inTxn 
+    ) *plan.Perror
 
 
 }
-*/
+
+
+
+
 
 
 

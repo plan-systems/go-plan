@@ -285,6 +285,7 @@ func (st *SessionTool) GenerateNewKey(
             } else {
                 newKey = &PubKey{
                     KeyDomain: inKeys[0].KeyDomain,
+                    CryptoKitId: inKeys[0].CryptoKitId,
                     KeyBase: inKeys[0].PubKey,
                 }
             }

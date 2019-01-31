@@ -205,7 +205,24 @@ func doCoreTests(A, B *testSession) {
     // Test agent encode/decode
     {
         blobBuf := make([]byte, 500000)
-        agent, _ := NewAgent("", 1000)
+        decoder := NewTxnDecoder()
+        encoder, _ := NewTxnEncoder(1000)
+
+        {
+            err := encoder.ResetSession(
+                decoder.TxnEncoderInvocation(),
+                A.Session,
+                gCommunityID[:],
+            )
+            if err != nil {
+                gTesting.Fatal(err)
+            }
+
+            err = encoder.ResetAuthorID(*A.signingPubKey)
+            if err != nil {
+                gTesting.Fatal(err)
+            }
+        }
 
         for i := 0; i < 100; i++ {
             
@@ -214,13 +231,11 @@ func doCoreTests(A, B *testSession) {
             payload := blobBuf[:blobLen]
             rand.Read(payload)
 
-            txns, err := agent.EncodeToTxns(
+            txns, err := encoder.EncodeToTxns(
                 payload,
                 []byte{4, 3, 2, 1},
                 pdi.PayloadCodec_Unspecified,
-                A.Session,
-                A.signingPubKey,
-                gCommunityID[:],
+                nil,
             )
             if err != nil {
                 gTesting.Fatal(err)
@@ -230,7 +245,7 @@ func doCoreTests(A, B *testSession) {
                 decodedInfo := pdi.TxnInfo{}
                 decodedSeg := pdi.TxnSegment{}
 
-                err := agent.DecodeRawTxn(
+                err := decoder.DecodeRawTxn(
                     txn.RawTxn,
                     &decodedInfo,
                     &decodedSeg,
@@ -302,7 +317,7 @@ func newSession(inInvocationStr string, inUserName string) *testSession {
 
 
     ts.encryptPubKey = ts.GenerateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL)
-    ts.signingPubKey = ts.GenerateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL)
+    ts.signingPubKey = ts.GenerateNewKey(ski.KeyType_SIGNING_KEY, ski.KeyDomain_PERSONAL)
 
     return ts
 }
