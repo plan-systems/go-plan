@@ -4,12 +4,12 @@ package main
 
 import (
 
-    //"fmt"
+    "fmt"
     "os"
     "path"
     "io/ioutil"
     //"strings"
-    //"sync"
+    "sync"
     //"time"
     "net"
     //"encoding/hex"
@@ -88,7 +88,7 @@ type Snode struct {
 
     grpcServer                  *grpc.Server
     listener                    net.Listener
-    serverDone                  chan struct{}
+    grpcDone                    chan struct{}
     ShuttingDown                chan struct{}
 
     FSNameEncoding              *base64.Encoding
@@ -110,7 +110,7 @@ type Config struct {
     Name                        string                          `json:"node_name"`
     NodeID                      hexutil.Bytes                   `json:"node_id"`
 
-    Stores                      []ds.StorageInfo                `json:"node_info"`
+    StorageConfigs              []ds.StorageConfig              `json:"storage_configs"`
 
     RuntimeSettings             RuntimeSettings                 `json:"runtime_settings"`
 
@@ -161,7 +161,6 @@ func (config *Config) WriteToFile(inPathname string) error {
     err = ioutil.WriteFile(inPathname, buf, config.DefaultFileMode)
 
     return err
-
 }
 
 
@@ -173,10 +172,10 @@ func NewSnode(inBasePath *string) *Snode {
     sn := &Snode{
         FSNameEncoding: base64.RawURLEncoding,
         ShuttingDown: make(chan struct{}),
-        serverDone: make(chan struct{}),
+        grpcDone: make(chan struct{}),
+        Stores: make(map[plan.CommunityID]*ds.Store),
     }
 
-    sn.Stores = map[plan.CommunityID]*ds.Store{}
     sn.ActiveSessions.Init()
 
     var err error
@@ -238,7 +237,26 @@ func (sn *Snode) WriteConfig() error {
 
 
 // CreateNewStore creates a new data store and adds it to this nodes list of stores (and updates the config on disk)
-func (sn *Snode) CreateNewStore(inInfo *ds.StorageInfo) error {
+func (sn *Snode) CreateNewStore(inConfig *ds.StorageConfig) error {
+    var err error
+
+    if path.IsAbs(inInfo.HomePath) {
+
+        if _, err := os.Stat(inInfo.HomePath); ! os.IsNotExist(err) {
+            return fmt.Errorf("for safety, the path '%s' must not already exist", inInfo.HomePath)
+        }
+
+        err = os.MkdirAll(inInfo.HomePath, sn.Config.DefaultFileMode)
+
+    } else {
+
+        pathname := path.Join(sn.BasePath, inInfo.HomePath)
+        err = os.Mkdir(pathname, sn.Config.DefaultFileMode)
+    }
+
+    if err != nil {
+        return err
+    }
 
     sn.Config.Stores = append(sn.Config.Stores, *inInfo)
 
@@ -251,13 +269,13 @@ func (sn *Snode) Startup() error {
     for i := range sn.Config.Stores {
         info := &sn.Config.Stores[i]
         
-        S := ds.NewStore(info, sn.BasePath)
+        St := ds.NewStore(info, sn.BasePath)
 
-        sn.registerStore(S)
+        sn.registerStore(St)
     }
 
-    for _, S := range sn.Stores {
-        err := S.OnServiceStarting()
+    for _, St := range sn.Stores {
+        err := St.OnServiceStarting()
         if err != nil {
             return err
         }
@@ -268,14 +286,14 @@ func (sn *Snode) Startup() error {
 
 
 
-func (sn *Snode) registerStore(S *ds.Store) {
+func (sn *Snode) registerStore(St *ds.Store) {
 
-    communityID := plan.GetCommunityID(S.Info.CommunityID)
+    communityID := plan.GetCommunityID(St.Info.CommunityID)
     //var communityID plan.CommunityID
     //copy(communityID[:], CS.Info.CommunityID)
 
     // TODO: add mutex!
-    sn.Stores[communityID] = S
+    sn.Stores[communityID] = St
 
 }
 
@@ -307,7 +325,7 @@ func (sn *Snode) StartServer() {
         sn.listener.Close()
         sn.listener = nil
 
-        close(sn.serverDone)
+        close(sn.grpcDone)
     }()
 
 }
@@ -322,12 +340,17 @@ func (sn *Snode) Shutdown() {
     }
 
     log.Info("Waiting on server")
-    <-sn.serverDone
+    <- sn.grpcDone
 
-    log.Debug("Closing stores...")
-    for _, CS := range sn.Stores {
-        CS.Close()
+    group := sync.WaitGroup{}
+    group.Add(len(sn.Stores))
+
+    log.Debug("Shutting down stores...")
+    for _, St := range sn.Stores {
+        go St.Shutdown(&group)
     }
+
+    group.Wait()
 
 }
 
@@ -408,8 +431,8 @@ func (pnID SnodeID) UnmarshalJSON( inText []byte ) error {
 func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) (*pdi.StorageSession, error) {
     cID := plan.GetCommunityID(in.CommunityId)
 
-    S := sn.Stores[cID]
-    if S == nil {
+    St := sn.Stores[cID]
+    if St == nil {
         return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found {ID:%v}", in.CommunityId)
     }
 
@@ -420,8 +443,7 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
 
     // TODO security checks to prevent DoS
     session :=  sn.ActiveSessions.NewSession(ctx)
-
-    session.Cookie = S
+    session.Cookie = St
     /*
     go func() {
         for i := 0; i < 10; i++ {
@@ -439,7 +461,7 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
     time.Sleep(60 * time.Second)   */
 
     msg := &pdi.StorageSession{
-        AgentStr: S.AgentStr,
+        RequiredAgent: St.Agent.AgentStr(),
     }
 	return msg, nil
 }
@@ -454,33 +476,39 @@ func (sn *Snode) Query(inQuery *pdi.QueryTxns, inOutlet pdi.StorageProvider_Quer
     job := &ds.QueryJob{
         QueryTxns: inQuery,
         Outlet:    inOutlet,
-        OnComplete: make(chan error, 1),
+        OnComplete: make(chan *plan.Perror),
     }
 
-    S := session.Cookie.(*ds.Store)
-    S.QueryInbox <- job
+    St := session.Cookie.(*ds.Store)
+    St.QueryInbox <- job
 
-    jobErr := <-job.OnComplete
-    return jobErr
+    perr := <-job.OnComplete
+    return perr
+}
+
+var txnAwaitingCommit = pdi.TxnMetaInfo{
+    TxnStatus: pdi.TxnStatus_AWAITING_COMMIT,
 }
 
 // CommitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) CommitTxn(inTxn *pdi.Txn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
+func (sn *Snode) CommitTxn(inTxn *pdi.RawTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
     session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
     if err != nil {
         return err
     }
     job := &ds.CommitJob{
-        Txn:       inTxn,
-        Outlet:    inOutlet,
-        OnComplete: make(chan error, 1),
+        RawTxn:     inTxn,
+        Outlet:     inOutlet,
+        OnComplete: make(chan *plan.Perror),
     }
 
-    S := session.Cookie.(*ds.Store)
-    S.CommitInbox <- job
+    job.Outlet.Send(&txnAwaitingCommit)
 
-    jobErr := <-job.OnComplete
-    return jobErr
+    St := session.Cookie.(*ds.Store)
+    St.CommitInbox <- job
+
+    perr := <-job.OnComplete
+    return perr
 }
 
 
