@@ -14,8 +14,6 @@ package plan
 import (
 	"time"
     "os"
-	"os/user"
-    "path"
 )
 
 // DataHandler is a deferred data handler function
@@ -150,74 +148,3 @@ const (
 	DistantPast int64 = -DistantFuture
 )
 
-/*****************************************************
-** Utility & Conversion Helpers
-**/
-
-// GetCommunityID returns the CommunityID for the given buffer
-func GetCommunityID(in []byte) CommunityID {
-
-	var out CommunityID
-
-	overhang := CommunityIDSz - len(in)
-	if overhang < 0 {
-		in = in[-overhang:]
-		overhang = 0
-	}
-
-	copy(out[overhang:], in)
-	return out
-}
-
-// GetKeyID returns the KeyID for the given buffer
-func GetKeyID(in []byte) KeyID {
-
-	var out KeyID
-
-	overhang := KeyIDSz - len(in)
-	if overhang < 0 {
-		in = in[-overhang:]
-		overhang = 0
-	}
-
-	copy(out[overhang:], in)
-	return out
-}
-
-// GetChannelID returns the KeyID for the given buffer
-func GetChannelID(in []byte) ChannelID {
-
-	var out ChannelID
-
-	overhang := ChannelIDSz - len(in)
-	if overhang < 0 {
-		in = in[-overhang:]
-		overhang = 0
-	}
-
-	copy(out[overhang:], in)
-	return out
-}
-
-// UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
-// inSubDir can be any relative pathname
-func UseLocalDir(inSubDir string) (string, error) {
-	usr, err := user.Current()
-	if err != nil {
-        return "", err
-	}
-
-    pathname := usr.HomeDir
-    if len(inSubDir) > 0 {
-        pathname = path.Join(pathname, inSubDir)
-    }
-    pathname = path.Clean(path.Join(pathname, "_.plan"))
-
-    err = os.MkdirAll(pathname, DefaultFileMode)
-	if err != nil {
-		return "", err
-	}
-
-	return pathname, nil
-
-}
