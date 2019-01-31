@@ -11,6 +11,8 @@ import (
 
     "golang.org/x/crypto/sha3"
 
+    "encoding/base64"
+    "encoding/binary"
 )
 
 /*
@@ -313,10 +315,11 @@ func SegmentIntoTxns(
 	inMaxSegmentSize int,
 ) ([]*TxnSegment, *plan.Perror) {
 
-	bytesRemain := len(inData)
+    payloadSz := len(inData)
+	bytesRemain := payloadSz
 	pos := 0
 
-	N := (len(inData) + inMaxSegmentSize - 1) / inMaxSegmentSize
+	N := (payloadSz + inMaxSegmentSize - 1) / inMaxSegmentSize
 	txns := make([]*TxnSegment, 0, N)
 
 	for bytesRemain > 0 {
@@ -330,7 +333,8 @@ func SegmentIntoTxns(
             SegInfo: &TxnSegInfo{
                 PayloadCodec: inPayloadCodec,
                 PayloadLabel: inPayloadLabel,
-                SegByteSize: int32(segSz),
+                PayloadLength: int32(payloadSz), 
+                SegmentLength: int32(segSz),
             },
 			SegData: inData[pos:pos+segSz],
 		})
@@ -353,3 +357,118 @@ func SegmentIntoTxns(
 
 
 //func AssembleSegments(inSegs []*TxnSegment) ([]*TxnSegment, *plan.Perror)
+
+
+
+
+
+// Base64 is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
+// See comments for TxnInfo.UTID in pdi.proto
+var Base64 = base64.NewEncoding("-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz").WithPadding(base64.NoPadding)
+
+// ConvertToUTID converts a time index and octal identifier into a 48 byte UTID (ASCII) string.
+// UTID aka "Universal Transaction Identifier", a 48 character ASCII string that encodes 30 bytes using pdi.Base64: 
+//     8 bytes (BIG-endian bytes of TimeSealed, see below) 
+//  + 22 bytes (rightmost-bytes of hash digest of this txn) ====> 30 bytes (total)
+// The purpose of a UTID is so that txns can be stored and traversed chronologically in O(1) time.
+// If the string is less than 48 chars, it is assumed to be left-padded with "zeros" (the '.' char)
+func ConvertToUTID(inPrefix string, inUnixSecs int64, inID []byte) string {
+    var raw [30]byte
+
+	binary.BigEndian.PutUint64(raw[0:8], uint64(inUnixSecs))
+
+    // Use right-most bytes
+	overhang := 22 - len(inID)
+	if overhang < 0 {
+		copy(raw[8:], inID[-overhang:])
+	} else {
+		copy(raw[8+overhang:], inID)
+	}
+
+    prefixLen := len(inPrefix)
+    var out [64]byte
+    if prefixLen > 0 {
+        if prefixLen > 64-48 {
+            prefixLen = 16
+        }
+        copy(out[:prefixLen], []byte(inPrefix))
+    }
+
+	Base64.Encode(out[prefixLen:], raw[:])
+	return string(out[:prefixLen+48])
+}
+
+
+
+// Deposit deposits the given transfer into this account
+func (acct *StorageAccount) Deposit(xfer *Transfer) *plan.Perror {
+
+    switch xfer.Currency {
+        case Currency_Gas:
+            acct.GasBalance += xfer.Amount
+        case Currency_CommunityFiat:
+            acct.FiatBalance += xfer.Amount
+    }
+
+    return nil
+}
+
+
+// Withdraw subtracts the given transfer amount from this account
+func (acct *StorageAccount) Withdraw(xfer *Transfer) *plan.Perror {
+
+    switch xfer.Currency {
+        case Currency_Gas:
+            if acct.GasBalance < xfer.Amount {
+                return plan.Error(nil, plan.TransferFailed, "insufficient gas for transfer")
+            }
+            acct.GasBalance -= xfer.Amount
+        case Currency_CommunityFiat:
+            if acct.FiatBalance < xfer.Amount {
+                return plan.Error(nil, plan.TransferFailed, "insufficient fiat for transfer")
+            }
+            acct.FiatBalance -= xfer.Amount
+    }
+
+    return nil
+}
+
+
+
+
+
+
+/*
+type UTIDComparator struct {
+    decode
+    matchTime       int64           
+    matchID         [17]
+}
+
+func (comp UTIDComparator) Reset(inUTID string) *plan.Error {
+
+
+	dbuf := make([]byte, enc.DecodedLen(len(s)))
+	n, err := enc.Decode(comp., []byte(inUTID))
+	return dbuf[:n], err
+
+    Base64.DecodeString(inUTID)
+
+    len := len(inUTID)
+
+}
+
+func IsUTID(UTID_a, UTID_b string) int {
+
+}
+// CompareUTID returns 0 if equal, -1 or 1 bas
+func CompareUTID(UTID_A, UTID_B string) int {
+    if len(UTID_A) == len(UTID_B) {
+
+    }
+
+// The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
+
+
+}
+*/
