@@ -51,12 +51,12 @@ type TxnEncoder interface {
     ) *plan.Perror
 
     // EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
-    // Pre: ResetSession() must be successfully called.
+    // Pre: ResetSession() *and* ResetAuthorID() must be successfully called.
     EncodeToTxns(
         inPayload      []byte, 
         inPayloadName  []byte,
         inPayloadCodec PayloadCodec, 
-        inTransfers    []Transfer, 
+        inTransfers    []*Transfer, 
     ) ([]*Txn, *plan.Perror)
 
 
@@ -86,6 +86,10 @@ type TxnDecoder interface {
 
 
 }
+
+
+
+
 
 
 

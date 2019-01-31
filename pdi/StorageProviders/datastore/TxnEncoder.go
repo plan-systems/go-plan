@@ -38,7 +38,7 @@ type dsEncoder struct {
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
     inSegmentMaxSz int,
-) (pdi.TxnEncoder, error) {
+) (pdi.TxnEncoder, *plan.Perror) {
 
     defaultKit, _ := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
 
@@ -154,7 +154,7 @@ func (enc *dsEncoder) EncodeToTxns(
     inPayload      []byte, 
     inPayloadLabel []byte,
     inPayloadCodec pdi.PayloadCodec, 
-    inTransfers    []pdi.Transfer, 
+    inTransfers    []*pdi.Transfer, 
 ) ([]*pdi.Txn, *plan.Perror) {
 
     {
@@ -206,11 +206,15 @@ func (enc *dsEncoder) EncodeToTxns(
                 SegInfo: segs[i].SegInfo,
                 From: &enc.author,
                 TimeSealed: timeSealed,
+                Transfers: inTransfers,
                 HashKitId: hashKit.HashKitID,
             }
             
             // Add extra for length signature and len bytes
-            rawTxn := make([]byte, 500 + txnInfo.Size() + segSz)
+            rawTxn := make([]byte, 500 + txnInfo.Size() + segSz + len(inTransfers) * 200)
+
+            // Only put the transfers in the first txnInfo.
+            inTransfers = nil 
 
             // 1) Append the TxnInfo
             txnLen, merr := txnInfo.MarshalTo(rawTxn[2:])
