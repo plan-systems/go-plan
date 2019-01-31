@@ -205,7 +205,7 @@ type SessionTool struct {
 
 // NewSessionTool creates a new tool for helping manage a SKI session.
 func NewSessionTool(
-    inInvocationStr string, 
+    inProvider Provider,
     inUserName string,
     inCommunityID []byte,   // if len()==0, it will be auto-generated
 ) (*SessionTool, *plan.Perror) {
@@ -226,10 +226,10 @@ func NewSessionTool(
     if err != nil {
         return nil, err
     }
-
-    st.Session, err = StartSession(SessionParams{
+    
+    st.Session, err = inProvider.StartSession(SessionParams{
         Invocation: plan.Block{
-            Label: inInvocationStr,
+            Label: inProvider.InvocationStr(),
         },
         BaseDir: path,
     })
