@@ -1,5 +1,5 @@
-// Package filesys implements ski.Provider for keys stored on the local file system (via encrypted file)
-package filesys
+// Package hive implements ski.Provider for keys stored on the local file system (via encrypted file)
+package hive
 
 import (
     //"encoding/json"
@@ -14,52 +14,43 @@ import (
 
 	"github.com/plan-systems/go-plan/ski"
 	"github.com/plan-systems/go-plan/plan"
-    
+
+    // CryptoKits always available
+	_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 )
 
 
 const (
 
-    // ProviderInvocation should be passed for inInvocation when calling SKI.fileRepo.StartSession()
-    providerInvocation = "/plan/ski/Provider/filesys/1"
+    // ProviderInvocation should be passed for inInvocation when calling SKI.provider.StartSession()
+    providerInvocation = "/plan/ski/Provider/hive/1"
 )
 
 
 
-var (
 
-    // Provider is the primary "entry" point
-    Provider = newfileRepo()
-)
+// Provider is a local implemention of ski.Provider
+type Provider struct {
+    ski.Provider
 
-
-func init() {
-    ski.RegisterProvider(Provider)
+    sessions            []*Session
 }
 
+// NewProvider creates a new hive Provider (a ski.Provider implemented via a file in the OS)
+func NewProvider() *Provider {
 
-
-
-// fileRepo is a local implemention of SKI.Provider
-type fileRepo struct {
-    sessions            []*fsSession
-}
-
-
-func newfileRepo() *fileRepo {
-
-    var provider = &fileRepo{
-        nil,
+    var provider = &Provider{
+        sessions: nil,
     }
 
     return provider
 }
 
 // NewSession initializes the SKI's keyring.
-func (provider *fileRepo) NewSession(
+func (provider *Provider) NewSession(
     inPB ski.SessionParams,
-) *fsSession {
-	session := &fsSession{
+) *Session {
+	session := &Session{
         parentProvider: provider,
         Params: inPB,
         nextAutoSave: time.Now(),
@@ -71,13 +62,13 @@ func (provider *fileRepo) NewSession(
 }
 
     
-
-func (provider *fileRepo) InvocationStr() string {
+// InvocationStr -- see interface ski.Provider
+func (provider *Provider) InvocationStr() string {
     return providerInvocation
 }
 
 // StartSession starts a new SKI session
-func (provider *fileRepo) StartSession(
+func (provider *Provider) StartSession(
     inPB ski.SessionParams,
 ) (ski.Session, *plan.Perror) {
 
@@ -111,8 +102,8 @@ func (provider *fileRepo) StartSession(
 
 
 
-
-func (provider *fileRepo) EndSession(inSession *fsSession, inReason string) *plan.Perror {
+// EndSession -- see interface ski.Provider
+func (provider *Provider) EndSession(inSession *Session, inReason string) *plan.Perror {
     for i, session := range provider.sessions {
         if session == inSession {
             n := len(provider.sessions)-1
@@ -135,12 +126,14 @@ const (
 )
 */
 
-// fsSession represents a local implementation of the SKI
-type fsSession struct {
+// Session represents a local implementation of the SKI
+type Session struct {
+    ski.Session
+
     autoSaveMutex       sync.Mutex
 
     // TODO: put in mutex!?
-    parentProvider      *fileRepo
+    parentProvider      *Provider
     Params              ski.SessionParams
     nextAutoSave        time.Time
     //fsStatus            fsStatus
@@ -155,7 +148,7 @@ type fsSession struct {
 
 
 
-func (session *fsSession) dbPathname() string {
+func (session *Session) dbPathname() string {
     /*
     fsNameEncoding := base64.RawURLEncoding
 
@@ -174,7 +167,7 @@ func (session *fsSession) dbPathname() string {
 
 
 
-func (session *fsSession) loadFromFile() *plan.Perror {
+func (session *Session) loadFromFile() *plan.Perror {
 
     session.autoSaveMutex.Lock()
     defer session.autoSaveMutex.Unlock()
@@ -218,7 +211,7 @@ func (session *fsSession) loadFromFile() *plan.Perror {
 
 
 
-func (session *fsSession) saveToFile() *plan.Perror {
+func (session *Session) saveToFile() *plan.Perror {
 
     session.autoSaveMutex.Lock()
     defer session.autoSaveMutex.Unlock()
@@ -249,7 +242,7 @@ func (session *fsSession) saveToFile() *plan.Perror {
 }
 
 
-func (session *fsSession) resetAutoSave() {
+func (session *Session) resetAutoSave() {
 
     // When we save out successfully, stop the autosave gor outine
     {
@@ -264,8 +257,8 @@ func (session *fsSession) resetAutoSave() {
 
 
 
-// EndSession ends this SKI session
-func (session *fsSession) EndSession(inReason string, inOnCompletion plan.Action) {
+// EndSession -- see ski.Session
+func (session *Session) EndSession(inReason string, inOnCompletion plan.Action) {
     err := session.parentProvider.EndSession(session, inReason)
 
     session.saveToFile()
@@ -274,7 +267,7 @@ func (session *fsSession) EndSession(inReason string, inOnCompletion plan.Action
     return
 }
 
-func (session *fsSession) CheckOpParamsAndPermissions(
+func (session *Session) checkOpParamsAndPermissions(
     inArgs *ski.OpArgs,
     ) *plan.Perror {
 
@@ -311,9 +304,11 @@ func (session *fsSession) CheckOpParamsAndPermissions(
     return nil
 }
 
-func (session *fsSession) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
 
-    err := session.CheckOpParamsAndPermissions(&inArgs)
+// DispatchOp -- see ski.Session
+func (session *Session) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
+
+    err := session.checkOpParamsAndPermissions(&inArgs)
     if err != nil {
         inOnCompletion(nil, err)
         return
@@ -336,7 +331,7 @@ func (session *fsSession) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCom
     plan.Assert(keyringSet != nil, "expected keyringSet for non-nil error!")
 
     logE := log.WithFields(log.Fields{ 
-        "desc": "ski.Provider.filesys.DispatchOp()",
+        "desc": "ski.Provider.hive.DispatchOp()",
         "OpName": inArgs.OpName,
     })
     logE.Trace( "doOp()" )
