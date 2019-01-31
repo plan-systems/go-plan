@@ -243,7 +243,7 @@ func (group *SessionGroup) NewSession(
     return session
 }
 
-
+// InsertSession inserts the given session into this SessionGroup -- THREADSAFE
 func (group *SessionGroup) InsertSession(inSession *ClientSession) {
 
     inSession.PrevActivityTime = plan.Now()
@@ -254,6 +254,7 @@ func (group *SessionGroup) InsertSession(inSession *ClientSession) {
 
 }
 
+// EndSession removes the given session from this SessionGroup -- THREADSAFE
 func (group *SessionGroup) EndSession(inSessionToken string, inReason string) {
 
     group.Lock()
@@ -269,8 +270,8 @@ func (group *SessionGroup) EndSession(inSessionToken string, inReason string) {
 
 }
 
-
-func (group *SessionGroup) EndInactiveSessions( inExpiration plan.Time ) {
+// EndInactiveSessions removes alls sessions inactive longer than the given time index -- THREADSAFE
+func (group *SessionGroup) EndInactiveSessions(inExpiration plan.Time) {
 
     var expired []*ClientSession
 
@@ -297,7 +298,7 @@ func (group *SessionGroup) EndInactiveSessions( inExpiration plan.Time ) {
     }
 }
 
-
+// EndAllSessions ends all sessions
 func (group *SessionGroup) EndAllSessions(inReason string) {
 
     group.Lock()
