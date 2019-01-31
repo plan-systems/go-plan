@@ -43,7 +43,7 @@ func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *
 	return &Perror{
 		Status{
             inCode,
-            fmt.Sprintf(inFormat, inArgs),
+            fmt.Sprintf(inFormat, inArgs...),
             nil,
         },
 		inErr,
@@ -105,6 +105,9 @@ const (
     // Unimplemented means flow hit a point requiring deeper implementation
     Unimplemented
 
+    // FileSysError means an unexpected file sys error occured
+    FileSysError
+
 	/*****************************************************
 	** PDI
 	**/
@@ -151,11 +154,7 @@ const (
 	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
 	TargetChannelEpochExpired
 
-    // StorageImplNotFound means the requested storage impl is not available, etc.
-    StorageImplNotFound
 
-    // TxnPartsMissing means one or more required txn parts are not present
-    TxnPartsMissing
 
     /*****************************************************
 	** SKI / Security
@@ -255,14 +254,33 @@ const (
 	// FailedToLoadDatabase means an error was encountered when creating or loading the database
 	FailedToLoadDatabase
 
-	// FailedToCommitTxn means an unexpected fatal error occurred while committing one ore more StorageTxns
+	// FailedToCommitTxn means an unexpected fatal error occurred while committing one ore more txns
 	FailedToCommitTxn
 
-    // FailedToUnmarshalTxn means a StorageTxn failed to Unmarshal
-    FailedToUnmarshalTxn
+    // IncompatibleStorage means the given TxnEncoder desc string reflects that the SP and client are incompatible
+    IncompatibleStorage
 
-    // SessionNotReady means the given StorageSession is not ready/open/started
-    SessionNotReady
+    // EncoderSessionNotReady means that TxnEncoder.ResetSession() has either not yet been called or the SKI session associated with it has closed.
+    EncoderSessionNotReady
+
+    // StorageImplNotFound means the requested storage impl is not available, etc.
+    StorageImplNotFound
+
+    // TxnPartsMissing means one or more required txn parts are not present
+    TxnPartsMissing
+
+    // AccountNotAvailable means the StorageProvider failed to find the account associated w/ the txn's "from" public key (or is damaged)
+    AccountNotAvailable
+
+    // InsufficientGas means the sender does not have a balance with sufficient gas to commit the txn
+    InsufficientGas
+
+    // TransferFailed means the gas/fiat transfer failed (e.g. insufficient funds)
+    TransferFailed
+
+    // StorageNotReady means a problem occurred at the storage level
+    StorageNotReady
+
 
 	/*****************************************************
 	** Network
