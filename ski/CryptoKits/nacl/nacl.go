@@ -88,11 +88,11 @@ var CryptoKit = ski.CryptoKit{
             }
 
             default:
-                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %d}", ioEntry.KeyType)
+                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %v}", ioEntry.KeyType)
         }
 
         if err != nil {
-            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %d}", ioEntry.KeyType)
+            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %v}", ioEntry.KeyType)
         }
 
         return nil
@@ -109,7 +109,7 @@ var CryptoKit = ski.CryptoKit{
     ) ([]byte, *plan.Perror) {
 
         if len(inKey) != 32 {
-            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", 32, len(inKey))
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key size, want %v, got %v", 32, len(inKey))
         }
 
         var salt [24]byte
@@ -163,11 +163,11 @@ var CryptoKit = ski.CryptoKit{
     ) ([]byte, *plan.Perror) {
 
         if len(inPeerPubKey) != 32 {
-            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected peer pub key length, want %d, got %s", 32, len(inPeerPubKey))
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected peer pub key length, want %v, got %v", 32, len(inPeerPubKey))
         }
 
         if len(inPrivKey) != 32 {
-            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected private key length, want %d, got %s", 32, len(inPrivKey))
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected private key length, want %v got %v", 32, len(inPrivKey))
         }
 
         var salt [24]byte
@@ -221,7 +221,7 @@ var CryptoKit = ski.CryptoKit{
     ) ([]byte, *plan.Perror) {
 
         if len(inSignerPrivKey) != 64 {
-            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key length, want %d, got %s", 64, len(inSignerPrivKey))
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected sign key size, want %v, got %v", 64, len(inSignerPrivKey))
         }
 
         var privKey [64]byte
