@@ -3,6 +3,7 @@ package ski
 
 import (
 	"github.com/plan-systems/go-plan/plan"
+
 )
 
 // NumKeyDomains is the number of possible ski.KeyDomain values (increment the last enum)
@@ -11,18 +12,6 @@ const NumKeyDomains = KeyDomain_PERSONAL + 1
 /*****************************************************
 ** ski.Session
 **/
-
-// Signer is a lambda-lifted interface for arbitrary signing of digests
-type Signer interface {
-
-    // Signs the given digest and calls the completion proc with the sig (or an error)
-    Sign( 
-        inSigner       *PubKey,
-        inDigest       []byte,
-        inOnCompletion func(inSig []byte, inErr *plan.Perror),
-    )
-}
-
 
 
 // Session provides lambda-lifted crypto services from an opaque service provider.
@@ -66,16 +55,17 @@ type Provider interface {
 ** ski.InvokeProvider()
 **/
 
+/*
 // ProviderRegistry maps provider names to implementations
 var gProviderRegistry = map[string]Provider{}
 
 // RegisterProvider registers the given provider so it can be invoked via ski.StartSession()
 func RegisterProvider(inProvider Provider) error {
-	istr := inProvider.InvocationStr()
-	if gProviderRegistry[istr] != nil {
-		return plan.Errorf(nil, plan.InvocationAlreadyExists, "the ski invocation %s already exists", istr)
+	invoke := inProvider.InvocationStr()
+	if gProviderRegistry[invoke] != nil {
+		return plan.Errorf(nil, plan.InvocationAlreadyExists, "the ski invocation %s already exists", invoke)
 	}
-	gProviderRegistry[istr] = inProvider
+	gProviderRegistry[invoke] = inProvider
 	return nil
 }
 
@@ -93,6 +83,7 @@ func StartSession(
 
 	return session, err
 }
+*/
 
 /*****************************************************
 ** ski.Provider AccessScopes
