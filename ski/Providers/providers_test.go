@@ -22,7 +22,6 @@ var gTesting *testing.T
 var gCommunityID = [4]byte{0, 1, 2, 3}
 
 
-
 func TestFileSysSKI(t *testing.T) {
 
     gTesting = t
@@ -48,9 +47,7 @@ func TestFileSysSKI(t *testing.T) {
         B.EndSession("done B")
     }
 
-
 }
-
 
 
 

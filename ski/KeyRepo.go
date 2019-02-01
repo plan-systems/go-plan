@@ -311,7 +311,7 @@ func (krSet *KeyringSet) GetKeyring(
 /*
 func SerializeKeysAsBundle(
     inKeys []*KeyEntry,
-) ([]byte, *plan.Err) {
+) ([]byte, error) {
 
     bundle := KeyBundle{
         Keys: inKeys
@@ -412,7 +412,7 @@ func (kr *Keyring) ExportKeys(
 // MergeKeys adds a key to the keychain (ignoring collitions if the key entry is identical)
 func (kr *Keyring) MergeKeys(
     inKeyList KeyList,
-    ) *plan.Err {
+    ) error {
 
     var collisions []*KeyEntry
     var keyID plan.KeyID
@@ -429,7 +429,7 @@ func (kr *Keyring) MergeKeys(
     }
     kr.Unlock()
 
-    var err *plan.Err
+    var err error
 
     if len(collisions) > 0 {
         err = plan.Errorf(nil, plan.KeyIDCollision, "key ID collision while adding keys {keyID:%v}", collisions)
