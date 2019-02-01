@@ -4,7 +4,6 @@ package main
 
 import (
 
-    "fmt"
     "os"
     "path"
     "io/ioutil"
@@ -22,7 +21,11 @@ import (
 
     //"github.com/tidwall/redcon"
 
+    //"github.com/plan-systems/go-plan/ski"
     "github.com/plan-systems/go-plan/plan"
+    "github.com/plan-systems/go-plan/pdi"
+    "github.com/plan-systems/go-plan/pservice"
+
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
     //github.com/plan-systems/go-plan/ski"
     _ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
@@ -40,8 +43,6 @@ import (
     "github.com/ethereum/go-ethereum/common/hexutil"
 
 
-    "github.com/plan-systems/go-plan/pdi"
-    "github.com/plan-systems/go-plan/pservice"
 
     //"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -149,6 +150,23 @@ func (config *Config) ReadFromFile(inPathname string) error {
     return err
 }
 
+/*
+func (config *Config) ReadFromFile(inPathname string) *plan.Perr {
+    buf, err := ioutil.ReadFile(inPathname)
+    if err != nil {
+        return plan.Errorf(err, plan.ConfigNotRead, "error reading Snode config file %v", inPathname)
+    }
+
+    err = json.Unmarshal(buf, config)
+    if err != nil {
+        return plan.Errorf(err, plan.ConfigNotRead, "error unmarshalling Snode config file %v", inPathname)
+    }
+
+    return err
+}
+
+*/
+
 
 // WriteToFile attempts to save node config info to the given pathname.
 func (config *Config) WriteToFile(inPathname string) error {
@@ -188,6 +206,9 @@ func NewSnode(inBasePath *string) *Snode {
 
     if err == nil {
         err = os.MkdirAll(sn.BasePath, plan.DefaultFileMode)
+        if err != nil {
+            err = plan.Errorf(err, plan.FailedToAccessPath, "failed to setup Snode.BasePath %v", sn.BasePath)
+        }
     }
 
     if err != nil {
@@ -202,7 +223,7 @@ func NewSnode(inBasePath *string) *Snode {
 func (sn *Snode) ReadConfig(inInit bool) error {
 
     pathname := path.Join(sn.BasePath, ConfigFilename)
-
+ 
     err := sn.Config.ReadFromFile(pathname)
     if err != nil {
         if os.IsNotExist(err) {
@@ -229,36 +250,59 @@ func (sn *Snode) WriteConfig() error {
 
     err := sn.Config.WriteToFile(pathname)
     if err != nil {
-        log.WithError(err).Info("Failed to write config %s", pathname)
+        return plan.Errorf(err, plan.FailedToAccessPath, "Failed to write Snode config %s", pathname)
     }
 
-    return err
+    return nil
 }
 
 
 // CreateNewStore creates a new data store and adds it to this nodes list of stores (and updates the config on disk)
-func (sn *Snode) CreateNewStore(inConfig *ds.StorageConfig) error {
+func (sn *Snode) CreateNewStore(
+    inConfig *ds.StorageConfig,
+    inDeposits []*pdi.Transfer,
+) error {
+    
     var err error
 
-    if path.IsAbs(inInfo.HomePath) {
+    // Prep the db path
+    {
+        if path.IsAbs(inConfig.HomePath) {
 
-        if _, err := os.Stat(inInfo.HomePath); ! os.IsNotExist(err) {
-            return fmt.Errorf("for safety, the path '%s' must not already exist", inInfo.HomePath)
+            if _, err := os.Stat(inConfig.HomePath); ! os.IsNotExist(err) {
+                return plan.Errorf(nil, plan.FailedToAccessPath, "for safety, the path '%s' must not already exist", inConfig.HomePath)
+            }
+
+            err = os.MkdirAll(inConfig.HomePath, sn.Config.DefaultFileMode)
+
+        } else {
+
+            pathname := path.Join(sn.BasePath, inConfig.HomePath)
+            err = os.Mkdir(pathname, sn.Config.DefaultFileMode)
         }
 
-        err = os.MkdirAll(inInfo.HomePath, sn.Config.DefaultFileMode)
-
-    } else {
-
-        pathname := path.Join(sn.BasePath, inInfo.HomePath)
-        err = os.Mkdir(pathname, sn.Config.DefaultFileMode)
+        if err != nil {
+            return plan.Errorf(err, plan.FailedToAccessPath, "could not create the new storage path %s", inConfig.HomePath)
+        }
     }
 
-    if err != nil {
+    St := ds.NewStore(inConfig, sn.BasePath)
+    if err = St.Startup(true); err != nil {
         return err
     }
 
-    sn.Config.Stores = append(sn.Config.Stores, *inInfo)
+    if err = St.DepositTransfers(inDeposits); err != nil {
+        return err
+    }
+    
+    sn.Config.StorageConfigs = append(sn.Config.StorageConfigs, *inConfig)
+
+    if err = sn.WriteConfig(); err != nil {
+        return err
+    }
+
+    // Register the new store so it will be shutdown properly
+    sn.registerStore(St)
 
     return nil
 }
@@ -266,8 +310,8 @@ func (sn *Snode) CreateNewStore(inConfig *ds.StorageConfig) error {
 // Startup should be called after ReadConfig() and any desired calls to CreateStore()
 func (sn *Snode) Startup() error {
 
-    for i := range sn.Config.Stores {
-        info := &sn.Config.Stores[i]
+    for i := range sn.Config.StorageConfigs {
+        info := &sn.Config.StorageConfigs[i]
         
         St := ds.NewStore(info, sn.BasePath)
 
@@ -275,7 +319,7 @@ func (sn *Snode) Startup() error {
     }
 
     for _, St := range sn.Stores {
-        err := St.OnServiceStarting()
+        err := St.Startup(false)
         if err != nil {
             return err
         }
@@ -288,7 +332,7 @@ func (sn *Snode) Startup() error {
 
 func (sn *Snode) registerStore(St *ds.Store) {
 
-    communityID := plan.GetCommunityID(St.Info.CommunityID)
+    communityID := plan.GetCommunityID(St.Config.Epoch.CommunityID)
     //var communityID plan.CommunityID
     //copy(communityID[:], CS.Info.CommunityID)
 
@@ -337,10 +381,10 @@ func (sn *Snode) Shutdown() {
 
     if sn.grpcServer != nil {
         sn.grpcServer.GracefulStop()
-    }
 
-    log.Info("Waiting on server")
-    <- sn.grpcDone
+        log.Info("Waiting on server")
+        <- sn.grpcDone
+    }
 
     group := sync.WaitGroup{}
     group.Add(len(sn.Stores))
@@ -461,7 +505,7 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
     time.Sleep(60 * time.Second)   */
 
     msg := &pdi.StorageSession{
-        RequiredAgent: St.Agent.AgentStr(),
+        TxnEncoderInvocation: St.TxnDecoder.TxnEncoderInvocation(),
     }
 	return msg, nil
 }
@@ -476,7 +520,7 @@ func (sn *Snode) Query(inQuery *pdi.QueryTxns, inOutlet pdi.StorageProvider_Quer
     job := &ds.QueryJob{
         QueryTxns: inQuery,
         Outlet:    inOutlet,
-        OnComplete: make(chan *plan.Perror),
+        OnComplete: make(chan error),
     }
 
     St := session.Cookie.(*ds.Store)
@@ -499,7 +543,7 @@ func (sn *Snode) CommitTxn(inTxn *pdi.RawTxn, inOutlet pdi.StorageProvider_Commi
     job := &ds.CommitJob{
         RawTxn:     inTxn,
         Outlet:     inOutlet,
-        OnComplete: make(chan *plan.Perror),
+        OnComplete: make(chan error),
     }
 
     job.Outlet.Send(&txnAwaitingCommit)

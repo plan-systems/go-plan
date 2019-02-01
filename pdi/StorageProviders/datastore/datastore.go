@@ -41,12 +41,12 @@ type StorageConfig struct {
 
 
 /*
-func SupportsStorageType(inParams map[string]string) *plan.Perror {
+func SupportsStorageType(inParams map[string]string) *plan.Err {
 
 }*/
 
 type failedJob struct {
-    Error                       *plan.Perror
+    Error                       *plan.Err
     QueryJob                    *QueryJob
     CommitJob                   *CommitJob
 }
@@ -73,7 +73,7 @@ type Store struct {
     // close when shutting down (polite shutdown)
     shuttingDown                chan *sync.WaitGroup
 
-    txnDecoder                   pdi.TxnDecoder
+    TxnDecoder                   pdi.TxnDecoder
     //stDecoder                   pdi.TxnDecoder
 
     log                         *log.Logger
@@ -94,11 +94,11 @@ type Log struct {
 
 
 
-func (L *Log) LogErr(inErr Perror) {
+func (L *Log) LogErr(inErr Err) {
     log.Error(inErr)
 }
 
-func (L *Log) LogErr(inErr Perror) {
+func (L *Log) LogErr(inErr Err) {
     log.Error(inErr)
 }
 */
@@ -122,7 +122,7 @@ func NewStore(
         //commitScrap: make([]byte, 4000),
     }
 
-    St.txnDecoder = NewTxnDecoder()
+    St.TxnDecoder = NewTxnDecoder()
 
     if path.IsAbs(St.Config.HomePath) {
         St.AbsPath = St.Config.HomePath
@@ -133,21 +133,23 @@ func NewStore(
     return St
 }
 
-// OnServiceStarting should be called once Datastore is preprared and ready to invoke the underlying implementation.
-func (St *Store) OnServiceStarting() error {
+// Startup should be called once Datastore is preprared and ready to invoke the underlying implementation.
+func (St *Store) Startup(inFirstTime bool) error {
 
     logE := log.WithFields(log.Fields{ 
         "impl": St.Config.ImplName,
         "path": St.AbsPath,
     })
-    logE.Info( "OnServiceStarting()" )
+    logE.Info( "Startup()" )
 
     var err error
 
     switch St.Config.ImplName {
         case "badger":
-            badgerDS, err := badger.NewDatastore(St.AbsPath, nil)
-            if err == nil {
+            badgerDS, berr := badger.NewDatastore(St.AbsPath, nil)
+            if berr != nil {
+                err = plan.Error(berr, plan.FailedToLoadDatabase, "badger.NewDatastore() failed")
+            } else {
                 St.ds = badgerDS
                 St.closeDs = func() {
                     badgerDS.Close()
@@ -157,13 +159,11 @@ func (St *Store) OnServiceStarting() error {
             err = plan.Errorf(nil, plan.StorageImplNotFound, "storage implementation for '%s' not found", St.Config.ImplName)
     }
 
-    if err == nil {
-        St.startProcessingJobs()
-    } else {
-        logE := logE.WithError(err)
-        logE.Warn("OnServiceStarting() ERROR")
+    if err != nil {
+        return err
     }
 
+    St.startProcessingJobs()
 
     return err
 }
@@ -193,20 +193,20 @@ func (St *Store) Shutdown(inGroup *sync.WaitGroup) {
 type QueryJob struct {
     QueryTxns *pdi.QueryTxns
     Outlet     pdi.StorageProvider_QueryServer
-    OnComplete chan *plan.Perror
+    OnComplete chan error
 }
 
 // CommitJob represents a pending CommitTxn() call to a StorageProvider
 type CommitJob struct {
     RawTxn    *pdi.RawTxn
     Outlet     pdi.StorageProvider_CommitTxnServer
-    OnComplete chan *plan.Perror
+    OnComplete chan error
 }
 
 
 
 // UTIDKeyForTxn creates a ds.Key based on the transaction's timestamp and hash.UTIDKeyForTxn
-// See comments for TxnInfo.UTID 
+// See comments for ConvertToUTID
 func UTIDKeyForTxn(txnInfo *pdi.TxnInfo) ds.Key {
     key := pdi.ConvertToUTID("/", txnInfo.TimeSealed, txnInfo.TxnHashname)
     return ds.RawKey(key)
@@ -221,23 +221,24 @@ func UTIDKeyForTxn(txnInfo *pdi.TxnInfo) ds.Key {
 func AccountKeyForPubKey(inPubKey *ski.PubKey) ds.Key {
 
     const (
-        maxPubKeyLen = 25       // Arbitrary. As a ref point, BTC and ETH public address size is 20 bytes
+        maxPubKeyLen = 24       // Arbitrary. As a ref point, BTC and ETH public address size is 20 bytes
+        encodedKeyLen = (maxPubKeyLen * 8 + 5) / 6
         prefixLen = 3
     )
 
     pubKey := inPubKey.Base256()
-	overhang := maxPubKeyLen - len(pubKey)
-    if overhang < 0 {
-        pubKey = pubKey[-overhang:]
+	overhang := len(pubKey) - maxPubKeyLen
+    if overhang > 0 {
+        pubKey = pubKey[overhang:]
     }
 
-    var out [maxPubKeyLen+prefixLen]byte
+    var out [encodedKeyLen+prefixLen]byte
     out[0] = '/'
-    out[1] = 'L'
+    out[1] = '@'
     out[2] = '/'
-    copy(out[prefixLen:], pubKey)
+	pdi.Base64.Encode(out[prefixLen:], pubKey)
 
-    finalLen := prefixLen + len(pubKey)
+    finalLen := prefixLen + pdi.Base64.EncodedLen(len(pubKey))
     return ds.RawKey(string(out[:finalLen]))
 }
 
@@ -338,19 +339,24 @@ func (St *Store) updateAccount(
     var (
         creatingNew bool
         acct pdi.StorageAccount
+        err error
     )
 
-    val, err := dsTxn.Get(dsKey)
-    if err == ds.ErrNotFound {
-        err = nil
-    } else if err == nil {
-        if 2 * len(val) < cap(St.commitScrap) {
-            St.commitScrap = make([]byte, 2 * len(val) + 1000)
+    // Load the acct from the db
+    {
+        var val []byte
+        val, err = dsTxn.Get(dsKey)
+        if err == ds.ErrNotFound {
+            err = nil
+            creatingNew = true
+        } else if err == nil {
+            err = acct.Unmarshal(val)
         }
 
-        err = acct.Unmarshal(val)
+        if err != nil {
+            err = plan.Errorf(err, plan.StorageNotReady, "failed to get/unmarshal account %v", dsKey)
+        }
     }
-
 
     if err == nil {
         err = inOp(&acct)
@@ -358,13 +364,17 @@ func (St *Store) updateAccount(
 
     // Write the new acct out
     if err == nil {
-        var n int
-        n, err = acct.MarshalTo(St.commitScrap)
+        var scrap [200]byte
+        acctSz, err := acct.MarshalTo(scrap[:])
+        if err != nil {
+            err = plan.Errorf(err, plan.StorageNotReady, "failed to marshal account %v", dsKey)
+        }
+
         if err == nil {
             if creatingNew {
                 St.log.Infof("Creating account %v to receive deposit", dsKey)
             }
-            err = dsTxn.Put(dsKey, St.commitScrap[:n]) 
+            err = dsTxn.Put(dsKey, scrap[:acctSz]) 
             if err != nil {
                 err = plan.Errorf(err, plan.StorageNotReady, "failed to update acct %v", dsKey)
             }
@@ -429,98 +439,131 @@ func (St *Store) depositTransfers(
 }
 */
 
+// TODO: make txn iterator so that failed Commits() are retried 2-3 times, etc
+func (St *Store) newTxn(readOnly bool) (ds.Txn, error) {
+
+    dsTxn, err := St.ds.NewTransaction(readOnly)
+    if err != nil {
+        return nil, plan.Errorf(err, plan.StorageNotReady, "St.ds.NewTransaction() failed")
+    }
+
+    return dsTxn, nil
+}
+
+
+
+
+// DepositTransfers deposits the given amount to 
+func (St *Store) DepositTransfers(inTransfers []*pdi.Transfer) error {
+
+    if len(inTransfers) == 0 {
+        return nil
+    }
+
+    txn := St.NewTxnHelper()
+
+    for txn.NextAttempt() {
+        var err error
+
+        for _, xfer := range inTransfers {
+            _, err = St.updateAccount(
+                txn.dsTxn,
+                xfer.To,
+                func (ioAcct *pdi.StorageAccount) error {
+                    return ioAcct.Deposit(xfer) 
+                },
+            )
+
+            // Bail if any deposit returns an err
+            if err != nil {
+                break
+            }
+        }
+
+        txn.Finish(err)
+    }
+
+    return txn.FatalErr()
+}
+
+
 func (St *Store) doCommitJob(commitJob *CommitJob) {
 
     commitJob.Outlet.Send(&txnCommitting)
 
     var (
         txnInfo pdi.TxnInfo
-        err error
-        perr *plan.Perror
         dsKey ds.Key
-        dsTxn ds.Txn
     )
 
 
-    err = St.txnDecoder.DecodeRawTxn(
+    err := St.TxnDecoder.DecodeRawTxn(
         commitJob.RawTxn.TxnData,
         &txnInfo,
         nil,
     )
 
     if err == nil {
-        dsTxn, err = St.ds.NewTransaction(false)
-        if err != nil {
-            err = plan.Errorf(err, plan.StorageNotReady, "St.ds.NewTransaction() failed")
-        }
-    }
+        txn := St.NewTxnHelper()
 
-    // Debit the senders account (from gas and any transfers ordered)
-    if err == nil { 
-        gasForTxn := St.Config.Epoch.GasTxnBase + int64(St.Config.Epoch.GasPerKb) * int64( len(commitJob.RawTxn.TxnData) >> 10 )
+        for txn.NextAttempt() {
 
-        dsKey, err = St.updateAccount(
-            dsTxn,
-            txnInfo.From,
-            func (ioAcct *pdi.StorageAccount) error {
+            // Debit the senders account (from gas and any transfers ordered)
+            {
+                gasForTxn := St.Config.Epoch.GasTxnBase + int64(St.Config.Epoch.GasPerKb) * int64( len(commitJob.RawTxn.TxnData) >> 10 )
 
-                // Debit gas needed for txn
-                ioAcct.GasBalance -= gasForTxn
-                if ioAcct.GasBalance < 0 {
-                    return plan.Error(err, plan.InsufficientGas, "txn sender has insufficient gas")
-                }
+                dsKey, err = St.updateAccount(
+                    txn.dsTxn,
+                    txnInfo.From,
+                    func (ioAcct *pdi.StorageAccount) error {
 
-                // Debit explicit transfers
+                        // Debit gas needed for txn
+                        if ioAcct.GasBalance < gasForTxn {
+                            return plan.Error(nil, plan.InsufficientGas, "txn sender has insufficient gas")
+                        }
+
+                        ioAcct.GasBalance -= gasForTxn
+
+                        // Debit explicit transfers
+                        for _, xfer := range txnInfo.Transfers {
+                            err = ioAcct.Withdraw(xfer)
+                            if err != nil {
+                                return err
+                            }
+                        }
+
+                        return nil
+                    },
+                )
+            }
+
+            // Deposit txn credits to recipients
+            if err == nil {
                 for _, xfer := range txnInfo.Transfers {
-                    if xfer.Amount < 0 {
-                        return plan.Errorf(err, plan.TransferFailed, "illegal transfer amount(s)")
-                    }
-                    
-                    err = ioAcct.Withdraw(xfer)
-                    if err != nil {
-                        return err
-                    }
+                    _, err = St.updateAccount(
+                        txn.dsTxn,
+                        xfer.To,
+                        func (ioAcct *pdi.StorageAccount) error {
+                            return ioAcct.Deposit(xfer)
+                        },
+                    )
                 }
-
-                return nil
-            },
-        )
-    }
-
-    // Finish primary txn
-    if err == nil {
-            
-        // Transfer credits
-        for _, xfer := range txnInfo.Transfers {
-            _, err = St.updateAccount(
-                dsTxn,
-                xfer.To,
-                func (ioAcct *pdi.StorageAccount) error {
-                    return ioAcct.Deposit(xfer)
-                },
-            )
-        }
-
-        // Finally, write the raw txn
-        if err == nil {
-            key := UTIDKeyForTxn(&txnInfo)
-            err = dsTxn.Put(key, commitJob.RawTxn.TxnData)
-            if err != nil {
-                err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
             }
-        }
 
-        if err == nil {
-            err = dsTxn.Commit()
-            if err != nil {
-                err = plan.Error(err, plan.StorageNotReady, "ds.Txn.Commit() failed")
+            // Write the raw txn
+            if err == nil {
+                key := UTIDKeyForTxn(&txnInfo)
+                err := txn.dsTxn.Put(key, commitJob.RawTxn.TxnData)
+                if err != nil {
+                    err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
+                }
             }
-        } else {
-            // TODO: what causes a txn to gfo stale or fail?   Should we repeat?
-            dsTxn.Discard()
-        }
-    }
 
+            txn.Finish(err)
+        }
+
+        err = txn.FatalErr()
+    }
 
 
     if err == nil {
@@ -529,9 +572,10 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
         commitJob.Outlet.Send(&txnFinalized)
 
     } else {
-        perr, _ := err.(*plan.Perror)
+
+        perr, _ := err.(*plan.Err)
         if perr == nil {
-            perr = plan.Error(err, plan.FailedToCommitTxn, "failed to commit job")
+            perr = plan.Error(err, plan.FailedToCommitTxn, "txn commit failed")
         }
 
         St.log.WithFields(log.Fields{
@@ -554,13 +598,13 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
     }
 
     // This releases the GRPC handler
-    commitJob.OnComplete <- perr
+    commitJob.OnComplete <- err
 }
 
 
 func (St *Store) doQueryJob(queryJob *QueryJob) {
 
-    var perr *plan.Perror
+    var perr *plan.Err
     if perr != nil {
 
         fj := failedJob{
