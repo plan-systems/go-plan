@@ -41,7 +41,7 @@ func (KR *KeyRepo) Clear() {
 func (KR *KeyRepo) FetchKeyringSet(
     inCommunityID []byte,
     inAutoCreate bool,
-) (*KeyringSet, *plan.Err) {
+) (*KeyringSet, error) {
 
     CID := plan.GetCommunityID(inCommunityID)
  
@@ -73,7 +73,7 @@ func (KR *KeyRepo) FetchKeyringSet(
 
 // Marshal writes out entire state to a given buffer.
 // Warning: the return buffer is not encrypted and contains private key data!
-func (KR *KeyRepo) Marshal() ([]byte, *plan.Err) {
+func (KR *KeyRepo) Marshal() ([]byte, error) {
 
     KR.RLock()
 
@@ -108,9 +108,9 @@ func (KR *KeyRepo) Marshal() ([]byte, *plan.Err) {
         krSet.RUnlock()
     }
 
-    dAtA, merr := keyTome.Marshal()
-    if merr != nil {
-        return nil, plan.Errorf(merr, plan.FailedToMarshal, "Unexpected error marshaing KeyTome")
+    dAtA, err := keyTome.Marshal()
+    if err != nil {
+        return nil, plan.Errorf(err, plan.FailedToMarshal, "Unexpected error marshaing KeyTome")
     }
 
     return dAtA, nil
@@ -118,13 +118,12 @@ func (KR *KeyRepo) Marshal() ([]byte, *plan.Err) {
 
 
 // Unmarshal resets this KeyRepo from the state data written out by Marshal()
-func (KR *KeyRepo) Unmarshal(dAtA []byte) *plan.Err {
+func (KR *KeyRepo) Unmarshal(dAtA []byte) error {
 
     keyTome := KeyTome{}
 
-    merr := keyTome.Unmarshal(dAtA)
-    if merr != nil {
-        return plan.Errorf(merr, plan.FailedToUnmarshal, "Unexpected error unmarshalling KeyTome")
+    if err := keyTome.Unmarshal(dAtA); err != nil {
+        return plan.Errorf(err, plan.FailedToUnmarshal, "Unexpected error unmarshalling KeyTome")
     }
 
     for _, bundle := range keyTome.Bundles {
@@ -161,9 +160,9 @@ type KeyringSet struct {
 // GenerateNewKeys generates the requested keys and adds them to this KeyringSet
 func (krSet *KeyringSet) GenerateNewKeys(
     inKeySpecs []*PubKey,
-) ([]*KeyEntry, *plan.Err) {
+) ([]*KeyEntry, error) {
 
-    var err *plan.Err
+    var err error
     var newKeys []*KeyEntry
 
     for {
@@ -213,9 +212,9 @@ func (krSet *KeyringSet) GenerateNewKeys(
 
 func (krSet *KeyringSet) getKeyEntryInternal(
     inKeySpec *PubKey,
-) (*KeyEntry, *plan.Err) {
+) (*KeyEntry, error) {
 
-    var err *plan.Err
+    var err error
     var keyEntry *KeyEntry
 
     if inKeySpec.KeyDomain < 0 || inKeySpec.KeyDomain > NumKeyDomains {
@@ -272,7 +271,7 @@ func (krSet *KeyringSet) FetchKeys(
 // FetchKey is identical to FetchNamedKeys() except is for only one key.
 func (krSet *KeyringSet) FetchKey(
     inKeySpec *PubKey,
-) (*KeyEntry, *plan.Err) {
+) (*KeyEntry, error) {
 
     krSet.RLock()
     keyEntry, err := krSet.getKeyEntryInternal(inKeySpec)
@@ -286,7 +285,7 @@ func (krSet *KeyringSet) FetchKey(
 // GetKeyring returns an entire KeyDomain
 func (krSet *KeyringSet) GetKeyring(
     inKeyDomain KeyDomain,
-) ([]*KeyEntry, *plan.Err) {
+) ([]*KeyEntry, error) {
 
     if inKeyDomain < 0 || inKeyDomain > NumKeyDomains {
         return nil, plan.Errorf(nil, plan.KeyDomainNotFound, "keyring not found {KeyDomain: %v}", inKeyDomain)

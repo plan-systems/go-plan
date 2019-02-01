@@ -24,7 +24,7 @@ type CryptoKit struct {
 		inRand io.Reader,
 		inRequestedKeyLen int,
 		ioEntry *KeyEntry,
-	) *plan.Err
+	) error
 
 	/*****************************************************
 	** Symmetric encryption
@@ -34,12 +34,12 @@ type CryptoKit struct {
 		inRand io.Reader,
 		inMsg []byte,
 		inKey []byte,
-	) ([]byte, *plan.Err)
+	) ([]byte, error)
 
 	Decrypt func(
 		inMsg []byte,
 		inKey []byte,
-	) ([]byte, *plan.Err)
+	) ([]byte, error)
 
 	/*****************************************************
 	** Asymmetric encryption
@@ -50,13 +50,13 @@ type CryptoKit struct {
 		inMsg []byte,
 		inPeerPubKey []byte,
 		inPrivKey []byte,
-	) ([]byte, *plan.Err)
+	) ([]byte, error)
 
 	DecryptFrom func(
 		inMsg []byte,
 		inPeerPubKey []byte,
 		inPrivKey []byte,
-	) ([]byte, *plan.Err)
+	) ([]byte, error)
 
 	/*****************************************************
 	** Signing & Verification
@@ -65,13 +65,13 @@ type CryptoKit struct {
 	Sign func(
 		inDigest []byte,
 		inSignerPrivKey []byte,
-	) ([]byte, *plan.Err)
+	) ([]byte, error)
 
 	VerifySignature func(
 		inSig []byte,
 		inDigest []byte,
 		inSignerPubKey []byte,
-	) *plan.Err
+	) error
 }
 
 /*****************************************************
@@ -88,9 +88,9 @@ var gCryptoKitRegistry struct {
 // RegisterCryptoKit is convenience fuction that registers the given provider so it can be invoked via ski.StartSession()
 func RegisterCryptoKit(
 	inPkg *CryptoKit,
-) *plan.Err {
+) error {
 
-	var err *plan.Err
+	var err error
 	gCryptoKitRegistry.Lock()
     if gCryptoKitRegistry.Lookup == nil {
         gCryptoKitRegistry.Lookup = map[CryptoKitID]*CryptoKit{} 
@@ -115,7 +115,7 @@ func RegisterCryptoKit(
 // If the associated CryptoKit has not been registered, an error is returned.
 func GetCryptoKit(
 	inCryptoKitID CryptoKitID,
-) (*CryptoKit, *plan.Err) {
+) (*CryptoKit, error) {
 
 	gCryptoKitRegistry.RLock()
     if inCryptoKitID == CryptoKitID_DEFAULT_KIT {
@@ -139,7 +139,7 @@ func VerifySignature(
 	inDigest       []byte,
 	inCryptoKitID  CryptoKitID,
 	inSignerPubKey []byte,
-) *plan.Err {
+) error {
 
 	kit, err := GetCryptoKit(inCryptoKitID)
 	if err != nil {
@@ -161,7 +161,7 @@ func VerifySignatureFrom(
 	inSig    []byte,
 	inDigest []byte,
 	inFrom   *PubKey,
-) *plan.Err {
+) error {
 
     if inFrom == nil {
     	return plan.Errorf(nil, plan.MissingParam, "missing 'from' param")    

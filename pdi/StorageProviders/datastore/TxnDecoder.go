@@ -42,14 +42,12 @@ func NewTxnDecoder() pdi.TxnDecoder {
  }
 
 
-
-
 // DecodeRawTxn -- See TxnDecoder
  func (dec *dsDecoder) DecodeRawTxn(
     rawTxn     []byte, 
     outInfo    *pdi.TxnInfo,
     outSegment *pdi.TxnSegment,
-) *plan.Err {
+) error {
 
     txnLen := len(rawTxn)
     if txnLen < 50 {
@@ -59,9 +57,8 @@ func NewTxnDecoder() pdi.TxnDecoder {
     // 1) Unmarshal the txn info
     var txnInfo pdi.TxnInfo
     pos := 2 + (int(rawTxn[0]) >> 8) + int(rawTxn[1])
-    merr := txnInfo.Unmarshal(rawTxn[2:pos])
-    if merr != nil {
-        return plan.Error(merr, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
+    if err := txnInfo.Unmarshal(rawTxn[2:pos]); err != nil {
+        return plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
     }
     if txnInfo.SegInfo == nil {
         return plan.Error(nil, plan.TxnPartsMissing, "txn is missing segment info")
@@ -100,8 +97,7 @@ func NewTxnDecoder() pdi.TxnDecoder {
     txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
 
     // 6) Verify the sig
-    perr := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, txnInfo.From)
-    if perr != nil {
+    if perr := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, txnInfo.From); perr != nil {
         return perr
     }
 

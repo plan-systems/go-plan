@@ -55,7 +55,7 @@ var CryptoKit = ski.CryptoKit{
         inRand io.Reader,
         inRequestedKeyLen int,
         ioEntry *ski.KeyEntry,
-    ) *plan.Err {
+    ) error {
 
         var err error
 
@@ -68,7 +68,6 @@ var CryptoKit = ski.CryptoKit{
                     ioEntry.PrivKey = make([]byte, 32)
                     _, err = inRand.Read(ioEntry.PrivKey)
                 }
-
             }
         
             case ski.KeyType_ASYMMETRIC_KEY: {
@@ -106,7 +105,7 @@ var CryptoKit = ski.CryptoKit{
         inRand io.Reader, 
         inMsg []byte,
         inKey []byte,
-    ) ([]byte, *plan.Err) {
+    ) ([]byte, error) {
 
         if len(inKey) != 32 {
             return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key size, want %v, got %v", 32, len(inKey))
@@ -130,7 +129,7 @@ var CryptoKit = ski.CryptoKit{
     Decrypt: func(
         inMsg []byte,
         inKey []byte,
-    ) ([]byte, *plan.Err) {
+    ) ([]byte, error) {
 
         var salt [24]byte
         copy(salt[:], inMsg[:24])
@@ -138,7 +137,7 @@ var CryptoKit = ski.CryptoKit{
         var privKey [32]byte
         copy(privKey[:], inKey[:32])
 
-        var err *plan.Err
+        var err error
         msg, ok := secretbox.Open(nil, inMsg[24:], &salt, &privKey)
         if ! ok {
             err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt data")
@@ -160,7 +159,7 @@ var CryptoKit = ski.CryptoKit{
         inMsg []byte,
         inPeerPubKey []byte,
         inPrivKey []byte,
-    ) ([]byte, *plan.Err) {
+    ) ([]byte, error) {
 
         if len(inPeerPubKey) != 32 {
             return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected peer pub key length, want %v, got %v", 32, len(inPeerPubKey))
@@ -190,7 +189,7 @@ var CryptoKit = ski.CryptoKit{
         inMsg []byte,
         inPeerPubKey []byte,
         inPrivKey []byte,
-    ) ([]byte, *plan.Err) {
+    ) ([]byte, error) {
 
         var salt [24]byte
         copy(salt[:], inMsg[:24])
@@ -199,7 +198,7 @@ var CryptoKit = ski.CryptoKit{
         copy(peerPubKey[:], inPeerPubKey[:32])
         copy(privKey[:], inPrivKey[:32])
 
-        var err *plan.Err
+        var err error
         msg, ok := box.Open(nil, inMsg[24:], &salt, &peerPubKey, &privKey)
         if ! ok {
             err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt for peer %v", inPeerPubKey)
@@ -218,7 +217,7 @@ var CryptoKit = ski.CryptoKit{
     Sign: func(
         inDigest []byte,
         inSignerPrivKey []byte,
-    ) ([]byte, *plan.Err) {
+    ) ([]byte, error) {
 
         if len(inSignerPrivKey) != 64 {
             return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected sign key size, want %v, got %v", 64, len(inSignerPrivKey))
@@ -240,7 +239,7 @@ var CryptoKit = ski.CryptoKit{
         inSig []byte,
         inDigest []byte,
         inSignerPubKey []byte,
-    ) *plan.Err {
+    ) error {
 
         // need to re-combine the sig and hash to produce the
         // signed message that Open expects
@@ -253,7 +252,7 @@ var CryptoKit = ski.CryptoKit{
 
         _, ok := sign.Open(nil, signedMsg, &pubKey)
 
-        if !ok {
+        if ! ok {
             return plan.Error(nil, plan.VerifySignatureFailed, "nacl sig verification failed")
         }
                 

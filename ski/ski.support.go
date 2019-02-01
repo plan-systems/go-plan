@@ -55,6 +55,32 @@ func (entry *KeyEntry) GetKeyID() plan.KeyID {
 	return plan.GetKeyID(entry.PubKey)
 }
 
+// CopyToPubKey copies this KeyEntry into the form of a PubKey
+func (entry *KeyEntry) CopyToPubKey() *PubKey {
+
+    return &PubKey{
+        KeyType: entry.KeyType,
+        KeyDomain: entry.KeyDomain,
+        CryptoKitId: entry.CryptoKitId,
+        KeyBase: entry.PubKey,
+        Encoding: 0,
+    }
+}
+
+// CopyFrom copies the fields from the given KeyEntry into this PubKey
+func (pk *PubKey) CopyFrom(entry *KeyEntry) {
+    
+    pk.KeyType = entry.KeyType
+    pk.KeyDomain = entry.KeyDomain
+    pk.CryptoKitId = entry.CryptoKitId
+    pk.Encoding = 0
+    pk.KeyBase = entry.PubKey
+}
+
+
+
+
+
 // Base256 returns the pure binary representation of a key
 func (pk *PubKey) Base256() []byte {
     if pk.Encoding == 0 {
@@ -66,7 +92,7 @@ func (pk *PubKey) Base256() []byte {
 
 
 // NewHashKit returns the requested HashKit.
-func NewHashKit(inID HashKitID) (HashKit, *plan.Err) {
+func NewHashKit(inID HashKitID) (HashKit, error) {
 
     var kit HashKit
 
@@ -104,14 +130,14 @@ func GenerateNewKeys(
     inRand io.Reader,
     inRequestedKeyLen int,
     inKeySpecs []*PubKey,
-) ([]*KeyEntry, *plan.Err) {
+) ([]*KeyEntry, error) {
 
     N :=  len(inKeySpecs)
 
     newKeys := make([]*KeyEntry, N)
 
     var kit *CryptoKit 
-    var err *plan.Err
+    var err error
 
     timeCreated := plan.Now().UnixSecs
 
@@ -152,7 +178,7 @@ func GenerateKeys(
     skiSession Session,
     inCommunityID []byte,
     inKeySpecs []*PubKey,
-    inOnCompletion func(inKeys []*KeyEntry, inErr *plan.Err),
+    inOnCompletion func(inKeys []*KeyEntry, inErr error),
 ) {
 
     skiSession.DispatchOp( OpArgs{
@@ -160,15 +186,15 @@ func GenerateKeys(
             CommunityID: inCommunityID,
             KeySpecs: inKeySpecs,
         }, 
-        func (inResults *plan.Block, err *plan.Err) {
+        func (inResults *plan.Block, err error) {
             var newKeys []*KeyEntry
 
             if err == nil {
                 bundleBuf := inResults.GetContentWithCodec(KeyBundleProtobufCodec, 0)
                 keyBundle := KeyBundle{}
-                merr := keyBundle.Unmarshal(bundleBuf)   
-                if merr != nil {
-                    err = plan.Error(merr, plan.FailedToUnmarshal, "failed to unmarshal KeyBundle from OpGenerateKeys")
+                err = keyBundle.Unmarshal(bundleBuf)   
+                if err != nil {
+                    err = plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal KeyBundle from OpGenerateKeys")
                 } else {
                     newKeys = keyBundle.Keys
 
@@ -196,7 +222,7 @@ type SessionTool struct {
     Session     Session
     CommunityID []byte
 
-    blocker     chan int   
+    blocker     chan error   
 }
 
 
@@ -208,13 +234,13 @@ func NewSessionTool(
     inProvider Provider,
     inUserName string,
     inCommunityID []byte,   // if len()==0, it will be auto-generated
-) (*SessionTool, *plan.Err) {
+) (*SessionTool, error) {
 
 
     st := &SessionTool{
         UserName: inUserName,
         CommunityID: inCommunityID,
-        blocker: make(chan int, 1),
+        blocker: make(chan error, 1),
     }
 
     if len(st.CommunityID) == 0 {
@@ -240,22 +266,22 @@ func NewSessionTool(
 
 
 // DoOp performs the given op, blocking until completion
-func (st *SessionTool) DoOp(inOpArgs OpArgs) (*plan.Block, *plan.Err) {
+func (st *SessionTool) DoOp(inOpArgs OpArgs) (*plan.Block, error) {
 
-    var outErr *plan.Err
     var outResults *plan.Block
 
-    st.Session.DispatchOp(inOpArgs, func(opResults *plan.Block, inErr *plan.Err) {
-        outErr = inErr
-        outResults = opResults
+    st.Session.DispatchOp(
+        inOpArgs, 
+        func(opResults *plan.Block, inErr error) {
+            outResults = opResults
 
-        st.blocker <- 1
-    })
+            st.blocker <- inErr
+        },
+    )
 
-    <- st.blocker
+    err := <- st.blocker
 
-
-    return outResults, outErr
+    return outResults, err
 }
 
 
@@ -279,22 +305,19 @@ func (st *SessionTool) GenerateNewKey(
                 KeyDomain: inKeyDomain,
             },
         },
-        func(inKeys []*KeyEntry, inErr *plan.Err) {
-            if inErr != nil {
-                log.Fatal(inErr)
-            } else {
-                newKey = &PubKey{
-                    KeyDomain: inKeys[0].KeyDomain,
-                    CryptoKitId: inKeys[0].CryptoKitId,
-                    KeyBase: inKeys[0].PubKey,
-                }
+        func(inKeys []*KeyEntry, inErr error) {
+            if inErr == nil {
+                newKey = inKeys[0].CopyToPubKey()
             }
 
-            st.blocker <- 1
+            st.blocker <- inErr
         },
     )
 
-    <- st.blocker
+    err := <- st.blocker
+    if err != nil {
+        log.Fatal(err)
+    }
 
     return newKey
 
@@ -304,13 +327,14 @@ func (st *SessionTool) GenerateNewKey(
 // EndSession ends the current session
 func (st *SessionTool) EndSession(inReason string) {
 
-    st.Session.EndSession(inReason, func(inParam interface{}, inErr *plan.Err) {
-        if inErr != nil {
-            log.Fatal(inErr)
-        }
-        st.blocker <- 1
+    st.Session.EndSession(inReason, func(inParam interface{}, inErr error) {
+        st.blocker <- inErr
     })
 
-    <- st.blocker
+    err := <- st.blocker
+    if err != nil {
+        log.Fatal(err)
+    }
+
 
 }

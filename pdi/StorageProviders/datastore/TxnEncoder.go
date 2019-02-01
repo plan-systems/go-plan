@@ -38,9 +38,12 @@ type dsEncoder struct {
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
     inSegmentMaxSz int,
-) (pdi.TxnEncoder, *plan.Err) {
+) (pdi.TxnEncoder, error) {
 
-    defaultKit, _ := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
+    defaultKit, perr := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
+    if perr != nil {
+        return nil, perr
+    }
 
     enc := &dsEncoder{
         hashKit: defaultKit,
@@ -59,7 +62,7 @@ func (enc *dsEncoder) ResetSession(
     inInvocation  string,
     inSession     ski.Session,
     inCommunityID []byte,
-) *plan.Err {
+) error {
 
     if inInvocation != "" && inInvocation != txnEncoderInvocation1 {
         return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inInvocation, txnEncoderInvocation1)
@@ -75,7 +78,7 @@ func (enc *dsEncoder) ResetSession(
 }
 
 
-func (enc *dsEncoder) checkReady() *plan.Err {
+func (enc *dsEncoder) checkReady() error {
 
     if enc.skiSession == nil {
         return plan.Errorf(nil, plan.EncoderSessionNotReady, "SKI session missing")
@@ -92,10 +95,9 @@ func (enc *dsEncoder) checkReady() *plan.Err {
 
 // GenerateNewAccount -- See TxnEncoder
 func (enc *dsEncoder) GenerateNewAccount(
-) (*ski.PubKey, *plan.Err) {
+) (*ski.PubKey, error) {
 
-    err := enc.checkReady()
-    if err != nil {
+    if err := enc.checkReady(); err != nil {
         return nil, err
     }
 
@@ -115,30 +117,24 @@ func (enc *dsEncoder) GenerateNewAccount(
         },
         func(inKeys []*ski.KeyEntry, inErr *plan.Err) {
             if inErr == nil {
-                newKey = &ski.PubKey{
-                    KeyDomain: inKeys[0].KeyDomain,
-                    CryptoKitId: inKeys[0].CryptoKitId,
-                    KeyBase: inKeys[0].PubKey,
-                }
+                newKey = inKeys[0].CopyToPubKey()
             }
 
             blocker <- inErr
         },
     )
 
-    err = <- blocker
-    if err != nil {
-        return nil, err
+    if perr := <- blocker; perr != nil {
+        return nil, perr
     }
 
     return newKey, nil
-
 }
 
 
 func (enc *dsEncoder) ResetAuthorID(
     inFrom ski.PubKey,
-) *plan.Err {
+) error {
 
     enc.author = inFrom
 
@@ -155,21 +151,18 @@ func (enc *dsEncoder) EncodeToTxns(
     inPayloadLabel []byte,
     inPayloadCodec pdi.PayloadCodec, 
     inTransfers    []*pdi.Transfer, 
-) ([]*pdi.Txn, *plan.Err) {
+) ([]*pdi.Txn, error) {
 
-    {
-        err := enc.checkReady()
-        if err != nil {
-            return nil, err
-        }
+    if err := enc.checkReady(); err != nil {
+        return nil, err
     }
 
     segs, err := pdi.SegmentIntoTxns(
         inPayload,
         inPayloadLabel,
         inPayloadCodec, 
-        enc.SegmentMaxSz)
-
+        enc.SegmentMaxSz,
+    )
     if err != nil {
         return nil, err
     }
@@ -269,7 +262,6 @@ func (enc *dsEncoder) EncodeToTxns(
 
         // Wait for len(txns) number of results before we're done
         signingDone.Wait()
-
     }
 
     if signErr != nil {

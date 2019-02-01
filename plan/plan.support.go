@@ -64,7 +64,7 @@ func GetChannelID(in []byte) ChannelID {
 
 // UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
 // inSubDir can be any relative pathname
-func UseLocalDir(inSubDir string) (string, *Err) {
+func UseLocalDir(inSubDir string) (string, error) {
 	usr, err := user.Current()
 	if err != nil {
         return "", Error(err, FileSysError, "failed to get current user dir")
@@ -133,9 +133,9 @@ type AccountAlloc struct {
 
 // CommunityEpoch contains core params req'd for a community (and StorageProviders for that community) 
 type CommunityEpoch struct {
-    Alloc                   AccountAlloc            `json:"alloc_alloc"`
     CommunityName           string                  `json:"community_name"`
     CommunityID             hexutil.Bytes           `json:"community_id"`
+    GenesisID               hexutil.Bytes           `json:"genesis_id"`
     StartTime               Time                    `json:"start_time"` 
     GasPerKb                int64                   `json:"gas_per_kb"`         
     GasTxnBase              int64                   `json:"gas_txn_base"`       // Txn gas cost := GasTxnBase + GasPerKb * (len(rawTxn) >> 10)

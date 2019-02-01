@@ -70,7 +70,7 @@ func (provider *Provider) InvocationStr() string {
 // StartSession starts a new SKI session
 func (provider *Provider) StartSession(
     inPB ski.SessionParams,
-) (ski.Session, *plan.Err) {
+) (ski.Session, error) {
 
     if inPB.Invocation.Label != provider.InvocationStr() {
         return nil, plan.Errorf(nil, plan.InvocationNotAvailable,  "ski invocation does not match (%s != %s)", inPB.Invocation.Label, provider.InvocationStr())
@@ -89,8 +89,7 @@ func (provider *Provider) StartSession(
         }
     } */
 
-    err := session.loadFromFile()
-    if err != nil {
+    if err := session.loadFromFile(); err != nil {
         return nil, err
     }
 
@@ -102,8 +101,8 @@ func (provider *Provider) StartSession(
 
 
 
-// EndSession -- see interface ski.Provider
-func (provider *Provider) EndSession(inSession *Session, inReason string) *plan.Err {
+// EndSession ends to given session
+func (provider *Provider) EndSession(inSession *Session, inReason string) error {
     for i, session := range provider.sessions {
         if session == inSession {
             n := len(provider.sessions)-1
@@ -167,7 +166,7 @@ func (session *Session) dbPathname() string {
 
 
 
-func (session *Session) loadFromFile() *plan.Err {
+func (session *Session) loadFromFile() error {
 
     session.autoSaveMutex.Lock()
     defer session.autoSaveMutex.Unlock()
@@ -180,17 +179,15 @@ func (session *Session) loadFromFile() *plan.Err {
     if len(pathname) == 0 {
         return nil
     }
-    buf, ferr := ioutil.ReadFile(pathname)
-    if ferr != nil {
+    buf, err := ioutil.ReadFile(pathname)
+    if err != nil {
 
         // If file doesn't exist, don't consider it an error
-        if os.IsNotExist(ferr) {
+        if os.IsNotExist(err) {
             return nil
         }
-        return plan.Errorf(ferr, plan.KeyTomeFailedToLoad, "Failed to load key tome file '%v'", pathname)
+        return plan.Errorf(err, plan.KeyTomeFailedToLoad, "Failed to load key tome file '%v'", pathname)
     }
-
-    var err *plan.Err
 
     // TODO: decrypt file buf!
     {
@@ -211,7 +208,7 @@ func (session *Session) loadFromFile() *plan.Err {
 
 
 
-func (session *Session) saveToFile() *plan.Err {
+func (session *Session) saveToFile() error {
 
     session.autoSaveMutex.Lock()
     defer session.autoSaveMutex.Unlock()
@@ -269,7 +266,7 @@ func (session *Session) EndSession(inReason string, inOnCompletion plan.Action) 
 
 func (session *Session) checkOpParamsAndPermissions(
     inArgs *ski.OpArgs,
-    ) *plan.Err {
+    ) error {
 
     if len(inArgs.CommunityID) < 4 {
         return plan.Errorf(nil, plan.CommunityNotSpecified, "community ID must be specified for SKI op %v", inArgs.OpName)
@@ -375,11 +372,11 @@ func (session *Session) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompl
 func doOp(
     ioKeyringSet *ski.KeyringSet,
     opArgs ski.OpArgs,
-) (*plan.Block, *plan.Err) {
+) (*plan.Block, error) {
 
     outResults := &plan.Block{}
 
-    var err *plan.Err
+    var err error
 
     /*****************************************************
     ** 1) LOAD OP CRYPTO KEY & KIT
@@ -526,7 +523,7 @@ func doOp(
 func exportKeysIntoMsg(
     ioKeyringSet *ski.KeyringSet,
     inKeySpecs []*ski.PubKey,
-) ([]byte, *plan.Err) {
+) ([]byte, error) {
 
     var keysBuf []byte
     {
@@ -568,7 +565,7 @@ func exportKeysIntoMsg(
 func importKeysFromMsg(
     ioKeyringSet *ski.KeyringSet,
     inMsg []byte,
-) *plan.Err {
+) error {
 
     block := plan.Block{}
     err := block.Unmarshal(inMsg)
@@ -598,9 +595,5 @@ func importKeysFromMsg(
 
     return nil
 }
-
-
-
-
 
 

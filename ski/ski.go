@@ -48,7 +48,7 @@ type Provider interface {
 	// StartSession starts a new session SKI.session.  In general, you should only start one session
 	StartSession(
 		inPB SessionParams,
-	) (Session, *plan.Err)
+	) (Session, error)
 }
 
 /*****************************************************
@@ -145,7 +145,7 @@ type OpArgs struct {
 }
 
 // OpCompletionHandler handles the result of a SKI operation
-type OpCompletionHandler func(inResults *plan.Block, inErr *plan.Err)
+type OpCompletionHandler func(inResults *plan.Block, inErr error)
 
 // OpArgs.OpName -- these are the available operations for SKI.Session.DispatchOp()
 // Unless otherwise stated, output from an op is returned in inResults.Content
