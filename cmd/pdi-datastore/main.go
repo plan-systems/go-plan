@@ -2,50 +2,129 @@ package main
 
 
 import (
+	"github.com/plan-systems/go-plan/pdi"
+    "context"
     "flag"
     log "github.com/sirupsen/logrus"
 
-    "bufio"
-    "os"
+    //"bufio"
+    //"os"
+    "crypto/rand"
+    //"time"
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
-    //"github.com/plan-systems/go-plan/plan"
-
+    "github.com/plan-systems/go-plan/plan"
+    "github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/go-plan/ski/Providers/hive"
 )
 
-
-
+var datastores = []string{
+    "badger",
+}
 
 func main() {
 
-    basePath    := flag.String( "datadir",      "",         "Directory for all files associated with this datastore" )
-    init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh datastore" )
-    create      := flag.String( "create",       "",         "Specifies a Datastore implementation to be created" )
+    basePath    := flag.String( "datadir",      "",                 "Directory for all files associated with this datastore" )
+    init        := flag.Bool  ( "init",         false,              "Initializes <datadir> as a fresh datastore" )
+    create      := flag.String( "create",       "",                 "Creates a new store with the given community name" )
+    datastore   := flag.String( "datastore",    datastores[0],      "Specifies a Datastore implementation to be created (e.g. badger)" )
 
     flag.Parse()
+
+    ctx := context.Background()
+    intrh, ctx := plan.SetupInterruptHandler(ctx)
+	defer intrh.Close()
 
     {
         sn := NewSnode(basePath)
 
-        err := sn.ReadConfig(*init)
-        if err != nil {
-            log.WithError(err).Fatalf("failed to read node config")
+        {
+            err := sn.ReadConfig(*init)
+            if err != nil {
+                log.WithError(err).Fatalf("failed to read storage node config")
+            }
         }
 
-        if len(*create) > 0 {
-            info := &ds.StorageInfo{
-                ImplName: *create,
+        switch {
+
+        case *init == true:
+            // No op
+            
+        case len(*create) > 0: {
+
+            if datastore == nil {
+                datastore = &datastores[0]
             }
-            err = sn.CreateNewStore(info)
+            config := &ds.StorageConfig{
+                ImplName: *datastore,
+                Epoch: plan.CommunityEpoch{
+                    CommunityName: *create,
+                    CommunityID: make([]byte, plan.CommunityIDSz),
+                    StartTime: plan.Now(),
+                    GasPerKb: 10,
+                    GasTxnBase: 100,
+                },
+            }
+            rand.Read(config.Epoch.CommunityID)
+
+            config.HomePath = plan.MakeFSFriendly(config.Epoch.CommunityName, config.Epoch.CommunityID[:2])
+
+            // Generate pub/private key of genesis acct
+            var (
+                err error
+                st *ski.SessionTool
+            )
+            st, err = ski.NewSessionTool(
+                hive.NewProvider(),
+                "genesis-admin",
+                config.Epoch.CommunityID,
+            )
+            if err != nil {
+                log.Fatal(err)
+            }
+
+            // Create the admin acct
+            decoder := ds.NewTxnDecoder()
+            encoder, err := ds.NewTxnEncoder(0)
+            err = encoder.ResetSession(
+                decoder.TxnEncoderInvocation(),
+                st.Session,
+                st.CommunityID,
+            )
+            if err != nil {
+                log.Fatal(err)
+            }
+
+            pubKey, err := encoder.GenerateNewAccount()
+            if err != nil {
+                log.Fatal(err)
+            }
+
+            config.Epoch.GenesisID = pubKey.Base256()
+
+            deposits := []*pdi.Transfer{
+                &pdi.Transfer{
+                    To: pubKey,
+                    Gas: 1000,
+                    Fiat: 565,
+                },
+            }
+
+            err = sn.CreateNewStore(config, deposits)
             if err != nil {
                 log.WithError(err).Fatalf("failed to create '%s' datastore", *create)
-            } else {
-                sn.WriteConfig()
             }
-        } else {
 
-            err = sn.Startup()
+            pdi.EntryOp_NEW_CHANNEL_EPOCH
+
+            st.EndSession("donezo")
+            
+        } 
+        
+        default: {
+
+            err := sn.Startup()
             if err != nil {
                 log.WithError(err).Fatalf("failed to startup node")
             }
@@ -54,20 +133,83 @@ func main() {
 
             sn.StartServer()
 
-            log.Print("StartService() COMPLETE")
+            log.Print("RUNNING")
 
-            {   
-                reader := bufio.NewReader(os.Stdin)
-                reader.ReadString('\n')
-
-                //fmt.Printf("Input Char Is : %v", string([]byte(input)[0]))
+            select {
+                case <-ctx.Done():
             }
 
-            sn.Shutdown()
-        }
+        } }
+
+        sn.Shutdown()
     }
 
+    
     log.Print("Ending...")
 }
 
 
+
+
+
+
+/*
+
+type GenesisTool struct {
+    SkiSession      ski.Session
+    TxnDecoder      TxnDecoder
+    TxnEncoder      TxnEncoder
+}
+
+
+func (genesis *GenesisTool) 
+
+
+
+   if true {
+
+        // Generate pub/private key of genesis acct
+        st, err := ski.NewSessionTool(
+            filesys.Provider.InvocationStr(),
+            "genesis-admin",
+            nil,
+        )
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        // Create the admin acct
+        decoder := ds.NewTxnDecoder()
+        encoder, err := ds.NewTxnEncoder(0)
+        err = encoder.ResetSession(
+            decoder.TxnEncoderInvocation(),
+            st.Session,
+            st.CommunityID,
+        )
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        pubKey, err := encoder.GenerateNewAccount()
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        // Create/Write genesis json file. 
+        genesis := plan.CommunityEpoch {
+            
+
+        }
+
+
+        // Create a new storage provider, passing it the genesis json (so it can perform account bootstrapping)
+
+
+        // With a StorageProvider bootstrapped (and the genesis admin acct allocated), bootstrap the community's reserved channels.
+        // To the SP, this just means committing a pile of new txns
+        
+
+        // Transfer power from the genesis acct to the community admins, halt the genesis acct, update the genesis completion time (ensure genesis period is immutable)
+
+    }
+*/
