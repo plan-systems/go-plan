@@ -83,10 +83,10 @@ func NewTxnDecoder() pdi.TxnDecoder {
     // 4) Prep the hasher so we can generate a digest 
     hashKit, ok := dec.hashKits[txnInfo.HashKitId]
     if ! ok {
-        var perr *plan.Err
-        hashKit, perr = ski.NewHashKit(txnInfo.HashKitId)
-        if perr != nil {
-            return perr
+        var err error
+        hashKit, err = ski.NewHashKit(txnInfo.HashKitId)
+        if err != nil {
+            return err
         }
         dec.hashKits[txnInfo.HashKitId] = hashKit
     }
@@ -97,8 +97,8 @@ func NewTxnDecoder() pdi.TxnDecoder {
     txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
 
     // 6) Verify the sig
-    if perr := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, txnInfo.From); perr != nil {
-        return perr
+    if err := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, txnInfo.From); err != nil {
+        return err
     }
 
     if outInfo != nil {

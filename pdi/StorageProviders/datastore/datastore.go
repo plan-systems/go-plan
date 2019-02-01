@@ -40,13 +40,10 @@ type StorageConfig struct {
 }
 
 
-/*
-func SupportsStorageType(inParams map[string]string) *plan.Err {
 
-}*/
 
 type failedJob struct {
-    Error                       *plan.Err
+    Error                       error
     QueryJob                    *QueryJob
     CommitJob                   *CommitJob
 }
@@ -591,7 +588,7 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
         })
 
         fj := failedJob{
-            Error: perr,
+            Error: err,
             CommitJob: commitJob,
         }
         St.FailedJobs <- fj
@@ -604,18 +601,18 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
 
 func (St *Store) doQueryJob(queryJob *QueryJob) {
 
-    var perr *plan.Err
-    if perr != nil {
+    var err error
+    if err != nil {
 
         fj := failedJob{
-            Error: perr,
+            Error: err,
             QueryJob: queryJob,
         }
         St.FailedJobs <- fj
     }
 
     // This releases the GRPC handler
-    queryJob.OnComplete <- perr
+    queryJob.OnComplete <- err
 
 
 }

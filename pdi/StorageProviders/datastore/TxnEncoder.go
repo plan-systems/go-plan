@@ -101,7 +101,7 @@ func (enc *dsEncoder) GenerateNewAccount(
         return nil, err
     }
 
-    blocker := make(chan *plan.Err, 1)
+    blocker := make(chan error, 1)
 
     var newKey *ski.PubKey
 
@@ -115,7 +115,7 @@ func (enc *dsEncoder) GenerateNewAccount(
                 KeyDomain: ski.KeyDomain_PERSONAL,
             },
         },
-        func(inKeys []*ski.KeyEntry, inErr *plan.Err) {
+        func(inKeys []*ski.KeyEntry, inErr error) {
             if inErr == nil {
                 newKey = inKeys[0].CopyToPubKey()
             }
@@ -124,8 +124,8 @@ func (enc *dsEncoder) GenerateNewAccount(
         },
     )
 
-    if perr := <- blocker; perr != nil {
-        return nil, perr
+    if err := <- blocker; err != nil {
+        return nil, err
     }
 
     return newKey, nil
@@ -169,7 +169,7 @@ func (enc *dsEncoder) EncodeToTxns(
 
     txns := make([]*pdi.Txn, len(segs))
 
-    var signErr *plan.Err
+    var signErr error
 
     {
         // Use the same time stamp for the entire batch
@@ -234,7 +234,7 @@ func (enc *dsEncoder) EncodeToTxns(
             signOp.Msg = txnInfo.TxnHashname
             enc.skiSession.DispatchOp( 
                 signOp, 
-                func (inResults *plan.Block, inErr *plan.Err) {
+                func (inResults *plan.Block, inErr error) {
                     if inErr == nil {
                         sig := inResults.Content
                         sigLen := len(sig)

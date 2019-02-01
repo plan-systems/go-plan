@@ -148,7 +148,7 @@ func (group *SessionGroup) Pop() interface{} {
 
 
 // ExtractSessionToken extracts the session_token from the given context
-func ExtractSessionToken(ctx context.Context) (string, *plan.Err) {
+func ExtractSessionToken(ctx context.Context) (string, error) {
 
     md, ok := metadata.FromIncomingContext(ctx)
     if ! ok || md == nil {
@@ -165,7 +165,7 @@ func ExtractSessionToken(ctx context.Context) (string, *plan.Err) {
 
 
 // TransferSessionToken extracts and transfers the session token from the given context and returns a replacement with it appended to the metadata
-func TransferSessionToken(ctx context.Context, md metadata.MD) (context.Context, *plan.Err) {
+func TransferSessionToken(ctx context.Context, md metadata.MD) (context.Context, error) {
 
     if md == nil {
         return nil, plan.Errorf(nil, plan.SessionTokenMissing, "no header/trailer (or %v) found", SessionTokenKey)
@@ -184,7 +184,7 @@ func TransferSessionToken(ctx context.Context, md metadata.MD) (context.Context,
 
 
 // FetchSession extracts the session token string from the context, performs a session lookup, and returns the ClientSession object.
-func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, *plan.Err) {
+func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, error) {
 
     token, err := ExtractSessionToken(ctx)
     if err != nil {

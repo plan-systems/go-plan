@@ -72,7 +72,7 @@ func RegisterProvider(inProvider Provider) error {
 // StartSession returns a provider implementation given an invocation block
 func StartSession(
 	inPB SessionParams,
-) (Session, *plan.Err) {
+) (Session, error) {
 
 	provider := gProviderRegistry[inPB.Invocation.Label]
 	if provider == nil || provider.InvocationStr() != inPB.Invocation.Label {

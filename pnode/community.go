@@ -151,22 +151,11 @@ func NewCommunityRepo(
     return CR
 }
 
-/*
-ws.targetChannel, perr = ws.CR.LockChannelStoreForOp(ws.entryHeader)
-
-func (CR *CommunityRepo) LockChannelStoreForOp(
-    inChannelID []byte,
-    ) (*ChannelStore, *plan.Err) {
-
-*/
-
-
-
 
 func (CR *CommunityRepo) LockChannelStore(
     inChannelID []byte,
     inFlags LoadChannelStoreFlags,
-    ) (*ChannelStore, *plan.Err) {
+    ) (*ChannelStore, error) {
 
 
     channelID := plan.GetChannelID(inChannelID)
@@ -175,7 +164,7 @@ func (CR *CommunityRepo) LockChannelStore(
     CS := CR.loadedChannels.table[channelID]
     CR.loadedChannels.RUnlock()
 
-    var err *plan.Err
+    var err error
     var hasWriteLock bool
 
     if CS == nil {
@@ -219,7 +208,7 @@ func (CR *CommunityRepo) LockChannelStore(
 func (CR *CommunityRepo) LoadChannelStore(
     inChannelID []byte, 
     inCreateNew bool,
-    ) (*ChannelStore, *plan.Err) {
+    ) (*ChannelStore, error) {
 
     CS := new( ChannelStore )
     CS.ChannelID = plan.GetChannelID(inChannelID)
@@ -279,7 +268,7 @@ func (CR *CommunityRepo) LookupMember(
     inMemberID []byte,
     inMemberEpoch plan.MemberEpoch,
     outInfo *pdi.MemberEpoch,
-    ) *plan.Err {
+    ) error {
 
     return nil
 }
@@ -402,7 +391,7 @@ func (CR *CommunityRepo) StartService() error {
                 eip.entryTxnIndex = i
                 eip.parentTxnName = tip.parentTxnName
 
-                eip.processAndMergeEntry(func (inErr *plan.Err) {
+                eip.processAndMergeEntry(func (inErr error) {
                     if inErr != nil {
                         
                         eip.failedEntries = append(eip.failedEntries, failedEntry{
@@ -500,7 +489,7 @@ func (CR *CommunityRepo) RevokeEntry( inHashnames []byte ) {
 
 
 type failedEntry struct {
-    err                     *plan.Err
+    err                     error
     entry                   *pdi.EntryCrypt
     entryTxnIndex           int
     parentTxnName           []byte
@@ -558,7 +547,7 @@ type entryInProcess struct {
 // internal: unpackHeader
 //   decrypts and deserializes a pdi header
 func (eip *entryInProcess) unpackHeader(
-    inOnCompletion func(*plan.Err),
+    inOnCompletion func(error),
     ) {
 
     eip.timeStart = plan.Now()
@@ -580,7 +569,7 @@ func (eip *entryInProcess) unpackHeader(
             Msg: eip.entry.HeaderCrypt,
         }, 
 
-        func(inRespose *plan.Block, inErr *plan.Err) {
+        func(inRespose *plan.Block, inErr error) {
             if inErr != nil {
                 inOnCompletion(inErr)
                 return
@@ -607,7 +596,7 @@ func (eip *entryInProcess) unpackHeader(
 //   note that because permissions are immutable at a point in time, it doesn't matter
 //   when we check permissions if they're changed later -- they'll
 //   always be the same for an entry at a specific point in time.
-func (eip *entryInProcess) validateEntry() *plan.Err {
+func (eip *entryInProcess) validateEntry() error {
 
     if eip.entryHeader.TimeAuthored < eip.CR.Info.TimeCreated.UnixSecs {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp earlier than community creation timestamp")
@@ -616,25 +605,25 @@ func (eip *entryInProcess) validateEntry() *plan.Err {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future")
     }
 
-    perr := eip.CR.LookupMember(eip.entryHeader.AuthorMemberId, plan.MemberEpoch(eip.entryHeader.AuthorMemberEpoch), &eip.authorEpoch)
-    if perr != nil {
-        return perr
+    err := eip.CR.LookupMember(eip.entryHeader.AuthorMemberId, plan.MemberEpoch(eip.entryHeader.AuthorMemberEpoch), &eip.authorEpoch)
+    if err != nil {
+        return err
     }
 
     eip.entryHash = eip.entry.ComputeHash()
 
-    perr = eip.skiSession.VerifySignature( 
+    err = eip.skiSession.VerifySignature( 
         eip.entry.Sig,
         eip.entryHash,
         eip.authorEpoch.PubSigningKey,
     )
 
-    if perr != nil {
+    if err != nil {
         return plan.Error(perr, plan.FailedToProcessPDIHeader, "PDI entry signature verification failed")
     }
 
 
-    err := eip.prepChannelAccess()
+    err = eip.prepChannelAccess()
 
     // At this point, the PDI entry's signature has been verified
     return err
@@ -659,7 +648,7 @@ type entryAccessReqs struct {
 }
 
 
-func (eip *entryInProcess) prepChannelAccess() *plan.Err {
+func (eip *entryInProcess) prepChannelAccess() error {
 
     plan.Assert( eip.targetChFlags == 0 &&  eip.accessChFlags == 0, "channel store lock flags not reset" )
 
@@ -672,10 +661,10 @@ func (eip *entryInProcess) prepChannelAccess() *plan.Err {
     }
 
     // First lock the target channel
-    var perr *plan.Err
-    eip.targetCh, perr = eip.CR.LockChannelStore(eip.entryHeader.ChannelId, targetChFlags)
-    if perr != nil {
-        return perr
+    var err error
+    eip.targetCh, err = eip.CR.LockChannelStore(eip.entryHeader.ChannelId, targetChFlags)
+    if err != nil {
+        return err
     }
 
     // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
@@ -700,9 +689,9 @@ func (eip *entryInProcess) prepChannelAccess() *plan.Err {
     }
 
     // Lookup the latest 
-    eip.accessCh, perr = eip.CR.LockChannelStore(epochMatch.AccessChannelId, accessChFlags)
-    if perr != nil {
-        return perr
+    eip.accessCh, err = eip.CR.LockChannelStore(epochMatch.AccessChannelId, accessChFlags)
+    if prr != nil {
+        return err
     }
 
     // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
@@ -779,7 +768,7 @@ func (eip *entryInProcess) prepChannelAccess() *plan.Err {
 
 
 func (eip *entryInProcess) mergeEntry(
-    inOnCompletion func(*plan.Err),
+    inOnCompletion func(error),
     ) {
 
 
@@ -791,10 +780,10 @@ func (eip *entryInProcess) mergeEntry(
 
 
 func (eip *entryInProcess) processAndMergeEntry( 
-    inOnCompletion func(*plan.Err),
+    inOnCompletion func(error),
     ) {
 
-    eip.unpackHeader( func(inErr *plan.Err) {
+    eip.unpackHeader( func(inErr error) {
         if inErr != nil {
             inOnCompletion(inErr)
         }
