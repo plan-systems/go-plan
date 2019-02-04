@@ -62,8 +62,7 @@ func (entry *KeyEntry) CopyToPubKey() *PubKey {
         KeyType: entry.KeyType,
         KeyDomain: entry.KeyDomain,
         CryptoKitId: entry.CryptoKitId,
-        KeyBase: entry.PubKey,
-        Encoding: 0,
+        Bytes: entry.PubKey,
     }
 }
 
@@ -73,22 +72,10 @@ func (pk *PubKey) CopyFrom(entry *KeyEntry) {
     pk.KeyType = entry.KeyType
     pk.KeyDomain = entry.KeyDomain
     pk.CryptoKitId = entry.CryptoKitId
-    pk.Encoding = 0
-    pk.KeyBase = entry.PubKey
+    pk.Bytes = entry.PubKey
 }
 
 
-
-
-
-// Base256 returns the pure binary representation of a key
-func (pk *PubKey) Base256() []byte {
-    if pk.Encoding == 0 {
-        return pk.KeyBase
-    }
-
-    panic("TODO unimperr")
-}
 
 
 // NewHashKit returns the requested HashKit.

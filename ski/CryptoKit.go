@@ -167,18 +167,11 @@ func VerifySignatureFrom(
     	return plan.Errorf(nil, plan.MissingParam, "missing 'from' param")    
     }
 
-    // TODO: support key base conversion
-    if inFrom.Encoding != 0 {
-    	return plan.Errorf(nil, plan.Unimplemented, "currently only support binary keys")    
-    }
-
-    signerPubKey := inFrom.KeyBase
-
     err := VerifySignature(
         inSig,
         inDigest,
         inFrom.CryptoKitId,
-        signerPubKey,
+        inFrom.Bytes,
     )
 
 	return err

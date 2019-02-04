@@ -56,14 +56,10 @@ message PubKey {
 
     // Specifies which CryptoKit handles this key
                 CryptoKitID     crypto_kit_id           = 3;
-
-    // Specifies the key data encoding format of PubKey.KeyBase
-    // Default is 0, meaning binary (8-bit) encoding.
-    // See https://github.com/multiformats/multibase/blob/master/multibase.csv 
-                int32           encoding                = 4;
                 
-    // Key data stored in the form specified by PubKey.Encoding
-                bytes           key_base                = 5;
+    // Key data stored in the form specified by PubKey.Encoding.
+    // Encoding must ensure that PubKey.Bytes con be used to check key equivalence.
+                bytes           bytes                   = 4;
 
 }
 

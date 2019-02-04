@@ -97,7 +97,11 @@ func NewTxnDecoder() pdi.TxnDecoder {
     txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
 
     // 6) Verify the sig
-    if err := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, txnInfo.From); err != nil {
+    pubKey := &ski.PubKey{
+        KeyDomain: ski.KeyDomain_PERSONAL,
+        Bytes: txnInfo.From,
+    }
+    if err := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, pubKey); err != nil {
         return err
     }
 

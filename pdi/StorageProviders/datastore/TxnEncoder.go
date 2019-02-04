@@ -197,7 +197,7 @@ func (enc *dsEncoder) EncodeToTxns(
 
             txnInfo := &pdi.TxnInfo{
                 SegInfo: segs[i].SegInfo,
-                From: &enc.author,
+                From: enc.author.Bytes,
                 TimeSealed: timeSealed,
                 Transfers: inTransfers,
                 HashKitId: hashKit.HashKitID,

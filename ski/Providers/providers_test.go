@@ -65,7 +65,7 @@ func doProviderTest(A, B *testSession) {
         KeySpecs: []*ski.PubKey{
             communityKey,
         },
-        PeerPubKey: B.encryptPubKey.Base256(),
+        PeerPubKey: B.encryptPubKey.Bytes,
     })
 
     // 3) insert the new community key into B
@@ -74,7 +74,7 @@ func doProviderTest(A, B *testSession) {
         Msg: opResults.Content,
         OpKeySpec: *B.encryptPubKey,
         CommunityID: gCommunityID[:],
-        PeerPubKey: A.encryptPubKey.Base256(),
+        PeerPubKey: A.encryptPubKey.Bytes,
     })
 
 
