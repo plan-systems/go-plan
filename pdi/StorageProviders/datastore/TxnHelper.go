@@ -6,16 +6,33 @@ import (
 )
 
 
+// DsAccess is used to wrap a Datastore AND ds.Txn
+type DsAccess interface {
+    ds.Read
+    ds.Write
+}
+
+
+/*
+type mockTxn struct {
+    ds.Txn
+}
+*/
+
+
 // TxnHelper wraps ds.Txn for easier Commit() reattempts
 type TxnHelper struct {
-    St *Store
+    DsAccess  DsAccess
+    ds        ds.Datastore 
+
+
+    // Private
     maxAttempts int
     readOnly bool 
-
+    dsTxn ds.Txn        // May be nil if this ds isn't a TxnDatastore
     isDone bool
     commitErr error
     fatalErr error
-    dsTxn ds.Txn
     tryNum int
 }
 
@@ -24,7 +41,7 @@ type TxnHelper struct {
 // This makes life easier for reattempting txns if they go stale, etc.
 func (St *Store) NewTxnHelper() TxnHelper {
     return TxnHelper{
-        St: St,
+        ds: St.ds,
         maxAttempts: 5,
         readOnly: false,
         tryNum: 0,
@@ -37,7 +54,7 @@ func (St *Store) NewTxnHelper() TxnHelper {
 //     2) Finish() has not been called with a non-nil error
 //     3) the txn has not yet been committed successfully yet.
 func (h *TxnHelper) NextAttempt() bool {
-    if h.dsTxn != nil {
+    if h.DsAccess != nil {
         panic("BeginTry/EndTry mismatch")
     }
 
@@ -50,16 +67,32 @@ func (h *TxnHelper) NextAttempt() bool {
         return false
     }
 
-    h.dsTxn, h.fatalErr = h.St.newTxn(h.readOnly)
+    // If we have a TxnDatastore, make a new txn, otherwise we use the Datastore interface
+    txnDs, ok := h.ds.(ds.TxnDatastore)
+    if txnDs != nil && ok {
+        var err error
+        h.dsTxn, err = txnDs.NewTransaction(h.readOnly)
+        if err != nil {
+            h.fatalErr = plan.Errorf(err, plan.StorageNotReady, "txnDatastore.NewTransaction() failed")
+        }
+        h.DsAccess = h.dsTxn
+    } else {
+        h.DsAccess = h.ds
+    }
 
     if h.fatalErr != nil {
         h.dsTxn = nil
+        h.DsAccess = nil
         return false
     }
 
     h.tryNum++
     return true
 }
+
+
+
+
 
 
 // Finish is called with inFatalErr == nil to denote that the ds.Txn should be committed.  If the commit 
@@ -73,22 +106,29 @@ func (h *TxnHelper) Finish(inFatalErr error) {
         h.fatalErr = inFatalErr
     }
 
-    if h.dsTxn != nil {
+    if h.DsAccess != nil {
 
-        if inFatalErr == nil {
-            err := h.dsTxn.Commit()
-            if err == nil {
-                h.isDone = true
-            } else {
-                h.commitErr = plan.Error(err, plan.StorageNotReady, "ds.Txn.Commit() failed")
-            }
+        // If h.dsTxn == nil, then this ds isn't a TxnDatastore
+        if h.dsTxn == nil {
+            h.isDone = true
         } else {
 
-            // TODO: what causes a txn to go stale or fail?   
-            h.dsTxn.Discard()
+            if inFatalErr == nil {
+                err := h.dsTxn.Commit()
+                if err == nil {
+                    h.isDone = true
+                } else {
+                    h.commitErr = plan.Error(err, plan.StorageNotReady, "ds.Txn.Commit() failed")
+                }
+            } else {
+
+                // TODO: what causes a txn to go stale or fail?   
+                h.dsTxn.Discard()
+            }
         }
 
         h.dsTxn = nil
+        h.DsAccess = nil
     }
 }
 
