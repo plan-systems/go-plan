@@ -219,17 +219,15 @@ func (krSet *KeyringSet) getKeyEntryInternal(
 
     if inKeySpec.KeyDomain < 0 || inKeySpec.KeyDomain > NumKeyDomains {
         err = plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {KeyDomain: %v}", inKeySpec.KeyDomain)
-    } else if inKeySpec.Encoding != 0 {
-        err = plan.Errorf(nil, plan.Unimplemented, "key encoding not impmemented (encoding=%v)", inKeySpec.Encoding)
     }
     
     if err == nil {
-        keyID := plan.GetKeyID(inKeySpec.KeyBase)
+        keyID := plan.GetKeyID(inKeySpec.Bytes)
         keyEntry = krSet.ByKeyDomain[inKeySpec.KeyDomain].KeysByID[keyID]
     }
 
     if keyEntry == nil && err == nil {
-        err = plan.Errorf(nil, plan.KeyEntryNotFound, "key not found {PubKey:%v}", inKeySpec.KeyBase)
+        err = plan.Errorf(nil, plan.KeyEntryNotFound, "key not found {PubKey:%v}", inKeySpec.Bytes)
     }
    
     return keyEntry, err
