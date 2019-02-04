@@ -9,7 +9,7 @@ import (
 func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 
 	if !inCond {
-		panic(fmt.Sprintf(inFormat, inArgs))
+		panic(fmt.Sprintf(inFormat, inArgs...))
 	}
 }
 
@@ -107,6 +107,9 @@ const (
 
     // FileSysError means an unexpected file sys error occured
     FileSysError
+
+    // ConfigNotRead denotes that the given file was not found/read
+    ConfigNotRead
 
 	/*****************************************************
 	** PDI
@@ -280,6 +283,12 @@ const (
 
     // StorageNotReady means a problem occurred at the storage level
     StorageNotReady
+
+    // TxnQueryFailed means the txn query failed to execute 
+    TxnQueryFailed
+
+    // TxnFailedToDecode means TxnDecoder.DecodeRawTxn() returned an error
+    TxnFailedToDecode
 
 
 	/*****************************************************

@@ -236,7 +236,7 @@ func (sn *Snode) ReadConfig(inInit bool) error {
                 err = sn.WriteConfig()
             }
         } else {
-            log.WithError(err).Info("Failed to load %s", pathname)
+            log.WithError(err).Infof("Failed to load %s", pathname)
         }
     }
 
@@ -511,14 +511,15 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
 }
 
 // Query -- see service StorageProvider in pdi.proto
-func (sn *Snode) Query(inQuery *pdi.QueryTxns, inOutlet pdi.StorageProvider_QueryServer) error {
+func (sn *Snode) Query(inQuery *pdi.TxnQuery, inOutlet pdi.StorageProvider_QueryServer) error {
     session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
     if err != nil {
         return err
     }
 
+    // TODO: use sync.Pool to reduce allocs
     job := &ds.QueryJob{
-        QueryTxns: inQuery,
+        TxnQuery:  inQuery,
         Outlet:    inOutlet,
         OnComplete: make(chan error),
     }
@@ -535,13 +536,13 @@ var txnAwaitingCommit = pdi.TxnMetaInfo{
 }
 
 // CommitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) CommitTxn(inTxn *pdi.RawTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
+func (sn *Snode) CommitTxn(inTxn *pdi.ReadiedTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
     session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
     if err != nil {
         return err
     }
     job := &ds.CommitJob{
-        RawTxn:     inTxn,
+        ReadiedTxn: inTxn,
         Outlet:     inOutlet,
         OnComplete: make(chan error),
     }
