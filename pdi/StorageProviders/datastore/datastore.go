@@ -18,11 +18,15 @@ import (
     log "github.com/sirupsen/logrus"
 
     ds "github.com/ipfs/go-datastore"
-    badger "github.com/ipfs/go-ds-badger"
+	dsq "github.com/ipfs/go-datastore/query"
+
+    "github.com/ipfs/go-ds-badger"
+    "github.com/ipfs/go-ds-leveldb"
+    boltds "github.com/ipfs/go-ds-bolt"
 
     //"github.com/tidwall/redcon"
 
-    "github.com/plan-systems/go-plan/ski"
+    //"github.com/plan-systems/go-plan/ski"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pdi"
     //_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
@@ -59,8 +63,7 @@ type Store struct {
 
     commitScrap                 []byte
 
-    ds                          ds.TxnDatastore
-    closeDs                     func()
+    ds                          ds.Datastore
 
     QueryInbox                  chan *QueryJob
     CommitInbox                 chan *CommitJob
@@ -143,15 +146,29 @@ func (St *Store) Startup(inFirstTime bool) error {
 
     switch St.Config.ImplName {
         case "badger":
-            badgerDS, berr := badger.NewDatastore(St.AbsPath, nil)
-            if berr != nil {
-                err = plan.Error(berr, plan.FailedToLoadDatabase, "badger.NewDatastore() failed")
+            badgerDS, dsErr := badger.NewDatastore(St.AbsPath, nil)
+            if dsErr != nil {
+                err = plan.Error(dsErr, plan.FailedToLoadDatabase, "badger.NewDatastore() failed")
             } else {
                 St.ds = badgerDS
-                St.closeDs = func() {
-                    badgerDS.Close()
-                }
             }
+
+        case "leveldb":
+            levelDS, dsErr := leveldb.NewDatastore(St.AbsPath, nil)
+            if dsErr != nil {
+                err = plan.Error(dsErr, plan.FailedToLoadDatabase, "leveldb.NewDatastore() failed")
+            } else {
+                St.ds = levelDS
+            }
+
+        case "bolt":
+            boldDS, dsErr := boltds.NewBoltDatastore(St.AbsPath, "ds", false)
+            if dsErr != nil {
+                err = plan.Error(dsErr, plan.FailedToLoadDatabase, "boltds.NewBoltDatastore() failed")
+            } else {
+                St.ds = boldDS
+            }
+
         default:
             err = plan.Errorf(nil, plan.StorageImplNotFound, "storage implementation for '%s' not found", St.Config.ImplName)
     }
@@ -169,16 +186,16 @@ func (St *Store) Startup(inFirstTime bool) error {
 // Shutdown closes this datastore, if open, blocking until completion.
 func (St *Store) Shutdown(inGroup *sync.WaitGroup) {
 
-    // Signal a shutdown
-    var waiter sync.WaitGroup
-    waiter.Add(2)
-    St.shuttingDown <- &waiter
-    St.shuttingDown <- &waiter
-    waiter.Wait()
+    if St.ds != nil {
 
-    if St.closeDs != nil {
-        St.closeDs()
-        St.closeDs = nil
+        // Signal a shutdown
+        var waiter sync.WaitGroup
+        waiter.Add(2)
+        St.shuttingDown <- &waiter
+        St.shuttingDown <- &waiter
+        waiter.Wait()
+
+        St.ds.Close()
     }
 
     inGroup.Done()
@@ -188,16 +205,16 @@ func (St *Store) Shutdown(inGroup *sync.WaitGroup) {
 
 // QueryJob represents a pending Query() call to a StorageProvider
 type QueryJob struct {
-    QueryTxns *pdi.QueryTxns
+    TxnQuery  *pdi.TxnQuery
     Outlet     pdi.StorageProvider_QueryServer
     OnComplete chan error
 }
 
 // CommitJob represents a pending CommitTxn() call to a StorageProvider
 type CommitJob struct {
-    RawTxn    *pdi.RawTxn
-    Outlet     pdi.StorageProvider_CommitTxnServer
-    OnComplete chan error
+    ReadiedTxn *pdi.ReadiedTxn
+    Outlet      pdi.StorageProvider_CommitTxnServer
+    OnComplete  chan error
 }
 
 
@@ -205,7 +222,7 @@ type CommitJob struct {
 // UTIDKeyForTxn creates a ds.Key based on the transaction's timestamp and hash.UTIDKeyForTxn
 // See comments for ConvertToUTID
 func UTIDKeyForTxn(txnInfo *pdi.TxnInfo) ds.Key {
-    key := pdi.ConvertToUTID("/", txnInfo.TimeSealed, txnInfo.TxnHashname)
+    key := pdi.FormUTID("/", txnInfo.TimeSealed, txnInfo.TxnHashname)
     return ds.RawKey(key)
 }
 
@@ -215,7 +232,7 @@ func UTIDKeyForTxn(txnInfo *pdi.TxnInfo) ds.Key {
 
 
 // AccountKeyForPubKey makes a datastore Key for a given PubKey
-func AccountKeyForPubKey(inPubKey *ski.PubKey) ds.Key {
+func AccountKeyForPubKey(pubKey []byte) ds.Key {
 
     const (
         maxPubKeyLen = 24       // Arbitrary. As a ref point, BTC and ETH public address size is 20 bytes
@@ -223,7 +240,6 @@ func AccountKeyForPubKey(inPubKey *ski.PubKey) ds.Key {
         prefixLen = 3
     )
 
-    pubKey := inPubKey.Base256()
 	overhang := len(pubKey) - maxPubKeyLen
     if overhang > 0 {
         pubKey = pubKey[overhang:]
@@ -274,6 +290,8 @@ func (St *Store) startProcessingJobs() {
 
             select {
                 case commitJob := <- St.CommitInbox:
+
+                    // Unlike QueryJobs, we only process once commit job at a time
                     St.doCommitJob(commitJob)
 
                 case doneSignal = <-St.shuttingDown:
@@ -292,7 +310,10 @@ func (St *Store) startProcessingJobs() {
 
             select {
                 case queryJob := <- St.QueryInbox:
-                    St.doQueryJob(queryJob)
+                    
+                    // Each QueryJob runs in a goroutine
+                    // TODO: limit number of in-flight query jobs?
+                    go St.doQueryJob(queryJob)
 
                 case doneSignal = <-St.shuttingDown:
             }
@@ -306,33 +327,15 @@ func (St *Store) startProcessingJobs() {
 var txnCommitting = pdi.TxnMetaInfo{
     TxnStatus: pdi.TxnStatus_COMMITTING,
 }
-var txnFinalized = pdi.TxnMetaInfo{
-    TxnStatus: pdi.TxnStatus_FINALIZED,
-}
-
-
-/*
-func (St *Store) loadAccount(inKey ds.Key, outAcct *pdi.StorageAccount) {
-
-}
-*/
-
-type accountVerb int
-
-const (
-    withdraw accountVerb = iota
-    deposit
-)
-
 
 
 func (St *Store) updateAccount(
-    dsTxn ds.Datastore,
-    inAcct *ski.PubKey,
+    dsAccess DsAccess,
+    inAcctAddr []byte,
     inOp func(acct *pdi.StorageAccount) error,
 ) (ds.Key, error) {
 
-    dsKey := AccountKeyForPubKey(inAcct)
+    dsKey := AccountKeyForPubKey(inAcctAddr)
     var (
         creatingNew bool
         acct pdi.StorageAccount
@@ -342,7 +345,7 @@ func (St *Store) updateAccount(
     // Load the acct from the db
     {
         var val []byte
-        val, err = dsTxn.Get(dsKey)
+        val, err = dsAccess.Get(dsKey)
         if err == ds.ErrNotFound {
             err = nil
             creatingNew = true
@@ -371,7 +374,7 @@ func (St *Store) updateAccount(
             if creatingNew {
                 St.log.Infof("Creating account %v to receive deposit", dsKey)
             }
-            err = dsTxn.Put(dsKey, scrap[:acctSz]) 
+            err = dsAccess.Put(dsKey, scrap[:acctSz]) 
             if err != nil {
                 err = plan.Errorf(err, plan.StorageNotReady, "failed to update acct %v", dsKey)
             }
@@ -436,19 +439,6 @@ func (St *Store) depositTransfers(
 }
 */
 
-// TODO: make txn iterator so that failed Commits() are retried 2-3 times, etc
-func (St *Store) newTxn(readOnly bool) (ds.Txn, error) {
-
-    dsTxn, err := St.ds.NewTransaction(readOnly)
-    if err != nil {
-        return nil, plan.Errorf(err, plan.StorageNotReady, "St.ds.NewTransaction() failed")
-    }
-
-    return dsTxn, nil
-}
-
-
-
 
 // DepositTransfers deposits the given amount to 
 func (St *Store) DepositTransfers(inTransfers []*pdi.Transfer) error {
@@ -464,7 +454,7 @@ func (St *Store) DepositTransfers(inTransfers []*pdi.Transfer) error {
 
         for _, xfer := range inTransfers {
             _, err = St.updateAccount(
-                txn.dsTxn,
+                txn.DsAccess,
                 xfer.To,
                 func (ioAcct *pdi.StorageAccount) error {
                     return ioAcct.Deposit(xfer) 
@@ -493,9 +483,8 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
         dsKey ds.Key
     )
 
-
     err := St.TxnDecoder.DecodeRawTxn(
-        commitJob.RawTxn.TxnData,
+        commitJob.ReadiedTxn.RawTxn,
         &txnInfo,
         nil,
     )
@@ -507,16 +496,16 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
 
             // Debit the senders account (from gas and any transfers ordered)
             {
-                gasForTxn := St.Config.Epoch.GasTxnBase + int64(St.Config.Epoch.GasPerKb) * int64( len(commitJob.RawTxn.TxnData) >> 10 )
+                gasForTxn := St.Config.Epoch.GasTxnBase + int64(St.Config.Epoch.GasPerKb) * int64( len(commitJob.ReadiedTxn.RawTxn) >> 10 )
 
                 dsKey, err = St.updateAccount(
-                    txn.dsTxn,
+                    txn.DsAccess,
                     txnInfo.From,
                     func (ioAcct *pdi.StorageAccount) error {
 
                         // Debit gas needed for txn
                         if ioAcct.GasBalance < gasForTxn {
-                            return plan.Error(nil, plan.InsufficientGas, "txn sender has insufficient gas")
+                            return plan.Errorf(nil, plan.InsufficientGas, "insufficient gas for txn cost of %v", gasForTxn)
                         }
 
                         ioAcct.GasBalance -= gasForTxn
@@ -538,7 +527,7 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
             if err == nil {
                 for _, xfer := range txnInfo.Transfers {
                     _, err = St.updateAccount(
-                        txn.dsTxn,
+                        txn.DsAccess,
                         xfer.To,
                         func (ioAcct *pdi.StorageAccount) error {
                             return ioAcct.Deposit(xfer)
@@ -550,7 +539,7 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
             // Write the raw txn
             if err == nil {
                 key := UTIDKeyForTxn(&txnInfo)
-                err := txn.dsTxn.Put(key, commitJob.RawTxn.TxnData)
+                err := txn.DsAccess.Put(key, commitJob.ReadiedTxn.RawTxn)
                 if err != nil {
                     err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
                 }
@@ -566,7 +555,10 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
     if err == nil {
 
         // Since this is a centralized db, every txn committed is finalized
-        commitJob.Outlet.Send(&txnFinalized)
+        commitJob.Outlet.Send(&pdi.TxnMetaInfo{
+            TxnStatus: pdi.TxnStatus_FINALIZED,
+            ConsensusTime: 0,   // TODO: set me!
+        })
 
     } else {
 
@@ -577,7 +569,7 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
 
         St.log.WithFields(log.Fields{
             "dsKey": dsKey,
-        }).Error(err)
+        }).Warn(err)
 
         commitJob.Outlet.Send(&pdi.TxnMetaInfo{
             TxnStatus: pdi.TxnStatus_FAILED_TO_COMMIT,
@@ -599,83 +591,95 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
 }
 
 
-func (St *Store) doQueryJob(queryJob *QueryJob) {
+func (St *Store) doQueryJob(job *QueryJob) {
 
-    var err error
+    // Note how if len(job.TxnQuery.TxnHashname) == 0, then .Prefix becomes only the encoded timestamp 
+    qryParams := dsq.Query{
+        Prefix: "/0",
+        SeekPrefix: pdi.FormUTID("/", job.TxnQuery.TimestampMin, job.TxnQuery.TxnHashname),
+        KeysOnly: job.TxnQuery.OmitRawTxn,
+    }
+
+    qry, err := St.ds.Query(qryParams)
+    if err != nil {
+        err = plan.Error(err, plan.TxnQueryFailed, "db.Query() failed")
+        log.Error(err)
+    }
+
+    stopKey := pdi.FormUTID("/", job.TxnQuery.TimestampMax, nil)
+
+    const batchMax = 20
+    var (
+        txnBatch    [batchMax]pdi.Txn
+        txnMetaInfo [batchMax]pdi.TxnMetaInfo
+        txns        [batchMax]*pdi.Txn
+    )
+
+    for i := 0; i < batchMax; i++ {
+        txns[i] = &txnBatch[i]
+        txns[i].TxnMetaInfo = &txnMetaInfo[i]
+    }
+
+    for err == nil && qry != nil {
+    
+        batchCount := int32(0)
+        totalCount := int32(0)
+
+        for result := range qry.Next() {
+            if result.Error != nil {
+                err = result.Error
+
+                if false {
+                    qry = nil   // Signal the query is over
+                }
+                break
+            }
+
+            if result.Key > stopKey {
+                qry.Close()
+                qry = nil
+                break
+            }
+
+            txn :=  txns[batchCount]
+
+            txn.UTID = result.Key[2:]
+            
+            if ! job.TxnQuery.OmitRawTxn {
+                txn.RawTxn = result.Entry.Value
+            }
+
+            batchCount++
+            totalCount++
+            if totalCount == job.TxnQuery.MaxTxns {
+                qry.Close()
+                qry = nil
+                break
+            }
+        }
+
+        if err == nil && batchCount > 0 {
+            job.Outlet.Send(&pdi.TxnBundle{
+                Txns: txns[:batchCount],
+            })
+        }
+
+        // IF we didn't get to the batchMax, then we know we're donezo
+        if batchCount < batchMax {
+            break
+        }
+    }
+
     if err != nil {
 
         fj := failedJob{
             Error: err,
-            QueryJob: queryJob,
+            QueryJob: job,
         }
         St.FailedJobs <- fj
     }
 
     // This releases the GRPC handler
-    queryJob.OnComplete <- err
-
-
-}
-
-
-/*
-var txnPool = sync.Pool{
-    New: func() interface{} {
-        return new(pdi.Txn)
-    },
-}
-*/
-/*
-func (k *ds.Key) formKeyFromTxn()
-
-func (St *Store) writer() {
-
+    job.OnComplete <- err
 
 }
-*/
-
-/*
-func (St *Store) readerWriter() {
-
-    S.txnPool = sync.Pool{
-        New: func() interface{} {
-            return new(pdi.Txn)
-        },
-    }
-
-    readerTimer := time.NewTicker(time.Millisecond * 25)
-    wakeTimer := readerTimer.C
-
-    for session.IsReady() {
-       
-        // When the session is catching up on reads, set wakeTimer to non-nil
-        if session.readerIsActive {
-            wakeTimer = readerTimer.C
-        } else {
-            wakeTimer = nil
-        }
-
-        // FIRST, choose requests made via RequestTxns() and CommitTxns(), THEN make incremental progress from the read head.
-        select {
-            case queryJob := <- S.QueryInbox:
-
-                // Sending a nil batch means we're shutting down
-                if batch != nil {
-
-                    session.doTxn(batch)
-
-                    // We're done with this item, so make it available for reuse
-                    session.txnBatchPool.Put(batch)
-
-                }
-
-            case <-wakeTimer:
-                session.doTxn(nil)
-        }
-
-    }
-
-    
-}
-
-*/
