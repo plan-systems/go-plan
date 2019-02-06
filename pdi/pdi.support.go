@@ -12,7 +12,6 @@ import (
     "golang.org/x/crypto/sha3"
 
     "encoding/base64"
-    "encoding/binary"
 )
 
 /*
@@ -313,7 +312,7 @@ func SegmentIntoTxns(
     inPayloadLabel   []byte,
     inPayloadCodec   PayloadCodec, 
 	inMaxSegmentSize int,
-) ([]*TxnSegment, *plan.Err) {
+) ([]*TxnSegment, error) {
 
     payloadSz := len(inData)
 	bytesRemain := payloadSz
@@ -356,119 +355,117 @@ func SegmentIntoTxns(
 
 
 
-//func AssembleSegments(inSegs []*TxnSegment) ([]*TxnSegment, *plan.Err)
-
 
 
 
 
 // Base64 is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
 // See comments for TxnInfo.UTID in pdi.proto
-var Base64 = base64.NewEncoding("-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz").WithPadding(base64.NoPadding)
+var Base64 = base64.NewEncoding("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~").WithPadding(base64.NoPadding)
 
-// ConvertToUTID converts a time index and octal identifier into a 48 byte UTID (ASCII) string.
-// UTID aka "Universal Transaction Identifier", a 48 character ASCII string that encodes 30 bytes using pdi.Base64: 
-//     8 bytes (BIG-endian bytes of TimeSealed, see below) 
-//  + 22 bytes (rightmost-bytes of hash digest of this txn) ====> 30 bytes (total)
+
+const (
+
+    // UTIDTimestampSz is the bytesize of the timestamp stored in a UTID
+    // This must be a multiple of 3 so that the encoded length doesn't have any bit overhang.
+    // 48 bits of unix seconds maxes around 8,800,000 CE, so we'll call that good for now.  :D 
+    UTIDTimestampSz = 6
+
+    // UTIDTxnIDSz is the byte length of the ID bytes encoded within in a UTID.
+    // This is also chosen to be a multiple of 3 such that the encoded txn hashname falls on base64 digit boundaries. 
+    UTIDTxnIDSz = 27
+
+    // UTIDTotalSz is the total bytesize of a decoded UTID.
+    // UTID aka "Universal Transaction Identifier", an ASCII string that encodes 33 bytes using pdi.Base64: 
+    //     6 bytes (rightmost BIG-endian bytes of TimeSealed) 
+    //  + 27 bytes (rightmost-bytes of hash digest of this txn) ==> *33* bytes (total) ==> *44* chars (pdi.Base64 encoded)
+    UTIDTotalSz = UTIDTxnIDSz + UTIDTimestampSz
+
+    // UTIDEncodedTimestmapLen is the base64 char len of an encoded timestamp.  To the right of this position, the txn hashname begins.
+    UTIDEncodedTimestmapLen = 8 * UTIDTimestampSz / 6
+
+    // UTIDEncodedLen is the ASCII char length of an encoded UTID (44 chars)
+    UTIDEncodedLen = 8 * UTIDTxnIDSz / 6
+
+)
+
+
+// FormUTID converts a txn timestamp and its binary identifier into a UTID aka "Universal Transaction Identifier",
+//     an ASCII string that encodes these two items in pdi.Base64 (see UTIDDecodedLen above).
+//
 // The purpose of a UTID is so that txns can be stored and traversed chronologically in O(1) time.
-// If the string is less than 48 chars, it is assumed to be left-padded with "zeros" (the '.' char)
-func ConvertToUTID(inPrefix string, inUnixSecs int64, inID []byte) string {
-    var raw [30]byte
+//
+// If len(inID) == 0, then only the encoded timstamp is returned (8 base64 chars).
+// If a UTID is less than 44 chars, it is assumed to be left-padded with "zeros" (the '0' char)
+func FormUTID(inPrefix string, inTimestamp int64, inID []byte) string {
+    var raw [UTIDTotalSz]byte
 
-	binary.BigEndian.PutUint64(raw[0:8], uint64(inUnixSecs))
+	raw[0] = byte(inTimestamp >> 40)
+	raw[1] = byte(inTimestamp >> 32)
+	raw[2] = byte(inTimestamp >> 24)
+	raw[3] = byte(inTimestamp >> 16)
+	raw[4] = byte(inTimestamp >> 8)
+	raw[5] = byte(inTimestamp)
+
+    rawLen := UTIDTimestampSz
 
     // Use right-most bytes
-	overhang := 22 - len(inID)
-	if overhang < 0 {
-		copy(raw[8:], inID[-overhang:])
-	} else {
-		copy(raw[8+overhang:], inID)
-	}
+    idSz := len(inID)
+    if idSz > 0 {
+        rawLen += UTIDTxnIDSz
+    	overhang := idSz - UTIDTxnIDSz
+        if overhang > 0 {
+            copy(raw[8:], inID[overhang:])
+        } else {
+            copy(raw[8-overhang:], inID)
+        }
+    }
 
     prefixLen := len(inPrefix)
+
     var out [64]byte
     if prefixLen > 0 {
-        if prefixLen > 64-48 {
-            prefixLen = 16
+        if prefixLen > 64 - UTIDEncodedLen {
+            prefixLen = 64 - UTIDEncodedLen
         }
         copy(out[:prefixLen], []byte(inPrefix))
     }
 
-	Base64.Encode(out[prefixLen:], raw[:])
-	return string(out[:prefixLen+48])
+	Base64.Encode(out[prefixLen:], raw[:rawLen])
+	return string(out[:prefixLen+UTIDEncodedLen])
 }
 
 
 
 // Deposit deposits the given transfer into this account
-func (acct *StorageAccount) Deposit(xfer *Transfer) *plan.Err {
+func (acct *StorageAccount) Deposit(xfer *Transfer) error {
 
-    switch xfer.Currency {
-        case Currency_Gas:
-            acct.GasBalance += xfer.Amount
-        case Currency_CommunityFiat:
-            acct.FiatBalance += xfer.Amount
-    }
+    acct.GasBalance += xfer.Gas
+    acct.FiatBalance += xfer.Fiat
 
     return nil
 }
 
 
 // Withdraw subtracts the given transfer amount from this account
-func (acct *StorageAccount) Withdraw(xfer *Transfer) *plan.Err {
+func (acct *StorageAccount) Withdraw(xfer *Transfer) error {
 
-    switch xfer.Currency {
-        case Currency_Gas:
-            if acct.GasBalance < xfer.Amount {
-                return plan.Error(nil, plan.TransferFailed, "insufficient gas for transfer")
-            }
-            acct.GasBalance -= xfer.Amount
-        case Currency_CommunityFiat:
-            if acct.FiatBalance < xfer.Amount {
-                return plan.Error(nil, plan.TransferFailed, "insufficient fiat for transfer")
-            }
-            acct.FiatBalance -= xfer.Amount
+    if xfer.Gas < 0 {
+        return plan.Errorf(nil, plan.TransferFailed, "gas transfer amount can't be negative")
     }
+    if xfer.Fiat < 0 {
+        return plan.Errorf(nil, plan.TransferFailed, "fiat transfer amount can't be negative")
+    }
+
+    if acct.GasBalance < xfer.Gas {
+        return plan.Error(nil, plan.TransferFailed, "insufficient gas for transfer")
+    }
+    acct.GasBalance -= xfer.Gas
+
+    if acct.FiatBalance < xfer.Fiat {
+        return plan.Error(nil, plan.TransferFailed, "insufficient fiat for transfer")
+    }
+    acct.FiatBalance -= xfer.Fiat
 
     return nil
 }
-
-
-
-
-
-
-/*
-type UTIDComparator struct {
-    decode
-    matchTime       int64           
-    matchID         [17]
-}
-
-func (comp UTIDComparator) Reset(inUTID string) *plan.Error {
-
-
-	dbuf := make([]byte, enc.DecodedLen(len(s)))
-	n, err := enc.Decode(comp., []byte(inUTID))
-	return dbuf[:n], err
-
-    Base64.DecodeString(inUTID)
-
-    len := len(inUTID)
-
-}
-
-func IsUTID(UTID_a, UTID_b string) int {
-
-}
-// CompareUTID returns 0 if equal, -1 or 1 bas
-func CompareUTID(UTID_A, UTID_B string) int {
-    if len(UTID_A) == len(UTID_B) {
-
-    }
-
-// The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-
-
-}
-*/
