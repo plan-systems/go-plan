@@ -527,8 +527,8 @@ func (sn *Snode) Query(inQuery *pdi.TxnQuery, inOutlet pdi.StorageProvider_Query
     St := session.Cookie.(*ds.Store)
     St.QueryInbox <- job
 
-    perr := <-job.OnComplete
-    return perr
+    err = <-job.OnComplete
+    return err
 }
 
 var txnAwaitingCommit = pdi.TxnMetaInfo{
@@ -552,8 +552,8 @@ func (sn *Snode) CommitTxn(inTxn *pdi.ReadiedTxn, inOutlet pdi.StorageProvider_C
     St := session.Cookie.(*ds.Store)
     St.CommitInbox <- job
 
-    perr := <-job.OnComplete
-    return perr
+    err = <-job.OnComplete
+    return err
 }
 
 

@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"github.com/plan-systems/go-plan/pdi"
     "context"
@@ -62,8 +61,8 @@ func main() {
                     CommunityName: *create,
                     CommunityID: make([]byte, plan.CommunityIDSz),
                     StartTime: plan.Now(),
-                    GasPerKb: 10,
-                    GasTxnBase: 100,
+                    GasPerKb: 1,
+                    GasTxnBase: 10,
                 },
             }
             rand.Read(config.Epoch.CommunityID)
@@ -101,13 +100,13 @@ func main() {
                 log.Fatal(err)
             }
 
-            config.Epoch.GenesisID = pubKey.Base256()
+            config.Epoch.GenesisID = pubKey.Bytes
 
             deposits := []*pdi.Transfer{
                 &pdi.Transfer{
-                    To: pubKey,
-                    Gas: 1000,
-                    Fiat: 565,
+                    To: pubKey.Bytes,
+                    Gas: 1000000,
+                    Fiat: 1000,
                 },
             }
 
@@ -116,7 +115,7 @@ func main() {
                 log.WithError(err).Fatalf("failed to create '%s' datastore", *create)
             }
 
-            pdi.EntryOp_NEW_CHANNEL_EPOCH
+            //di.EntryOp_NEW_CHANNEL_EPOCH
 
             st.EndSession("donezo")
             
