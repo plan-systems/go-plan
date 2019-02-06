@@ -7,25 +7,24 @@
 P  L  A  N etwork
 ```
 
-[PLAN](http://plan-systems.org) is a free and open platform for groups to securely communicate, collaborate, and coordinate projects and activities. To better understand PLAN and the role of `plan-protobufs`, see the [Design & Engineering Docs](https://github.com/plan-systems/design-docs).
+[PLAN](http://plan-systems.org) is a free and open platform for groups to securely communicate, collaborate, and coordinate projects and activities. 
 
 ## About
 
-`go-plan` is the official reference implementation of PLAN's peer-to-peer backend daemon/node.  Dubbed "pnode", its primary functions are to:
-- Securely replicate community data with other community nodes
-- Provide "serverless" scalable bandwidth and storage for PLAN communities
-- Securely host the [plan-unity](https://github.com/plan-systems/plan-unity) clients of community members
+This repo contains PLAN's backend infrastrcuture that ultimately hosts [plan-unity](https://github.com/plan-systems/plan-unity) clients.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `go-plan` is regarded as the official reference implementation.
+
+The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
+
+## Milestone Log
 
 
-## Project Log
-
-
-|    Date     | Status                                                          |
-|:-----------:|-----------------------------------------------------------------|
-| 07 Dec 2018 | Architecture docs complete; resuming active development         |
-| 10 Sep 2018 | Pausing active development to work on PLAN PoC                  |
-| 15 Aug 2018 | SKI makeover following permissions model proof of concept       |
-| 04 Jul 2018 | Active development begins                                       |
+|    Date     | Status                                                                  |
+|:-----------:|-------------------------------------------------------------------------|
+| Feb 2019 | pdi-datastore now implements [StorageProvider](https://github.com/plan-systems/design-docs/blob/master/PLAN-API-Documentation.md#Persistent-Data-Interface) using a centralized db |
+| Dec 2018 | Architecture docs complete; resuming active development                 |
+| Sep 2018 | Pausing active development to work on PLAN PoC                          |
+| Aug 2018 | SKI makeover following permissions model proof of concept               |
+| Jul 2018 | Active development begins                                               |
 
 
 
