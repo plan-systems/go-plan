@@ -70,7 +70,7 @@ const (
     CurrentSnodeVersion         = "0.1"
 
     // ConfigFilename is the file name the root stage config resides in
-    ConfigFilename              = "storage.config.json"
+    ConfigFilename              = "storage-config.json"
 
 )
 
@@ -186,7 +186,7 @@ func (config *Config) WriteToFile(inPathname string) error {
 
 
 // NewSnode creates and initializes a new Snode instance
-func NewSnode(inBasePath *string) *Snode {
+func NewSnode(inBasePath *string) (*Snode, error) {
     sn := &Snode{
         FSNameEncoding: base64.RawURLEncoding,
         ShuttingDown: make(chan struct{}),
@@ -201,7 +201,7 @@ func NewSnode(inBasePath *string) *Snode {
     if inBasePath != nil && len(*inBasePath) > 0 {
         sn.BasePath = *inBasePath
     } else {
-        sn.BasePath, err = plan.UseLocalDir("")
+        sn.BasePath, err = plan.UseLocalDir("Stores")
     }
 
     if err == nil {
@@ -212,10 +212,10 @@ func NewSnode(inBasePath *string) *Snode {
     }
 
     if err != nil {
-        log.Fatal(err)
+        return nil, err
     }
 
-    return sn
+    return sn, nil
 }
 
 
@@ -227,7 +227,6 @@ func (sn *Snode) ReadConfig(inInit bool) error {
     err := sn.Config.ReadFromFile(pathname)
     if err != nil {
         if os.IsNotExist(err) {
-            log.WithError(err).Warn("storage node config not found")
             if inInit {
                 sn.Config.ApplyDefaults()
                 sn.Config.NodeID = make([]byte, plan.CommunityIDSz)
@@ -236,7 +235,7 @@ func (sn *Snode) ReadConfig(inInit bool) error {
                 err = sn.WriteConfig()
             }
         } else {
-            log.WithError(err).Infof("Failed to load %s", pathname)
+            err = plan.Errorf(err, plan.ConfigFailure, "Failed to load %s", pathname)
         }
     }
 
@@ -250,43 +249,61 @@ func (sn *Snode) WriteConfig() error {
 
     err := sn.Config.WriteToFile(pathname)
     if err != nil {
-        return plan.Errorf(err, plan.FailedToAccessPath, "Failed to write Snode config %s", pathname)
+        return plan.Errorf(err, plan.FailedToAccessPath, "Failed to write storage node config %s", pathname)
     }
 
     return nil
 }
 
-
 // CreateNewStore creates a new data store and adds it to this nodes list of stores (and updates the config on disk)
 func (sn *Snode) CreateNewStore(
-    inConfig *ds.StorageConfig,
+    inImplName string,
     inDeposits []*pdi.Transfer,
+    inEpoch pdi.StorageEpoch,
 ) error {
     
+
+    stConfig := &ds.StorageConfig{
+        HomePath: path.Join("datastore", plan.MakeFSFriendly(inEpoch.CommunityName, inEpoch.CommunityID[:2])),
+        ImplName: inImplName,
+    }
+
     var err error
 
-    // Prep the db path
+    // Prep the db path & write out the community genesis in fo
     {
-        if path.IsAbs(inConfig.HomePath) {
+        var stPathname string
 
-            if _, err := os.Stat(inConfig.HomePath); ! os.IsNotExist(err) {
-                return plan.Errorf(nil, plan.FailedToAccessPath, "for safety, the path '%s' must not already exist", inConfig.HomePath)
-            }
-
-            err = os.MkdirAll(inConfig.HomePath, sn.Config.DefaultFileMode)
-
+        if path.IsAbs(stConfig.HomePath) {
+            stPathname = stConfig.HomePath
         } else {
-
-            pathname := path.Join(sn.BasePath, inConfig.HomePath)
-            err = os.Mkdir(pathname, sn.Config.DefaultFileMode)
+            stPathname = path.Join(sn.BasePath, stConfig.HomePath)
         }
 
+        if _, serr := os.Stat(stPathname); ! os.IsNotExist(serr) {
+            return plan.Errorf(nil, plan.FailedToAccessPath, "for safety, the path '%s' must not already exist", stPathname)
+        }
+
+        err = os.MkdirAll(stPathname, sn.Config.DefaultFileMode)
         if err != nil {
-            return plan.Errorf(err, plan.FailedToAccessPath, "could not create the new storage path %s", inConfig.HomePath)
+            return plan.Errorf(err, plan.FailedToAccessPath, "failed to create storage path %s", stPathname)
+        }
+
+        // Write out the community genesis file
+        {
+            buf, jerr := json.MarshalIndent(&inEpoch, "", "\t")
+            if jerr != nil {
+                return jerr
+            }
+
+            epPathname := path.Join(stPathname, pdi.GenesisEpochFilename)
+            if err = ioutil.WriteFile(epPathname, buf, sn.Config.DefaultFileMode); err != nil {
+                return plan.Errorf(err, plan.FailedToAccessPath, "could not create %s", epPathname)
+            }
         }
     }
 
-    St := ds.NewStore(inConfig, sn.BasePath)
+    St := ds.NewStore(stConfig, sn.BasePath)
     if err = St.Startup(true); err != nil {
         return err
     }
@@ -295,7 +312,7 @@ func (sn *Snode) CreateNewStore(
         return err
     }
     
-    sn.Config.StorageConfigs = append(sn.Config.StorageConfigs, *inConfig)
+    sn.Config.StorageConfigs = append(sn.Config.StorageConfigs, *stConfig)
 
     if err = sn.WriteConfig(); err != nil {
         return err
@@ -332,7 +349,7 @@ func (sn *Snode) Startup() error {
 
 func (sn *Snode) registerStore(St *ds.Store) {
 
-    communityID := plan.GetCommunityID(St.Config.Epoch.CommunityID)
+    communityID := plan.GetCommunityID(St.Epoch.CommunityID)
     //var communityID plan.CommunityID
     //copy(communityID[:], CS.Info.CommunityID)
 
@@ -342,16 +359,14 @@ func (sn *Snode) registerStore(St *ds.Store) {
 }
 
 
-
-
 // StartServer is used like main()
-func (sn *Snode) StartServer() {
+func (sn *Snode) StartServer() error {
     var err error
 
     log.Infof("Starting StorageProvider service on %v, %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     sn.listener, err = net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     if err != nil {
-        log.WithError(err).Error("net.Listen()")
+        return plan.Error(err, plan.NetworkNotReady, "failed to start StorageProvider")
     }
 
     // TODO: turn off compression since we're dealing w/ encrypted data
@@ -372,6 +387,7 @@ func (sn *Snode) StartServer() {
         close(sn.grpcDone)
     }()
 
+    return nil
 }
 
 

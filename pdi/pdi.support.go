@@ -11,18 +11,33 @@ import (
 
     "golang.org/x/crypto/sha3"
 
+    "github.com/ethereum/go-ethereum/common/hexutil"
+
     "encoding/base64"
 )
 
-/*
-// EntryAddr specifies the address of a PDI entry (an EntryCrypt) in a given StorageProvider.
-// Since a StorageTxn can potentially hold more than one entry, EntryIndex specifies which one (using zero-based indexing).
-type EntryAddr struct {
-	TimeCommited int64
-	TxnName      []byte
-	EntryIndex   uint16
+
+
+// AccountAlloc specifies an deposit values for a given public key (used during storage genesis).
+type AccountAlloc struct {
+    PubKey                  hexutil.Bytes           `json:"pub_key"`
+    Gas                     int64                   `json:"gas"`  
+    Fiat                    int64                   `json:"fiat"`  
 }
-*/
+
+// GenesisEpochFilename is the default file name used to store the latest CommunityEpoch
+const GenesisEpochFilename = "genesis.json"
+
+// StorageEpoch contains core params req'd for a community (and StorageProviders for that community) 
+type StorageEpoch struct {
+    CommunityName           string                  `json:"community_name"`
+    CommunityID             hexutil.Bytes           `json:"community_id"`
+    GenesisID               hexutil.Bytes           `json:"genesis_id"`
+    Salt                    hexutil.Bytes           `json:"salt"`
+    StartTime               int64                   `json:"start_time"` 
+    FuelPerKb               int64                   `json:"fuel_per_kb"`         
+    FuelPerTxn              int64                   `json:"fuel_per_txn"`       // Txn fuel cost := FuelPerTxn + FuelPerKb * (len(rawTxn) >> 10)
+}
 
 // EntryVersionMask is a bit mask on EntryCrypt.CryptInfo to extract pdi.EntryVersion
 const EntryVersionMask = 0xFF
@@ -440,8 +455,8 @@ func FormUTID(inPrefix string, inTimestamp int64, inID []byte) string {
 // Deposit deposits the given transfer into this account
 func (acct *StorageAccount) Deposit(xfer *Transfer) error {
 
-    acct.GasBalance += xfer.Gas
-    acct.FiatBalance += xfer.Fiat
+    acct.FuelBalance += xfer.Fuel
+    acct.ManaBalance += xfer.Mana
 
     return nil
 }
@@ -450,22 +465,22 @@ func (acct *StorageAccount) Deposit(xfer *Transfer) error {
 // Withdraw subtracts the given transfer amount from this account
 func (acct *StorageAccount) Withdraw(xfer *Transfer) error {
 
-    if xfer.Gas < 0 {
-        return plan.Errorf(nil, plan.TransferFailed, "gas transfer amount can't be negative")
+    if xfer.Fuel < 0 {
+        return plan.Errorf(nil, plan.TransferFailed, "fuel transfer amount can't be negative")
     }
-    if xfer.Fiat < 0 {
-        return plan.Errorf(nil, plan.TransferFailed, "fiat transfer amount can't be negative")
+    if xfer.Mana < 0 {
+        return plan.Errorf(nil, plan.TransferFailed, "mana transfer amount can't be negative")
     }
 
-    if acct.GasBalance < xfer.Gas {
-        return plan.Error(nil, plan.TransferFailed, "insufficient gas for transfer")
+    if acct.FuelBalance < xfer.Fuel {
+        return plan.Error(nil, plan.TransferFailed, "insufficient fuel for transfer")
     }
-    acct.GasBalance -= xfer.Gas
+    acct.FuelBalance -= xfer.Fuel
 
-    if acct.FiatBalance < xfer.Fiat {
-        return plan.Error(nil, plan.TransferFailed, "insufficient fiat for transfer")
+    if acct.ManaBalance < xfer.Mana {
+        return plan.Error(nil, plan.TransferFailed, "insufficient mana for transfer")
     }
-    acct.FiatBalance -= xfer.Fiat
+    acct.ManaBalance -= xfer.Mana
 
     return nil
 }

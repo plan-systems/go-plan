@@ -9,7 +9,6 @@ import (
     "encoding/hex"
     //"math/big"
 
-    "github.com/ethereum/go-ethereum/common/hexutil"
     //"github.com/ethereum/go-ethereum/common/math"
 )
 
@@ -121,23 +120,4 @@ func MakeFSFriendly(inName string, inSuffix []byte) string {
 }
 
 
-
-
-
-// AccountAlloc specifies an deposit values for a given public key (used during storage genesis).
-type AccountAlloc struct {
-    PubKey                  hexutil.Bytes           `json:"pub_key"`
-    Gas                     int64                   `json:"gas"`  
-    Fiat                    int64                   `json:"fiat"`  
-}
-
-// CommunityEpoch contains core params req'd for a community (and StorageProviders for that community) 
-type CommunityEpoch struct {
-    CommunityName           string                  `json:"community_name"`
-    CommunityID             hexutil.Bytes           `json:"community_id"`
-    GenesisID               hexutil.Bytes           `json:"genesis_id"`
-    StartTime               Time                    `json:"start_time"` 
-    GasPerKb                int64                   `json:"gas_per_kb"`         
-    GasTxnBase              int64                   `json:"gas_txn_base"`       // Txn gas cost := GasTxnBase + GasPerKb * (len(rawTxn) >> 10)
-}
 

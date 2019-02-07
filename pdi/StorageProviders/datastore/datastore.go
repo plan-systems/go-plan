@@ -6,9 +6,10 @@ import (
     "os"
     "path"
     "encoding/base64"
-    //"io/ioutil"
+    "io/ioutil"
     //"strings"
     "sync"
+    "encoding/json"
     //"time"
     //"hash"
     //"crypto/rand"
@@ -40,7 +41,6 @@ import (
 type StorageConfig struct {
     HomePath                string                  `json:"home_path"`
     ImplName                string                  `json:"impl_name"`
-    Epoch                   plan.CommunityEpoch          `json:"epoch"`
 }
 
 
@@ -57,6 +57,7 @@ type Store struct {
     CommunityID                 plan.CommunityID
     AgentDesc                   string    
     Config                      *StorageConfig
+    Epoch                       pdi.StorageEpoch
 
     AbsPath                     string
     keyEncoding                 base64.Encoding
@@ -103,7 +104,8 @@ func (L *Log) LogErr(inErr Err) {
 }
 */
 
-
+// DefaultImplName should be used when a datastore impl is not specified
+const DefaultImplName = "badger"
 
 // NewStore makes a new Datastore
 func NewStore(
@@ -141,6 +143,20 @@ func (St *Store) Startup(inFirstTime bool) error {
         "path": St.AbsPath,
     })
     logE.Info( "Startup()" )
+
+    // Load community info
+    {
+        pathname := path.Join(St.AbsPath, pdi.GenesisEpochFilename)
+        buf, err := ioutil.ReadFile(pathname)
+        if err != nil {
+            return plan.Errorf(err, plan.ConfigFailure, "missing %s", pathname)
+        }
+
+        err = json.Unmarshal(buf, &St.Epoch)
+        if err != nil {
+            return plan.Errorf(err, plan.ConfigFailure, "error unmarshalling %s", pathname)
+        }
+    }
 
     var err error
 
@@ -494,21 +510,21 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
 
         for txn.NextAttempt() {
 
-            // Debit the senders account (from gas and any transfers ordered)
+            // Debit the senders account (from Fuel and any transfers ordered)
             {
-                gasForTxn := St.Config.Epoch.GasTxnBase + int64(St.Config.Epoch.GasPerKb) * int64( len(commitJob.ReadiedTxn.RawTxn) >> 10 )
+                fuelForTxn := St.Epoch.FuelPerTxn + int64(St.Epoch.FuelPerKb) * int64( len(commitJob.ReadiedTxn.RawTxn) >> 10 )
 
                 dsKey, err = St.updateAccount(
                     txn.DsAccess,
                     txnInfo.From,
                     func (ioAcct *pdi.StorageAccount) error {
 
-                        // Debit gas needed for txn
-                        if ioAcct.GasBalance < gasForTxn {
-                            return plan.Errorf(nil, plan.InsufficientGas, "insufficient gas for txn cost of %v", gasForTxn)
+                        // Debit Fuel needed for txn
+                        if ioAcct.FuelBalance < fuelForTxn {
+                            return plan.Errorf(nil, plan.InsufficientFuel, "insufficient Fuel for txn cost of %v", fuelForTxn)
                         }
 
-                        ioAcct.GasBalance -= gasForTxn
+                        ioAcct.FuelBalance -= fuelForTxn
 
                         // Debit explicit transfers
                         for _, xfer := range txnInfo.Transfers {

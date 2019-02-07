@@ -275,14 +275,20 @@ const (
     // AccountNotAvailable means the StorageProvider failed to find the account associated w/ the txn's "from" public key (or is damaged)
     AccountNotAvailable
 
-    // InsufficientGas means the sender does not have a balance with sufficient gas to commit the txn
-    InsufficientGas
+    // InsufficientFuel means the sender does not have a balance with sufficient gas to commit the txn
+    InsufficientFuel
 
     // TransferFailed means the gas/fiat transfer failed (e.g. insufficient funds)
     TransferFailed
 
     // StorageNotReady means a problem occurred at the storage level
     StorageNotReady
+
+    // NetworkNotReady means the network is in an unusable state
+    NetworkNotReady
+
+    // ConfigFailure means something went wrong loading/reading config 
+    ConfigFailure
 
     // TxnQueryFailed means the txn query failed to execute 
     TxnQueryFailed
