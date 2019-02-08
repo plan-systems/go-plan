@@ -44,8 +44,6 @@ type StorageConfig struct {
 }
 
 
-
-
 type failedJob struct {
     Error                       error
     QueryJob                    *QueryJob
@@ -75,14 +73,8 @@ type Store struct {
     shuttingDown                chan *sync.WaitGroup
 
     TxnDecoder                   pdi.TxnDecoder
-    //stDecoder                   pdi.TxnDecoder
 
     log                         *log.Logger
-
-    //throttleCommits             bool
-
-    //msgOutbox                   chan *pservice.Msg
-    //msgInbox                    chan *pservice.Msg
 
     DefaultFileMode             os.FileMode
 
@@ -121,7 +113,6 @@ func NewStore(
         FailedJobs: make(chan failedJob, 4),
         shuttingDown: make(chan *sync.WaitGroup),
         log: log.StandardLogger(),
-        //commitScrap: make([]byte, 4000),
     }
 
     St.TxnDecoder = NewTxnDecoder()
@@ -233,19 +224,12 @@ type CommitJob struct {
     OnComplete  chan error
 }
 
-
-
 // UTIDKeyForTxn creates a ds.Key based on the transaction's timestamp and hash.UTIDKeyForTxn
 // See comments for ConvertToUTID
 func UTIDKeyForTxn(txnInfo *pdi.TxnInfo) ds.Key {
     key := pdi.FormUTID("/", txnInfo.TimeSealed, txnInfo.TxnHashname)
     return ds.RawKey(key)
 }
-
-
-
-
-
 
 // AccountKeyForPubKey makes a datastore Key for a given PubKey
 func AccountKeyForPubKey(pubKey []byte) ds.Key {
@@ -406,55 +390,6 @@ func (St *Store) updateAccount(
 
     return dsKey, err
 }
-
-
-/*
-func (St *Store) depositTransfers(
-    dsTxn ds.Txn,
-    inTransfers []*pdi.Transfer) {
-
-    
-    for _, xfer := range inTransfers {
-        dsKey := AccountKeyForPubKey(xfer.To)
-        
-        var acct pdi.StorageAccount
-
-        val, err := dsTxn.Get(dsKey)
-        if err == ds.ErrNotFound {
-            St.log.Infof("Creating account %v to receive deposit", dsKey)
-            err = nil
-        } else if err == nil {
-            if 2 * len(val) < cap(St.commitScrap) {
-                St.commitScrap = make([]byte, 2 * len(val) + 1000)
-            }
-
-            err = acct.Unmarshal(val)
-        }
-
-        if err == nil {
-            err = acct.Deposit(xfer)
-        }
-
-        // Write the new acct out
-        if err == nil {
-            var n int
-            n, err = acct.MarshalTo(St.commitScrap)
-            if err == nil {
-                err = dsTxn.Put(dsKey, St.commitScrap[:n]) 
-            }
-        }
-
-        // If we get a deposit err, log it and proceed normally (i.e. the funds are lost forever)
-        if err != nil {
-            St.log.WithField( 
-                "dsKey", dsKey,
-            ).Warning(err)
-        }
-    }
-
-}
-*/
-
 
 // DepositTransfers deposits the given amount to 
 func (St *Store) DepositTransfers(inTransfers []*pdi.Transfer) error {

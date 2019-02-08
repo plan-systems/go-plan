@@ -1,274 +1,255 @@
 package datastore
 
 import (
+	"sync"
+	//"google.golang.org/grpc/encoding"
 
-    "sync"
-    //"google.golang.org/grpc/encoding"
-
-    "github.com/plan-systems/go-plan/pdi"
-    "github.com/plan-systems/go-plan/ski"
-    "github.com/plan-systems/go-plan/plan"
-
+	"github.com/plan-systems/go-plan/pdi"
+	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/go-plan/ski"
 )
-
-
 
 // dsEncoder implements pdi.TxnEncoder
 type dsEncoder struct {
-    pdi.TxnEncoder
+	pdi.TxnEncoder
 
-    SegmentMaxSz        int
+	SegmentMaxSz int
 
-    invocation          string
+	invocation string
 
-    hashKit             ski.HashKit
-    author              ski.PubKey
-    communityID         []byte
-    skiSession          ski.Session
-
-
+	hashKit     ski.HashKit
+	author      ski.PubKey
+	communityID []byte
+	skiSession  ski.Session
 }
-
 
 // TxnNameByteLen is the length of txn names used by this agent (and its sister StorageProvider implementation)
 //var TxnNameByteLen = 24
 
-
 // NewTxnEncoder creates a new StorageProviderAgent for use with a pdi-datastore StorageProvider.
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
-    inSegmentMaxSz int,
+	inSegmentMaxSz int,
 ) (pdi.TxnEncoder, error) {
 
-    defaultKit, perr := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
-    if perr != nil {
-        return nil, perr
-    }
+	defaultKit, perr := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
+	if perr != nil {
+		return nil, perr
+	}
 
-    enc := &dsEncoder{
-        hashKit: defaultKit,
-        SegmentMaxSz: inSegmentMaxSz,
-    }
+	enc := &dsEncoder{
+		hashKit:      defaultKit,
+		SegmentMaxSz: inSegmentMaxSz,
+	}
 
-    if enc.SegmentMaxSz <= 0 {
-        enc.SegmentMaxSz = 10000
-    }
+	if enc.SegmentMaxSz <= 0 {
+		enc.SegmentMaxSz = 10000
+	}
 
-    return enc, nil
+	return enc, nil
 }
 
 // ResetSession --see TxnEncoder
 func (enc *dsEncoder) ResetSession(
-    inInvocation  string,
-    inSession     ski.Session,
-    inCommunityID []byte,
+	inInvocation string,
+	inSession ski.Session,
+	inCommunityID []byte,
 ) error {
 
-    if inInvocation != "" && inInvocation != txnEncoderInvocation1 {
-        return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inInvocation, txnEncoderInvocation1)
-    }
+	if inInvocation != "" && inInvocation != txnEncoderInvocation1 {
+		return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inInvocation, txnEncoderInvocation1)
+	}
 
-    enc.invocation = inInvocation
-    enc.skiSession = inSession
-    enc.communityID = inCommunityID
+	enc.invocation = inInvocation
+	enc.skiSession = inSession
+	enc.communityID = inCommunityID
 
-    err := enc.checkReady()
+	err := enc.checkReady()
 
-    return err
+	return err
 }
-
 
 func (enc *dsEncoder) checkReady() error {
 
-    if enc.skiSession == nil {
-        return plan.Errorf(nil, plan.EncoderSessionNotReady, "SKI session missing")
-    }
+	if enc.skiSession == nil {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "SKI session missing")
+	}
 
-    if len(enc.communityID) < 4 {
-        return plan.Errorf(nil, plan.EncoderSessionNotReady, "community ID missing")
-    }
+	if len(enc.communityID) < 4 {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "community ID missing")
+	}
 
-    return nil
+	return nil
 }
-
-
 
 // GenerateNewAccount -- See TxnEncoder
-func (enc *dsEncoder) GenerateNewAccount(
-) (*ski.PubKey, error) {
+func (enc *dsEncoder) GenerateNewAccount() (*ski.PubKey, error) {
 
-    if err := enc.checkReady(); err != nil {
-        return nil, err
-    }
+	if err := enc.checkReady(); err != nil {
+		return nil, err
+	}
 
-    blocker := make(chan error, 1)
+	blocker := make(chan error, 1)
 
-    var newKey *ski.PubKey
+	var newKey *ski.PubKey
 
-    ski.GenerateKeys(
-        enc.skiSession, 
-        enc.communityID, 
-        []*ski.PubKey{
-            &ski.PubKey{
-                KeyType: ski.KeyType_SIGNING_KEY,
-                CryptoKitId: ski.CryptoKitID_NaCl,
-                KeyDomain: ski.KeyDomain_PERSONAL,
-            },
-        },
-        func(inKeys []*ski.KeyEntry, inErr error) {
-            if inErr == nil {
-                newKey = inKeys[0].CopyToPubKey()
-            }
+	ski.GenerateKeys(
+		enc.skiSession,
+		enc.communityID,
+		[]*ski.PubKey{
+			&ski.PubKey{
+				KeyType:     ski.KeyType_SIGNING_KEY,
+				CryptoKitId: ski.CryptoKitID_NaCl,
+				KeyDomain:   ski.KeyDomain_PERSONAL,
+			},
+		},
+		func(inKeys []*ski.KeyEntry, inErr error) {
+			if inErr == nil {
+				newKey = inKeys[0].CopyToPubKey()
+			}
 
-            blocker <- inErr
-        },
-    )
+			blocker <- inErr
+		},
+	)
 
-    if err := <- blocker; err != nil {
-        return nil, err
-    }
+	if err := <-blocker; err != nil {
+		return nil, err
+	}
 
-    return newKey, nil
+	return newKey, nil
 }
-
 
 func (enc *dsEncoder) ResetAuthorID(
-    inFrom ski.PubKey,
+	inFrom ski.PubKey,
 ) error {
 
-    enc.author = inFrom
+	enc.author = inFrom
 
-    return nil
+	return nil
 }
-
-
-
 
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
-// TODO: Use ski.Signer interface?
 func (enc *dsEncoder) EncodeToTxns(
-    inPayload      []byte, 
-    inPayloadLabel []byte,
-    inPayloadCodec pdi.PayloadCodec, 
-    inTransfers    []*pdi.Transfer, 
+	inPayload []byte,
+	inPayloadLabel []byte,
+	inPayloadCodec pdi.PayloadCodec,
+	inTransfers []*pdi.Transfer,
 ) ([]*pdi.Txn, error) {
 
-    if err := enc.checkReady(); err != nil {
-        return nil, err
-    }
+	if err := enc.checkReady(); err != nil {
+		return nil, err
+	}
 
-    segs, err := pdi.SegmentIntoTxns(
-        inPayload,
-        inPayloadLabel,
-        inPayloadCodec, 
-        enc.SegmentMaxSz,
-    )
-    if err != nil {
-        return nil, err
-    }
+	segs, err := pdi.SegmentIntoTxns(
+		inPayload,
+		inPayloadLabel,
+		inPayloadCodec,
+		enc.SegmentMaxSz,
+	)
+	if err != nil {
+		return nil, err
+	}
 
-    txns := make([]*pdi.Txn, len(segs))
+	txns := make([]*pdi.Txn, len(segs))
 
-    var signErr error
+	var signErr error
 
-    {
-        // Use the same time stamp for the entire batch
-        timeSealed := plan.Now().UnixSecs
+	{
+		// Use the same time stamp for the entire batch
+		timeSealed := plan.Now().UnixSecs
 
-        hashKit := enc.hashKit
+		hashKit := enc.hashKit
 
-        signOp := ski.OpArgs{
-            OpName: ski.OpSign,
-            OpKeySpec: enc.author,
-            CommunityID: enc.communityID,
-        }
-        
-        signErrHandle := &signErr
-        signingDone := &sync.WaitGroup{}
-        signingDone.Add(len(txns))
+		signOp := ski.OpArgs{
+			OpName:      ski.OpSign,
+			OpKeySpec:   enc.author,
+			CommunityID: enc.communityID,
+		}
 
-        for i := range txns {
-            
-            segSz := len(segs[i].SegData)
+		signErrHandle := &signErr
+		signingDone := &sync.WaitGroup{}
+		signingDone.Add(len(txns))
 
-            if segSz != int(segs[i].SegInfo.SegmentLength) {
-                return nil, plan.Error(nil, plan.AssertFailed, "failed SegInfo payload size check")   
-            }
+		for i := range txns {
 
-            txnInfo := &pdi.TxnInfo{
-                SegInfo: segs[i].SegInfo,
-                From: enc.author.Bytes,
-                TimeSealed: timeSealed,
-                Transfers: inTransfers,
-                HashKitId: hashKit.HashKitID,
-            }
-            
-            // Add extra for length signature and len bytes
-            rawTxn := make([]byte, 500 + txnInfo.Size() + segSz + len(inTransfers) * 200)
+			segSz := len(segs[i].SegData)
 
-            // Only put the transfers in the first txnInfo.
-            inTransfers = nil 
+			if segSz != int(segs[i].SegInfo.SegmentLength) {
+				return nil, plan.Error(nil, plan.AssertFailed, "failed SegInfo payload size check")
+			}
 
-            // 1) Append the TxnInfo
-            txnLen, merr := txnInfo.MarshalTo(rawTxn[2:])
-            if merr != nil {
-                return nil, plan.Error(merr, plan.FailedToMarshal, "failed to marshal txnInfo")
-            }
-            rawTxn[0] = byte((txnLen >> 8) & 0xFF)
-            rawTxn[1] = byte(txnLen        & 0xFF)
-            txnLen += 2
+			txnInfo := &pdi.TxnInfo{
+				SegInfo:    segs[i].SegInfo,
+				From:       enc.author.Bytes,
+				TimeSealed: timeSealed,
+				Transfers:  inTransfers,
+				HashKitId:  hashKit.HashKitID,
+			}
 
-            // 2) Append the payload buf
-            copy(rawTxn[txnLen:txnLen+segSz], segs[i].SegData)
-            txnLen += segSz
-        
-            // 3) Calc the txn digest
-            hashKit.Hasher.Reset()
-            hashKit.Hasher.Write(rawTxn[:txnLen])
-            txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
+			// Add extra for length signature and len bytes
+			rawTxn := make([]byte, 500+txnInfo.Size()+segSz+len(inTransfers)*200)
 
-            if len(txnInfo.TxnHashname) != hashKit.Hasher.Size() {
-                return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
-            }
+			// Only put the transfers in the first txnInfo.
+			inTransfers = nil
 
-            signOp.Msg = txnInfo.TxnHashname
-            enc.skiSession.DispatchOp( 
-                signOp, 
-                func (inResults *plan.Block, inErr error) {
-                    if inErr == nil {
-                        sig := inResults.Content
-                        sigLen := len(sig)
-                        copy(rawTxn[txnLen:], sig)
-                        txnLen += sigLen
+			// 1) Append the TxnInfo
+			txnLen, merr := txnInfo.MarshalTo(rawTxn[2:])
+			if merr != nil {
+				return nil, plan.Error(merr, plan.FailedToMarshal, "failed to marshal txnInfo")
+			}
+			rawTxn[0] = byte((txnLen >> 8) & 0xFF)
+			rawTxn[1] = byte(txnLen & 0xFF)
+			txnLen += 2
 
-                        // Append the sig length div 4
-                        rawTxn[txnLen] = byte(sigLen >> 2)
-                        txnLen++
+			// 2) Append the payload buf
+			copy(rawTxn[txnLen:txnLen+segSz], segs[i].SegData)
+			txnLen += segSz
 
-                        txns[i] = &pdi.Txn{
-                            TxnInfo: txnInfo,
-                            RawTxn: rawTxn[:txnLen],
-                        }
-                    }
+			// 3) Calc the txn digest
+			hashKit.Hasher.Reset()
+			hashKit.Hasher.Write(rawTxn[:txnLen])
+			txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
 
-                    if inErr != nil && *signErrHandle == nil {
-                        *signErrHandle = inErr
-                    }
+			if len(txnInfo.TxnHashname) != hashKit.Hasher.Size() {
+				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
+			}
 
-                    signingDone.Done()
-                },
-            )
-        }
+			signOp.Msg = txnInfo.TxnHashname
+			enc.skiSession.DispatchOp(
+				signOp,
+				func(inResults *plan.Block, inErr error) {
+					if inErr == nil {
+						sig := inResults.Content
+						sigLen := len(sig)
+						copy(rawTxn[txnLen:], sig)
+						txnLen += sigLen
 
-        // Wait for len(txns) number of results before we're done
-        signingDone.Wait()
-    }
+						// Append the sig length div 4
+						rawTxn[txnLen] = byte(sigLen >> 2)
+						txnLen++
 
-    if signErr != nil {
-        return nil, signErr
-    }
+						txns[i] = &pdi.Txn{
+							TxnInfo: txnInfo,
+							RawTxn:  rawTxn[:txnLen],
+						}
+					}
 
-    return txns, nil
+					if inErr != nil && *signErrHandle == nil {
+						*signErrHandle = inErr
+					}
+
+					signingDone.Done()
+				},
+			)
+		}
+
+		// Wait for len(txns) number of results before we're done
+		signingDone.Wait()
+	}
+
+	if signErr != nil {
+		return nil, signErr
+	}
+
+	return txns, nil
 }
-
-
