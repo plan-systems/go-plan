@@ -34,9 +34,9 @@ type TxnEncoder interface {
     // ResetSession -- resets the currently set community ID used for EncodeToTxns()
     // This must be called before other calls into TxnEncoder.
     ResetSession(
-        inInvocation  string,
-        inSession     ski.Session,
-        inCommunityID []byte,
+        inEncodingDesc string,
+        inSession      ski.Session,
+        inCommunityID  []byte,
     ) error
 
     // GenerateNewAccount creates the necessary key(s) in the pres-et SKI session and returns a new public 
@@ -71,8 +71,8 @@ type TxnEncoder interface {
 // TxnDecoder is NOT assumed to be threadsafes unless specified otherswise 
 type TxnDecoder interface {
 
-    // TxnEncoderInvocation returns a string for use in TxnEncoder.ResetSession()
-    TxnEncoderInvocation() string
+    // EncodingDesc returns a string for use in TxnEncoder.ResetSession()
+    EncodingDesc() string
 
     // Decodes a raw txn to/from a StorageProvider (from a corresponding TxnEncoderAgent)
     // Also performs signature validation on the given txn, meaning that if no err is returned,
@@ -83,11 +83,7 @@ type TxnDecoder interface {
         outSegment *TxnSegment, // If non-nil, populated w/ the segment data from inTxn 
     ) error
 
-
 }
-
-
-
 
 
 
