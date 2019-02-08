@@ -7,31 +7,31 @@ import (
 )
 
 const (
-	txnEncoderInvocation1 = "/plan/pdi/encoding/invocation/datastore/1"
+	txnEncodingDesc1 = "/plan/pdi/encoding/datastore/1"
 )
 
 // dsDecoder implements pdi.TxnDecoder
 type dsDecoder struct {
 	pdi.TxnDecoder
 
-	encoderInvocation string
-	hashKits          map[ski.HashKitID]ski.HashKit
+	encodingDesc string
+	hashKits     map[ski.HashKitID]ski.HashKit
 }
 
 // NewTxnDecoder creates a TxnDecoder for use with pdi-datastore
 func NewTxnDecoder() pdi.TxnDecoder {
 
 	dec := &dsDecoder{
-		hashKits:          map[ski.HashKitID]ski.HashKit{},
-		encoderInvocation: txnEncoderInvocation1,
+		hashKits:     map[ski.HashKitID]ski.HashKit{},
+		encodingDesc: txnEncodingDesc1,
 	}
 
 	return dec
 }
 
-// GetEncoderInvocation -- see TxnDecoder
-func (dec *dsDecoder) TxnEncoderInvocation() string {
-	return dec.encoderInvocation
+// EncodingDesc -- see TxnDecoder
+func (dec *dsDecoder) EncodingDesc() string {
+	return dec.encodingDesc
 }
 
 // DecodeRawTxn -- See TxnDecoder

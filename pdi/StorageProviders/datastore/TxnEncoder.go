@@ -15,12 +15,11 @@ type dsEncoder struct {
 
 	SegmentMaxSz int
 
-	invocation string
-
-	hashKit     ski.HashKit
-	author      ski.PubKey
-	communityID []byte
-	skiSession  ski.Session
+	encodingDesc string
+	hashKit      ski.HashKit
+	author       ski.PubKey
+	communityID  []byte
+	skiSession   ski.Session
 }
 
 // TxnNameByteLen is the length of txn names used by this agent (and its sister StorageProvider implementation)
@@ -51,16 +50,16 @@ func NewTxnEncoder(
 
 // ResetSession --see TxnEncoder
 func (enc *dsEncoder) ResetSession(
-	inInvocation string,
+	inEncodingDesc string,
 	inSession ski.Session,
 	inCommunityID []byte,
 ) error {
 
-	if inInvocation != "" && inInvocation != txnEncoderInvocation1 {
-		return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inInvocation, txnEncoderInvocation1)
+	if inEncodingDesc != "" && inEncodingDesc != txnEncodingDesc1 {
+		return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inEncodingDesc, txnEncodingDesc1)
 	}
 
-	enc.invocation = inInvocation
+	enc.encodingDesc = inEncodingDesc
 	enc.skiSession = inSession
 	enc.communityID = inCommunityID
 

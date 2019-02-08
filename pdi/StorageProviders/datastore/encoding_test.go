@@ -112,7 +112,7 @@ func txnEncodingTest(A *testSession) {
 
 		{
 			err := encoder.ResetSession(
-				decoder.TxnEncoderInvocation(),
+				decoder.EncodingDesc(),
 				A.Session,
 				gCommunityID[:],
 			)
