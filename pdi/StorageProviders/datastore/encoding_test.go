@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"math/rand"
 	"testing"
+    "fmt"
 
 	"github.com/plan-systems/go-plan/pdi"
 	"github.com/plan-systems/go-plan/plan"
@@ -64,7 +65,7 @@ func TestVarAppendBuf(t *testing.T) {
 	}
 }
 
-func TestFileSysSKI(t *testing.T) {
+func TestTxnEncoding(t *testing.T) {
 
 	gTesting = t
 
@@ -106,9 +107,11 @@ func txnEncodingTest(A *testSession) {
 
 	// Test agent encode/decode
 	{
+        maxSegSize := 1000
+        
 		blobBuf := make([]byte, 500000)
 		decoder := NewTxnDecoder()
-		encoder, _ := NewTxnEncoder(1000)
+		encoder, _ := NewTxnEncoder(maxSegSize)
 
 		{
 			err := encoder.ResetSession(
@@ -131,43 +134,79 @@ func txnEncodingTest(A *testSession) {
 			}
 		}
 
-		for i := 0; i < 100; i++ {
 
-			blobLen := int(rand.Int31n(1 + rand.Int31n(5000)))
+        txns := make([]*pdi.DecodedTxn, 10000)
+
+        collator := pdi.NewTxnCollater()
+
+		for i := 0; i < 100; i++ {
+            testTime := plan.Now().UnixSecs
+
+			blobLen := int(rand.Int31n(1 + rand.Int31n(int32(maxSegSize) * 10)))
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)
 
-			txns, err := encoder.EncodeToTxns(
+			rawTxns, err := encoder.EncodeToTxns(
 				payload,
-				[]byte{4, 3, 2, 1},
+				fmt.Sprintf("e pluribus unum %d", i),
 				pdi.PayloadCodec_Unspecified,
 				nil,
+                testTime + int64(i),
 			)
 			if err != nil {
 				gTesting.Fatal(err)
 			}
 
-			for _, txn := range txns {
-				decodedInfo := pdi.TxnInfo{}
-				decodedSeg := pdi.TxnSegment{}
+            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", i, len(rawTxns), len(payload))
 
-				err := decoder.DecodeRawTxn(
-					txn.RawTxn,
-					&decodedInfo,
-					&decodedSeg,
+            prevUTID := ""
+
+			for idx, rawTxn := range rawTxns {
+				decodedTxn := &pdi.DecodedTxn{}
+
+				err = decodedTxn.DecodeRawTxn(
+					rawTxn,
+					decoder,
 				)
 				if err != nil {
 					gTesting.Fatal(err)
-				}
+                }
+                if prevUTID != decodedTxn.Info.SegPrev {
+                    gTesting.Fatal("prev seg UTID not set properly")
+                }
 
-				b1, _ := decodedInfo.Marshal()
-				b2, _ := txn.TxnInfo.Marshal()
-				if bytes.Compare(b1, b2) != 0 {
-					gTesting.Fatal("txn seg info check failed")
-				}
-				//if Bytes.Compare(decodedSeg.SegData, txn.
-			}
+                txns[idx] = decodedTxn
+                prevUTID = decodedTxn.UTID
+            }
+            N := len(rawTxns)
+
+            rand.Shuffle(N, func(i, j int) {
+                txns[i], txns[j] = txns[j], txns[i]
+            })
+
+            var final *pdi.DecodedTxn
+            for i := 0; i < N; i++ {
+                final, err = collator.Desegment(txns[i])
+                if err != nil {
+                    gTesting.Fatal(err)
+                }
+                if final != nil && i < N - 1 {
+                    gTesting.Fatal("got final too soon")
+                }
+            }
+
+            if final == nil {
+                gTesting.Fatal("didn't get final txn")
+            }
+
+            if bytes.Compare(payload, final.PayloadSeg) != 0 {
+                gTesting.Fatal("payload failed")
+            }
+
+            if final.UTID != prevUTID {
+                gTesting.Fatal("last UTID chk failed")
+            }
 		}
 	}
 }
