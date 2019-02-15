@@ -24,13 +24,11 @@ import (
     "github.com/ipfs/go-ds-badger"
     "github.com/ipfs/go-ds-leveldb"
     boltds "github.com/ipfs/go-ds-bolt"
-
-    //"github.com/tidwall/redcon"
+    //"github.com/dgraph-io/badger"
 
     //"github.com/plan-systems/go-plan/ski"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pdi"
-    //_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
 
 
   
@@ -44,12 +42,6 @@ type StorageConfig struct {
 }
 
 
-type failedJob struct {
-    Error                       error
-    QueryJob                    *QueryJob
-    CommitJob                   *CommitJob
-}
-
 // Store wraps a PLAN community UUID and a datastore
 type Store struct {
     CommunityID                 plan.CommunityID
@@ -62,12 +54,11 @@ type Store struct {
 
     commitScrap                 []byte
 
+    //db                          *badger.DB
     ds                          ds.Datastore
 
     QueryInbox                  chan *QueryJob
     CommitInbox                 chan *CommitJob
-
-    FailedJobs                  chan failedJob    
 
     // close when shutting down (polite shutdown)
     shuttingDown                chan *sync.WaitGroup
@@ -80,21 +71,6 @@ type Store struct {
 
 }
 
-
-/*
-type Log struct {
-}
-
-
-
-func (L *Log) LogErr(inErr Err) {
-    log.Error(inErr)
-}
-
-func (L *Log) LogErr(inErr Err) {
-    log.Error(inErr)
-}
-*/
 
 // DefaultImplName should be used when a datastore impl is not specified
 const DefaultImplName = "badger"
@@ -110,7 +86,6 @@ func NewStore(
         DefaultFileMode: plan.DefaultFileMode,
         QueryInbox: make(chan *QueryJob),
         CommitInbox: make(chan *CommitJob, 16),
-        FailedJobs: make(chan failedJob, 4),
         shuttingDown: make(chan *sync.WaitGroup),
         log: log.StandardLogger(),
     }
@@ -256,26 +231,6 @@ func AccountKeyForPubKey(pubKey []byte) ds.Key {
 }
 
 
-
-
-
-/*
-func (k ds.Key) Equals(inTime int64, inTxnName []byte) bool {
-    if len(k) != encodedKeyLen {
-        return false
-    }
-    if binary.BigEndian.Uint64(tk[0:8]) != uint64(inTime) {
-        return false
-    }
-    if bytes.Compare(tk[8:16], inTxnName) != 0 {
-        return false
-    }
-
-    return true
-}
-*/
-
-
 func (St *Store) startProcessingJobs() {
 
     // CommitInbox processor
@@ -285,7 +240,7 @@ func (St *Store) startProcessingJobs() {
 
         // TODO: add throttling?
 
-        // Don't' stop looping until the commit inbox is clear
+        // Keep looping until the commit inbox is clear
         for doneSignal == nil {
 
             select {
@@ -322,10 +277,6 @@ func (St *Store) startProcessingJobs() {
         doneSignal.Done()
     }()
 
-}
-
-var txnCommitting = pdi.TxnMetaInfo{
-    TxnStatus: pdi.TxnStatus_COMMITTING,
 }
 
 
@@ -424,23 +375,29 @@ func (St *Store) DepositTransfers(inTransfers []*pdi.Transfer) error {
     return txn.FatalErr()
 }
 
+const txnKeyPrefix = "/"
+const txnKeyPrefixLen = 1
 
 func (St *Store) doCommitJob(commitJob *CommitJob) {
 
-    commitJob.Outlet.Send(&txnCommitting)
 
     var (
         txnInfo pdi.TxnInfo
         dsKey ds.Key
     )
 
-    err := St.TxnDecoder.DecodeRawTxn(
+    _, err := St.TxnDecoder.DecodeRawTxn(
         commitJob.ReadiedTxn.RawTxn,
         &txnInfo,
-        nil,
     )
 
+    var txnMetaInfo pdi.TxnMetaInfo
+
     if err == nil {
+        
+        txnMetaInfo.TxnStatus = pdi.TxnStatus_COMMITTING
+        commitJob.Outlet.Send(&txnMetaInfo)
+
         txn := St.NewTxnHelper()
 
         for txn.NextAttempt() {
@@ -506,10 +463,8 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
     if err == nil {
 
         // Since this is a centralized db, every txn committed is finalized
-        commitJob.Outlet.Send(&pdi.TxnMetaInfo{
-            TxnStatus: pdi.TxnStatus_FINALIZED,
-            ConsensusTime: 0,   // TODO: set me!
-        })
+        txnMetaInfo.TxnStatus = pdi.TxnStatus_FINALIZED
+        commitJob.Outlet.Send(&txnMetaInfo)
 
     } else {
 
@@ -522,19 +477,14 @@ func (St *Store) doCommitJob(commitJob *CommitJob) {
             "dsKey": dsKey,
         }).Warn(err)
 
-        commitJob.Outlet.Send(&pdi.TxnMetaInfo{
-            TxnStatus: pdi.TxnStatus_FAILED_TO_COMMIT,
-            Alert: &plan.Status{
-                Code: perr.Code,
-                Msg: perr.Msg,
-            },
-        })
-
-        fj := failedJob{
-            Error: err,
-            CommitJob: commitJob,
+        txnMetaInfo.TxnStatus = pdi.TxnStatus_FAILED_TO_COMMIT
+        txnMetaInfo.Alert =  &plan.Status{
+            Code: perr.Code,
+            Msg: perr.Msg,
         }
-        St.FailedJobs <- fj
+        commitJob.Outlet.Send(&txnMetaInfo)
+
+        St.log.WithError(err).Warn("CommitJob error")
     }
 
     // This releases the GRPC handler
@@ -547,58 +497,43 @@ func (St *Store) doQueryJob(job *QueryJob) {
     // Note how if len(job.TxnQuery.TxnHashname) == 0, then .Prefix becomes only the encoded timestamp 
     qryParams := dsq.Query{
         Prefix: "/0",
-        SeekPrefix: pdi.FormUTID("/", job.TxnQuery.TimestampMin, job.TxnQuery.TxnHashname),
-        KeysOnly: job.TxnQuery.OmitRawTxn,
+        SeekPrefix: pdi.FormUTID("/", job.TxnQuery.TimestampMin, nil),
+        KeysOnly: true,
     }
 
     qry, err := St.ds.Query(qryParams)
     if err != nil {
         err = plan.Error(err, plan.TxnQueryFailed, "db.Query() failed")
-        log.Error(err)
     }
 
     stopKey := pdi.FormUTID("/", job.TxnQuery.TimestampMax, nil)
 
     const batchMax = 20
     var (
-        txnBatch    [batchMax]pdi.Txn
-        txnMetaInfo [batchMax]pdi.TxnMetaInfo
-        txns        [batchMax]*pdi.Txn
+        txnUTID     [batchMax]string
     )
-
-    for i := 0; i < batchMax; i++ {
-        txns[i] = &txnBatch[i]
-        txns[i].TxnMetaInfo = &txnMetaInfo[i]
-    }
 
     for err == nil && qry != nil {
     
         batchCount := int32(0)
         totalCount := int32(0)
+        approxSz := 0
 
         for result := range qry.Next() {
-            if result.Error != nil {
-                err = result.Error
 
-                if false {
-                    qry = nil   // Signal the query is over
-                }
-                break
+            err = result.Error
+            if err != nil {
+                err = plan.Error(err, plan.TxnQueryFailed, "dsq.Query.Next() error")
             }
 
-            if result.Key > stopKey {
+            if result.Key > stopKey || err != nil {
                 qry.Close()
                 qry = nil
                 break
             }
 
-            txn :=  txns[batchCount]
-
-            txn.UTID = result.Key[2:]
-            
-            if ! job.TxnQuery.OmitRawTxn {
-                txn.RawTxn = result.Entry.Value
-            }
+            approxSz += 100
+            txnUTID[batchCount] = result.Key[2:]
 
             batchCount++
             totalCount++
@@ -606,12 +541,14 @@ func (St *Store) doQueryJob(job *QueryJob) {
                 qry.Close()
                 qry = nil
                 break
+            } else if batchCount == batchMax {
+                break
             }
         }
 
         if err == nil && batchCount > 0 {
-            job.Outlet.Send(&pdi.TxnBundle{
-                Txns: txns[:batchCount],
+            job.Outlet.Send(&pdi.TxnBatch{
+                UTIDs: txnUTID[:batchCount],
             })
         }
 
@@ -622,12 +559,7 @@ func (St *Store) doQueryJob(job *QueryJob) {
     }
 
     if err != nil {
-
-        fj := failedJob{
-            Error: err,
-            QueryJob: job,
-        }
-        St.FailedJobs <- fj
+        St.log.WithError(err).Warn("QueryJob error")   
     }
 
     // This releases the GRPC handler
