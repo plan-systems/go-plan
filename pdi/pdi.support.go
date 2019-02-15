@@ -324,17 +324,17 @@ func NewStorageAlert(
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
 	inData           []byte,
-    inPayloadLabel   []byte,
+    inPayloadLabel   string,
     inPayloadCodec   PayloadCodec, 
 	inMaxSegmentSize int,
-) ([]*TxnSegment, error) {
+) ([]*TxnInfo, error) {
 
     payloadSz := len(inData)
 	bytesRemain := payloadSz
 	pos := 0
 
 	N := (payloadSz + inMaxSegmentSize - 1) / inMaxSegmentSize
-	txns := make([]*TxnSegment, 0, N)
+	segs := make([]*TxnInfo, 0, N)
 
 	for bytesRemain > 0 {
 
@@ -343,28 +343,25 @@ func SegmentIntoTxns(
 			segSz = inMaxSegmentSize
 		}
 
-		txns = append(txns, &TxnSegment{
-            SegInfo: &TxnSegInfo{
-                PayloadCodec: inPayloadCodec,
-                PayloadLabel: inPayloadLabel,
-                PayloadLength: int32(payloadSz), 
-                SegmentLength: int32(segSz),
-            },
-			SegData: inData[pos:pos+segSz],
+		segs = append(segs, &TxnInfo{
+            PayloadCodec: inPayloadCodec,
+            PayloadLabel: inPayloadLabel,
+            PayloadSz: int32(payloadSz), 
+            SegSz: int32(segSz),
 		})
 
 		pos += segSz
         bytesRemain -= segSz
 	}
 
-	for i, txn := range txns {
-		txn.SegInfo.SegmentNum = uint32(i)
-		txn.SegInfo.TotalSegments = uint32(len(txns))
+	for i, seg := range segs {
+		seg.SegIndex = uint32(i)
+		seg.SegTotal = uint32(N)
 	}
 
     plan.Assert(bytesRemain == 0, "assertion failed in SegmentIntoTxns {N:%d, bytesRemain:%d}", N, bytesRemain)
 
-	return txns, nil
+	return segs, nil
 
 }
 

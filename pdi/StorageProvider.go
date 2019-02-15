@@ -21,6 +21,8 @@ import (
 
 
 
+// TxnSegmentMaxSz allows malicious-sized txns to be detected
+const TxnSegmentMaxSz = 100 * 1024 * 1024
 
 
 // TxnEncoder encodes arbitrary data payloads into storage txns native to a specific StorageProvider.  
@@ -53,10 +55,11 @@ type TxnEncoder interface {
     // Pre: ResetSession() *and* ResetAuthorID() must be successfully called.
     EncodeToTxns(
         inPayload      []byte, 
-        inPayloadName  []byte,
+        inPayloadLabel string,
         inPayloadCodec PayloadCodec, 
         inTransfers    []*Transfer, 
-    ) ([]*Txn, error)
+        inTimeSealed   int64,           // If non-zero, this is used in place of the current time
+    ) ([][]byte, error)
 
 
     // Generates a txn that destroys the given address from committing any further txns.
@@ -74,14 +77,14 @@ type TxnDecoder interface {
     // EncodingDesc returns a string for use in TxnEncoder.ResetSession()
     EncodingDesc() string
 
-    // Decodes a raw txn to/from a StorageProvider (from a corresponding TxnEncoderAgent)
+    // Decodes a raw txn from a StorageProvider (from a corresponding TxnEncoder)
     // Also performs signature validation on the given txn, meaning that if no err is returned,
     //    then the txn was indeed signed by outInfo.From.
+    // Returns the payload buffer segment buf.
     DecodeRawTxn(
         inRawTxn   []byte,      // Raw txn to be decoded
         outInfo    *TxnInfo,    // If non-nil, populated w/ info extracted from inTxn
-        outSegment *TxnSegment, // If non-nil, populated w/ the segment data from inTxn 
-    ) error
+    ) ([]byte, error)
 
 }
 

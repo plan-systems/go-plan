@@ -42,8 +42,13 @@ func NewTxnEncoder(
 	}
 
 	if enc.SegmentMaxSz <= 0 {
-		enc.SegmentMaxSz = 10000
+		enc.SegmentMaxSz = 100 * 1024
 	}
+
+    maxSz := pdi.TxnSegmentMaxSz - 20000
+    if enc.SegmentMaxSz > maxSz {
+        enc.SegmentMaxSz = maxSz
+    }
 
 	return enc, nil
 }
@@ -130,10 +135,11 @@ func (enc *dsEncoder) ResetAuthorID(
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
 func (enc *dsEncoder) EncodeToTxns(
 	inPayload []byte,
-	inPayloadLabel []byte,
+	inPayloadLabel string,
 	inPayloadCodec pdi.PayloadCodec,
 	inTransfers []*pdi.Transfer,
-) ([]*pdi.Txn, error) {
+    timeSealed int64,
+) ([][]byte, error) {
 
 	if err := enc.checkReady(); err != nil {
 		return nil, err
@@ -149,13 +155,18 @@ func (enc *dsEncoder) EncodeToTxns(
 		return nil, err
 	}
 
-	txns := make([]*pdi.Txn, len(segs))
+	txns := make([][]byte, len(segs))
 
 	var signErr error
 
+    // Put the transfers in the last segment
+    segs[len(segs)-1].Transfers = inTransfers
+
 	{
 		// Use the same time stamp for the entire batch
-		timeSealed := plan.Now().UnixSecs
+		if timeSealed == 0 {
+            timeSealed = plan.Now().UnixSecs
+        }
 
 		hashKit := enc.hashKit
 
@@ -166,60 +177,60 @@ func (enc *dsEncoder) EncodeToTxns(
 		}
 
 		signErrHandle := &signErr
-		signingDone := &sync.WaitGroup{}
-		signingDone.Add(len(txns))
+		txnDone := &sync.WaitGroup{}
+        pos := int32(0)
+        payloadSz := int32(len(inPayload))
 
-		for i := range txns {
+		for i, seg := range segs {
 
-			segSz := len(segs[i].SegData)
-
-			if segSz != int(segs[i].SegInfo.SegmentLength) {
+			if pos + seg.SegSz > payloadSz {
 				return nil, plan.Error(nil, plan.AssertFailed, "failed SegInfo payload size check")
 			}
 
-			txnInfo := &pdi.TxnInfo{
-				SegInfo:    segs[i].SegInfo,
-				From:       enc.author.Bytes,
-				TimeSealed: timeSealed,
-				Transfers:  inTransfers,
-				HashKitId:  hashKit.HashKitID,
-			}
+            seg.TxnHashname = nil
+    		seg.From = enc.author.Bytes
+            seg.TimeSealed = timeSealed
+            seg.HashKitId = hashKit.HashKitID
+
+            if i > 0 {
+                seg.SegPrev = pdi.FormUTID("", segs[i-1].TimeSealed, segs[i-1].TxnHashname)
+            }
 
 			// Add extra for length signature and len bytes
-			rawTxn := make([]byte, 500+txnInfo.Size()+segSz+len(inTransfers)*200)
-
-			// Only put the transfers in the first txnInfo.
-			inTransfers = nil
+			rawTxn := make([]byte, 500 + seg.Size() + int(seg.SegSz))
 
 			// 1) Append the TxnInfo
-			txnLen, merr := txnInfo.MarshalTo(rawTxn[2:])
+			infoLen, merr := seg.MarshalTo(rawTxn[2:])
 			if merr != nil {
 				return nil, plan.Error(merr, plan.FailedToMarshal, "failed to marshal txnInfo")
 			}
-			rawTxn[0] = byte((txnLen >> 8) & 0xFF)
-			rawTxn[1] = byte(txnLen & 0xFF)
-			txnLen += 2
+			rawTxn[0] = byte((infoLen >> 8) & 0xFF)
+			rawTxn[1] = byte(infoLen & 0xFF)
+			txnLen := int32(infoLen) + 2
 
 			// 2) Append the payload buf
-			copy(rawTxn[txnLen:txnLen+segSz], segs[i].SegData)
-			txnLen += segSz
+			copy(rawTxn[txnLen:txnLen + seg.SegSz], inPayload[pos:pos + seg.SegSz])
+			txnLen += seg.SegSz
+            pos    += seg.SegSz
 
 			// 3) Calc the txn digest
 			hashKit.Hasher.Reset()
 			hashKit.Hasher.Write(rawTxn[:txnLen])
-			txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
+			seg.TxnHashname = hashKit.Hasher.Sum(nil)
 
-			if len(txnInfo.TxnHashname) != hashKit.Hasher.Size() {
+			if len(seg.TxnHashname) != hashKit.Hasher.Size() {
 				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
 			}
 
-			signOp.Msg = txnInfo.TxnHashname
+    		txnDone.Add(1)
+
+			signOp.Msg = seg.TxnHashname
 			enc.skiSession.DispatchOp(
 				signOp,
 				func(inResults *plan.Block, inErr error) {
 					if inErr == nil {
 						sig := inResults.Content
-						sigLen := len(sig)
+						sigLen := int32(len(sig))
 						copy(rawTxn[txnLen:], sig)
 						txnLen += sigLen
 
@@ -227,23 +238,25 @@ func (enc *dsEncoder) EncodeToTxns(
 						rawTxn[txnLen] = byte(sigLen >> 2)
 						txnLen++
 
-						txns[i] = &pdi.Txn{
-							TxnInfo: txnInfo,
-							RawTxn:  rawTxn[:txnLen],
-						}
+						txns[i] = rawTxn[:txnLen]
 					}
 
 					if inErr != nil && *signErrHandle == nil {
 						*signErrHandle = inErr
 					}
 
-					signingDone.Done()
+					txnDone.Done()
 				},
 			)
+
+		    // Wait for len(txns) number of results before we're done
+		    txnDone.Wait()
 		}
 
-		// Wait for len(txns) number of results before we're done
-		signingDone.Wait()
+        if pos != payloadSz {
+			return nil, plan.Error(nil, plan.AssertFailed, "payloadSz chk failed")
+		}
+
 	}
 
 	if signErr != nil {

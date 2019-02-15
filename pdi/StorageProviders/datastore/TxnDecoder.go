@@ -38,29 +38,24 @@ func (dec *dsDecoder) EncodingDesc() string {
 func (dec *dsDecoder) DecodeRawTxn(
 	rawTxn []byte,
 	outInfo *pdi.TxnInfo,
-	outSegment *pdi.TxnSegment,
-) error {
+) ([]byte, error) {
 
 	txnLen := len(rawTxn)
 	if txnLen < 50 {
-		return plan.Errorf(nil, plan.FailedToUnmarshal, "raw txn is too small (txnLen=%v)", txnLen)
+		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "raw txn is too small (txnLen=%v)", txnLen)
 	}
 
 	// 1) Unmarshal the txn info
 	var txnInfo pdi.TxnInfo
 	pos := 2 + (int(rawTxn[0]) >> 8) + int(rawTxn[1])
 	if err := txnInfo.Unmarshal(rawTxn[2:pos]); err != nil {
-		return plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
-	}
-	if txnInfo.SegInfo == nil {
-		return plan.Error(nil, plan.TxnPartsMissing, "txn is missing segment info")
+		return nil, plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
 	}
 
 	// 2) Extract the payload buf
-	end := pos + int(txnInfo.SegInfo.SegmentLength)
+	end := pos + int(txnInfo.SegSz)
 	if end > txnLen {
-		return plan.Errorf(nil, plan.FailedToUnmarshal, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
-
+		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
 	}
 	payloadBuf := rawTxn[pos:end]
 
@@ -68,22 +63,22 @@ func (dec *dsDecoder) DecodeRawTxn(
 	sigLen := int(rawTxn[txnLen-1]) << 2
 	txnLen -= 1 + sigLen
 	if txnLen < 10 {
-		return plan.Errorf(nil, plan.FailedToUnmarshal, "txn sig len is wrong (txnLen=%v, sigLen=%v)", txnLen, sigLen)
+		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "txn sig len is wrong (txnLen=%v, sigLen=%v)", txnLen, sigLen)
 	}
 	sig := rawTxn[txnLen : txnLen+sigLen]
 
 	// 4) Prep the hasher so we can generate a digest
 	hashKit, ok := dec.hashKits[txnInfo.HashKitId]
-	if !ok {
+	if ! ok {
 		var err error
 		hashKit, err = ski.NewHashKit(txnInfo.HashKitId)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		dec.hashKits[txnInfo.HashKitId] = hashKit
 	}
 
-	// 5) Calculate the digest of the raw txn
+	// 5) Calculate the hash digest and thus UTID of the raw txn
 	hashKit.Hasher.Reset()
 	hashKit.Hasher.Write(rawTxn[:txnLen])
 	txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
@@ -94,19 +89,12 @@ func (dec *dsDecoder) DecodeRawTxn(
 		Bytes:     txnInfo.From,
 	}
 	if err := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, pubKey); err != nil {
-		return err
+		return nil, err
 	}
 
 	if outInfo != nil {
 		*outInfo = txnInfo
 	}
 
-	if outSegment != nil {
-		*outSegment = pdi.TxnSegment{
-			SegInfo: txnInfo.SegInfo,
-			SegData: payloadBuf,
-		}
-	}
-
-	return nil
+	return payloadBuf, nil
 }
