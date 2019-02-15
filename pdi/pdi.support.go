@@ -326,15 +326,15 @@ func SegmentIntoTxns(
 	inData           []byte,
     inPayloadLabel   string,
     inPayloadCodec   PayloadCodec, 
-	inMaxSegmentSize int,
+	inMaxSegmentSize int32,
 ) ([]*TxnInfo, error) {
 
-    payloadSz := len(inData)
-	bytesRemain := payloadSz
-	pos := 0
+    payloadSz := int32(len(inData))
+	bytesRemain := int32(payloadSz)
 
 	N := (payloadSz + inMaxSegmentSize - 1) / inMaxSegmentSize
 	segs := make([]*TxnInfo, 0, N)
+    pos := int32(0)
 
 	for bytesRemain > 0 {
 
@@ -346,8 +346,7 @@ func SegmentIntoTxns(
 		segs = append(segs, &TxnInfo{
             PayloadCodec: inPayloadCodec,
             PayloadLabel: inPayloadLabel,
-            PayloadSz: int32(payloadSz), 
-            SegSz: int32(segSz),
+            SegSz: segSz,
 		})
 
 		pos += segSz
@@ -364,7 +363,6 @@ func SegmentIntoTxns(
 	return segs, nil
 
 }
-
 
 
 

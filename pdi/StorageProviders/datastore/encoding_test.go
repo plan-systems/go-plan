@@ -107,7 +107,7 @@ func txnEncodingTest(A *testSession) {
 
 	// Test agent encode/decode
 	{
-        maxSegSize := 1000
+        maxSegSize := int32(1000)
         
 		blobBuf := make([]byte, 500000)
 		decoder := NewTxnDecoder()
@@ -142,7 +142,7 @@ func txnEncodingTest(A *testSession) {
 		for i := 0; i < 100; i++ {
             testTime := plan.Now().UnixSecs
 
-			blobLen := int(rand.Int31n(1 + rand.Int31n(int32(maxSegSize) * 10)))
+			blobLen := int(rand.Int31n(1 + rand.Int31n(maxSegSize * 10)))
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)

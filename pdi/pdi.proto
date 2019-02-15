@@ -93,7 +93,7 @@ message TxnInfo {
     repeated    Transfer        transfers               = 2;
 
     /*****************************************************
-    ** Payload Info
+    ** Payload Info (identical for each segment)
     **/
 
     // Describes how to to decode the payload data (this value is identical for each segment that comprises a reassembled payload)
@@ -104,14 +104,11 @@ message TxnInfo {
     // This is generally assumed to be a string-friendly variant of a hash of the payload.
                 string          payload_label           = 5;
 
-    // Payload byte size 
-                int32           payload_sz              = 6;
-                
     /*****************************************************
     ** Txn Packaging Info
     **/
 
-    // Segment byte size 
+    // Segment byte size
                 int32           seg_sz                  = 8;
 
     // When a client payload is large, it must be split into multiple native txns.

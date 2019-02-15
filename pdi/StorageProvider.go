@@ -22,7 +22,7 @@ import (
 
 
 // TxnSegmentMaxSz allows malicious-sized txns to be detected
-const TxnSegmentMaxSz = 100 * 1024 * 1024
+const TxnSegmentMaxSz = 10 * 1024 * 1024
 
 
 // TxnEncoder encodes arbitrary data payloads into storage txns native to a specific StorageProvider.  

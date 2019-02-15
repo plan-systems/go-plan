@@ -17,6 +17,11 @@ func (txn *DecodedTxn) DecodeRawTxn(
 	inDecoder TxnDecoder,
 ) error {
 
+    // Don't even try to decode the txn if it's suspiciously large
+    if len(inRawTxn) > TxnSegmentMaxSz + 10000 {
+        return plan.Errorf(nil, plan.TxnFailedToDecode, "txn exceeds safe max segment limit")
+    }
+
 	var err error
 	txn.PayloadSeg, err = inDecoder.DecodeRawTxn(inRawTxn, &txn.Info)
 
@@ -54,7 +59,6 @@ func (group *segGroup) MergeSegment(seg *DecodedTxn) error {
 	segSz := int32(len(seg.PayloadSeg))
 
 	if group.Info.SegTotal != seg.Info.SegTotal ||
-		group.Info.PayloadSz != seg.Info.PayloadSz ||
 		group.Info.PayloadCodec != seg.Info.PayloadCodec {
 
 		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed consistency check", seg.UTID)
@@ -62,6 +66,8 @@ func (group *segGroup) MergeSegment(seg *DecodedTxn) error {
 		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v seg index exceeds total", seg.UTID)
 	} else if segSz != seg.Info.SegSz {
 		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v seg sz non consistent: expected %d, got %d", seg.UTID, seg.Info.SegSz, segSz)
+    } else if segSz > TxnSegmentMaxSz {
+		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v seg sz %d exceeds max limit", seg.UTID, segSz)
 	}
 
 	if group.Segs[idx] == nil {
@@ -84,38 +90,39 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 		return nil, nil
 	}
 
-	// We know each segment is good to go b/c MergeSegment() checks each seg as it comes in.
-	soleBuf := make([]byte, group.Info.PayloadSz)
-
+	totalSz := int32(0)
 	prevUTID := ""
-	pos := int32(0)
 
-	// First verify all the segments agree
-	for idx, seg := range group.Segs {
+	// First verify all segments present and calc size
+	for _, seg := range group.Segs {
 
-		posEnd := pos + seg.Info.SegSz
-
-		if seg.Info.SegPrev != prevUTID {
+        if seg.Info.SegPrev != prevUTID {
 			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg UTID %v, got %v", seg.UTID, seg.Info.SegPrev, prevUTID)
-		} else if posEnd > group.Info.PayloadSz {
-			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v (seg idx=%d of %d) would overrun payload buf", seg.UTID, idx+1, N)
 		}
 
-		copy(soleBuf[pos:posEnd], seg.PayloadSeg)
+		totalSz += seg.Info.SegSz
 
-		pos = posEnd
 		prevUTID = seg.UTID
 	}
 
-	if pos != group.Info.PayloadSz {
-		return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn seg data totaled %d, expected %d", pos, group.Info.PayloadSz)
+
+	// We know each segment is good to go b/c MergeSegment() checks each seg as it comes in.
+	soleBuf := make([]byte, totalSz)
+    pos := int32(0)
+
+	// Next, assemble the segment data
+	for _, seg := range group.Segs {
+
+		segEnd := pos + seg.Info.SegSz
+		copy(soleBuf[pos:segEnd], seg.PayloadSeg)
+		pos = segEnd
 	}
 
 	// Cannibalize the a segment as our consolidated/unified seg.  We choose the last one b/c the final/last UTID is already set.
 	// We know each segment is good to go b/c MergeSegment() checks each seg as it comes in.
 	sole := group.Segs[N-1]
 	sole.PayloadSeg = soleBuf
-	sole.Info.SegSz = pos
+	sole.Info.SegSz = totalSz
 	sole.Info.SegIndex = 0
 	sole.Info.SegTotal = 1
 	sole.Info.SegPrev = ""
@@ -134,20 +141,15 @@ func (tc *TxnCollater) Desegment(seg *DecodedTxn) (*DecodedTxn, error) {
 		sole *DecodedTxn
 		err  error
 	)
-
 	segSz := int32(len(seg.PayloadSeg))
 
 	// If there's only a single segment, we can decode immediately.
 	if seg.Info.SegTotal < 1 || seg.Info.SegIndex >= seg.Info.SegTotal {
-		err = plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, segNum=%d TotalSegments=%d", seg.UTID, seg.Info.SegIndex, seg.Info.SegTotal)
-	} else if seg.Info.SegSz != segSz {
+		err = plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.UTID, seg.Info.SegIndex, seg.Info.SegTotal)
+    } else if seg.Info.SegSz != segSz {
 		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.UTID, seg.Info.SegSz, segSz)
 	} else if seg.Info.SegTotal == 1 {
-		if seg.Info.PayloadSz != segSz {
-			err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad payload len: expected %d, got %d", seg.UTID, seg.Info.PayloadSz, segSz)
-		} else {
-			sole = seg
-		}
+		sole = seg
 	} else {
 		group := tc.segGroups[seg.Info.PayloadLabel]
 		if group == nil {

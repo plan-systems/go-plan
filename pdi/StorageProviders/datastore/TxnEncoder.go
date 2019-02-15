@@ -13,7 +13,7 @@ import (
 type dsEncoder struct {
 	pdi.TxnEncoder
 
-	SegmentMaxSz int
+	SegmentMaxSz int32
 
 	encodingDesc string
 	hashKit      ski.HashKit
@@ -28,7 +28,7 @@ type dsEncoder struct {
 // NewTxnEncoder creates a new StorageProviderAgent for use with a pdi-datastore StorageProvider.
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
-	inSegmentMaxSz int,
+	inSegmentMaxSz int32,
 ) (pdi.TxnEncoder, error) {
 
 	defaultKit, perr := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
@@ -45,7 +45,7 @@ func NewTxnEncoder(
 		enc.SegmentMaxSz = 100 * 1024
 	}
 
-    maxSz := pdi.TxnSegmentMaxSz - 20000
+    maxSz := int32(pdi.TxnSegmentMaxSz) - 20000
     if enc.SegmentMaxSz > maxSz {
         enc.SegmentMaxSz = maxSz
     }
