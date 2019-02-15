@@ -16,11 +16,11 @@ func TestErrors(t *testing.T) {
     if os.IsNotExist(err) {
 
         num := 55
-        perr := Errorf(err, PDIEntryErrorFamily, "custom msg {val:%d}", num)
+        perr := Errorf(err, GenericErrorFamily, "custom msg {val:%d}", num)
 
         actual := perr.Error()
 
-        expected := "custom msg {val:[55]} {code:5000, err:{open FileNotHere.yo: no such file or directory}}"
+        expected := "custom msg {val:55} {code:5000, err:{open FileNotHere.yo: no such file or directory}}"
         if actual != expected {
             t.Fatalf("got \"%v\", expected \"%v\"", actual, expected)
         }
