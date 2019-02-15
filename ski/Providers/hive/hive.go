@@ -302,13 +302,12 @@ func (session *Session) checkOpParamsAndPermissions(
 }
 
 
-// DispatchOp -- see ski.Session
-func (session *Session) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompletionHandler) {
+// DoOp -- see ski.Session
+func (session *Session) DoOp(inArgs ski.OpArgs) (*plan.Block, error) {
 
     err := session.checkOpParamsAndPermissions(&inArgs)
     if err != nil {
-        inOnCompletion(nil, err)
-        return
+        return nil, err
     }
 
     mutates := false
@@ -321,8 +320,7 @@ func (session *Session) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompl
 
     keyringSet, err := session.KeyRepo.FetchKeyringSet(inArgs.CommunityID, mutates)
     if err != nil {
-        inOnCompletion(nil, err)
-        return
+        return nil, err
     }
 
     plan.Assert(keyringSet != nil, "expected keyringSet for non-nil error!")
@@ -363,7 +361,7 @@ func (session *Session) DispatchOp(inArgs ski.OpArgs, inOnCompletion ski.OpCompl
         session.autoSaveMutex.Unlock()
     }
 
-    inOnCompletion(results, err)
+    return results, err
 }
 
 

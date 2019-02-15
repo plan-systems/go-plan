@@ -1,7 +1,6 @@
 package datastore
 
 import (
-	"sync"
 	//"google.golang.org/grpc/encoding"
 
 	"github.com/plan-systems/go-plan/pdi"
@@ -93,11 +92,7 @@ func (enc *dsEncoder) GenerateNewAccount() (*ski.PubKey, error) {
 		return nil, err
 	}
 
-	blocker := make(chan error, 1)
-
-	var newKey *ski.PubKey
-
-	ski.GenerateKeys(
+	newKeys, err := ski.GenerateKeys(
 		enc.skiSession,
 		enc.communityID,
 		[]*ski.PubKey{
@@ -107,19 +102,13 @@ func (enc *dsEncoder) GenerateNewAccount() (*ski.PubKey, error) {
 				KeyDomain:   ski.KeyDomain_PERSONAL,
 			},
 		},
-		func(inKeys []*ski.KeyEntry, inErr error) {
-			if inErr == nil {
-				newKey = inKeys[0].CopyToPubKey()
-			}
+    )
 
-			blocker <- inErr
-		},
-	)
+    if err != nil {
+        return nil, err
+    }
 
-	if err := <-blocker; err != nil {
-		return nil, err
-	}
-
+    newKey := newKeys[0].CopyToPubKey()
 	return newKey, nil
 }
 
@@ -157,8 +146,6 @@ func (enc *dsEncoder) EncodeToTxns(
 
 	txns := make([][]byte, len(segs))
 
-	var signErr error
-
     // Put the transfers in the last segment
     segs[len(segs)-1].Transfers = inTransfers
 
@@ -176,8 +163,6 @@ func (enc *dsEncoder) EncodeToTxns(
 			CommunityID: enc.communityID,
 		}
 
-		signErrHandle := &signErr
-		txnDone := &sync.WaitGroup{}
         pos := int32(0)
         payloadSz := int32(len(inPayload))
 
@@ -222,45 +207,32 @@ func (enc *dsEncoder) EncodeToTxns(
 				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
 			}
 
-    		txnDone.Add(1)
-
 			signOp.Msg = seg.TxnHashname
-			enc.skiSession.DispatchOp(
-				signOp,
-				func(inResults *plan.Block, inErr error) {
-					if inErr == nil {
-						sig := inResults.Content
-						sigLen := int32(len(sig))
-						copy(rawTxn[txnLen:], sig)
-						txnLen += sigLen
 
-						// Append the sig length div 4
-						rawTxn[txnLen] = byte(sigLen >> 2)
-						txnLen++
+			sigResults, signErr := enc.skiSession.DoOp(signOp)
+            if signErr != nil {
+                return nil, signErr
+            }
 
-						txns[i] = rawTxn[:txnLen]
-					}
+            // Append the seg
+            {
+                sig := sigResults.Content
+                sigLen := int32(len(sig))
+                copy(rawTxn[txnLen:], sig)
+                txnLen += sigLen
 
-					if inErr != nil && *signErrHandle == nil {
-						*signErrHandle = inErr
-					}
+                // Append the sig length div 4
+                rawTxn[txnLen] = byte(sigLen >> 2)
+                txnLen++
+            }
 
-					txnDone.Done()
-				},
-			)
-
-		    // Wait for len(txns) number of results before we're done
-		    txnDone.Wait()
+            txns[i] = rawTxn[:txnLen]
 		}
 
         if pos != payloadSz {
 			return nil, plan.Error(nil, plan.AssertFailed, "payloadSz chk failed")
 		}
 
-	}
-
-	if signErr != nil {
-		return nil, signErr
 	}
 
 	return txns, nil

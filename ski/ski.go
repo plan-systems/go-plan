@@ -15,11 +15,12 @@ const NumKeyDomains = KeyDomain_PERSONAL + 1
 
 
 // Session provides lambda-lifted crypto services from an opaque service provider.
-// All calls in this interface are THREADSAFE.
+//
+// TODO: make into gRPC service
 type Session interface {
 
-	// DispatchOp implements a complete set of SKI operations
-	DispatchOp(inOpArgs OpArgs, inOnCompletion OpCompletionHandler)
+	// DoOp implements a complete set of SKI operations
+	DoOp(inOpArgs OpArgs) (*plan.Block, error)
 
 	// EndSession ends this SKI session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
 	// Following a call to EndSession(), no more references to this session should be made.
@@ -143,9 +144,6 @@ type OpArgs struct {
 	// Input/Output buffer
 	Msg []byte
 }
-
-// OpCompletionHandler handles the result of a SKI operation
-type OpCompletionHandler func(inResults *plan.Block, inErr error)
 
 // OpArgs.OpName -- these are the available operations for SKI.Session.DispatchOp()
 // Unless otherwise stated, output from an op is returned in inResults.Content

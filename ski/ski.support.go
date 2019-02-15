@@ -165,38 +165,40 @@ func GenerateKeys(
     skiSession Session,
     inCommunityID []byte,
     inKeySpecs []*PubKey,
-    inOnCompletion func(inKeys []*KeyEntry, inErr error),
-) {
+) ([]*KeyEntry, error) {
 
-    skiSession.DispatchOp( OpArgs{
-            OpName: OpGenerateKeys,
-            CommunityID: inCommunityID,
-            KeySpecs: inKeySpecs,
-        }, 
-        func (inResults *plan.Block, err error) {
-            var newKeys []*KeyEntry
+    results, err := skiSession.DoOp( OpArgs{
+        OpName: OpGenerateKeys,
+        CommunityID: inCommunityID,
+        KeySpecs: inKeySpecs,
+    })
 
-            if err == nil {
-                bundleBuf := inResults.GetContentWithCodec(KeyBundleProtobufCodec, 0)
-                keyBundle := KeyBundle{}
-                err = keyBundle.Unmarshal(bundleBuf)   
-                if err != nil {
-                    err = plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal KeyBundle from OpGenerateKeys")
-                } else {
-                    newKeys = keyBundle.Keys
+    var newKeys []*KeyEntry
 
-                    N := len(keyBundle.Keys)
-                    plan.Assert(N == len(inKeySpecs), "number of keys returned from GenerateKeys() does not match input")
+    if err == nil {
+        bundleBuf := results.GetContentWithCodec(KeyBundleProtobufCodec, 0)
+        keyBundle := KeyBundle{}
+        err = keyBundle.Unmarshal(bundleBuf)   
+        if err != nil {
+            err = plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal KeyBundle from OpGenerateKeys")
+        } else {
+            newKeys = keyBundle.Keys
 
-                    for i := 0; i < N; i++ {
-                        plan.Assert(keyBundle.Keys[i].KeyType == inKeySpecs[i].KeyType, "keys generated from GenerateKeys() don't match request")
-                    }
-                }
+            N := len(keyBundle.Keys)
+            plan.Assert(N == len(inKeySpecs), "number of keys returned from GenerateKeys() does not match input")
+
+            for i := 0; i < N; i++ {
+                plan.Assert(keyBundle.Keys[i].KeyType == inKeySpecs[i].KeyType, "keys generated from GenerateKeys() don't match request")
             }
+        }
+    }
 
-            inOnCompletion(newKeys, err)
-        },
-    )
+    if err != nil {
+        return nil, err
+    }
+
+    return newKeys, nil
+
 }
 
 
@@ -255,20 +257,9 @@ func NewSessionTool(
 // DoOp performs the given op, blocking until completion
 func (st *SessionTool) DoOp(inOpArgs OpArgs) (*plan.Block, error) {
 
-    var outResults *plan.Block
+    results, err := st.Session.DoOp(inOpArgs)
 
-    st.Session.DispatchOp(
-        inOpArgs, 
-        func(opResults *plan.Block, inErr error) {
-            outResults = opResults
-
-            st.blocker <- inErr
-        },
-    )
-
-    err := <- st.blocker
-
-    return outResults, err
+    return results, err
 }
 
 
@@ -281,9 +272,7 @@ func (st *SessionTool) GenerateNewKey(
     inKeyDomain KeyDomain,
 ) *PubKey {
 
-    var newKey *PubKey
-
-    GenerateKeys(
+    newKeys, err := GenerateKeys(
         st.Session, 
         st.CommunityID[:], 
         []*PubKey{
@@ -292,22 +281,13 @@ func (st *SessionTool) GenerateNewKey(
                 KeyDomain: inKeyDomain,
             },
         },
-        func(inKeys []*KeyEntry, inErr error) {
-            if inErr == nil {
-                newKey = inKeys[0].CopyToPubKey()
-            }
-
-            st.blocker <- inErr
-        },
     )
 
-    err := <- st.blocker
     if err != nil {
         log.Fatal(err)
     }
 
-    return newKey
-
+    return newKeys[0].CopyToPubKey()
 }
 
 
