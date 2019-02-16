@@ -124,7 +124,6 @@ func (enc *dsEncoder) ResetAuthorID(
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
 func (enc *dsEncoder) EncodeToTxns(
 	inPayload []byte,
-	inPayloadLabel string,
 	inPayloadCodec pdi.PayloadCodec,
 	inTransfers []*pdi.Transfer,
     timeSealed int64,
@@ -136,7 +135,6 @@ func (enc *dsEncoder) EncodeToTxns(
 
 	segs, err := pdi.SegmentIntoTxns(
 		inPayload,
-		inPayloadLabel,
 		inPayloadCodec,
 		enc.SegmentMaxSz,
 	)

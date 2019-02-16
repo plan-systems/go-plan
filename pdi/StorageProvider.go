@@ -2,125 +2,78 @@ package pdi
 
 import (
 	//"fmt"
-    //"sync"
+	//"sync"
 
-    //"google.golang.org/grpc/encoding"
+	//"google.golang.org/grpc/encoding"
 
 	"github.com/plan-systems/go-plan/ski"
 )
 
 /**********************************************************************************************************************
-    StorageProvider wraps a persistent storage service provider. 
+  StorageProvider wraps a persistent storage service provider.
 
-    See the service defintion for StorageProvider, located in go-plan/pdi/pdi.proto.
+  See the service defintion for StorageProvider, located in go-plan/pdi/pdi.proto.
 
-    The TxnEncoder/TxnDecoder model is designed to wrap any kind of append-only database, 
-        including a distributed ledger. 
-        
+  The TxnEncoder/TxnDecoder model is designed to wrap any kind of append-only database,
+      particularly a distributed ledger.
+
 */
-
-
 
 // TxnSegmentMaxSz allows malicious-sized txns to be detected
 const TxnSegmentMaxSz = 10 * 1024 * 1024
 
-
-// TxnEncoder encodes arbitrary data payloads into storage txns native to a specific StorageProvider.  
-// For each StorageProvider implementation, there is a corresponding TxnEncoder that allows 
+// TxnEncoder encodes arbitrary data payloads into storage txns native to a specific StorageProvider.
+// For each StorageProvider implementation, there is a corresponding TxnEncoder that allows
 //     native txns to be generated locally for submission to the remote StorageProvider.
-// The StorageProvider + txn Encoder/Decoder system preserves the property that a StorageProvider must operate deterministically, 
+// The StorageProvider + txn Encoder/Decoder system preserves the property that a StorageProvider must operate deterministically,
 //     and can only validate txns and maintain a ledger of which public keys can post (and how much).
-// TxnEncoder is NOT assumed to be threadsafes unless specified otherswise 
+// TxnEncoder is NOT assumed to be threadsafes unless specified otherswise
 type TxnEncoder interface {
 
-    // ResetSession -- resets the currently set community ID used for EncodeToTxns()
-    // This must be called before other calls into TxnEncoder.
-    ResetSession(
-        inEncodingDesc string,
-        inSession      ski.Session,
-        inCommunityID  []byte,
-    ) error
+	// ResetSession -- resets the currently set community ID used for EncodeToTxns()
+	// This must be called before other calls into TxnEncoder.
+	ResetSession(
+		inEncodingDesc string,
+		inSession      ski.Session,
+		inCommunityID  []byte,
+	) error
 
-    // GenerateNewAccount creates the necessary key(s) in the pres-et SKI session and returns a new public 
-    //    key (used as an address) able to originate StorageProvider txns via EncodeToTxns().
-    // Pre: ResetSession() must be successfully called.
-    GenerateNewAccount() (*ski.PubKey, error)
+	// GenerateNewAccount creates the necessary key(s) in the pres-et SKI session and returns a new public
+	//    key (used as an address) able to originate StorageProvider txns via EncodeToTxns().
+	// Pre: ResetSession() must be successfully called.
+	GenerateNewAccount() (*ski.PubKey, error)
 
-    // ResetAuthorID -- resets the current set public key used to originate (i.e. sign) txns in EncodeToTxns()
-    ResetAuthorID(
-        inFrom ski.PubKey,
-    ) error
+	// ResetAuthorID -- resets the current set public key used to originate (i.e. sign) txns in EncodeToTxns()
+	ResetAuthorID(
+		inFrom ski.PubKey,
+	) error
 
-    // EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
-    // Pre: ResetSession() *and* ResetAuthorID() must be successfully called.
-    EncodeToTxns(
-        inPayload      []byte, 
-        inPayloadLabel string,
-        inPayloadCodec PayloadCodec, 
-        inTransfers    []*Transfer, 
-        inTimeSealed   int64,           // If non-zero, this is used in place of the current time
-    ) ([][]byte, error)
+	// EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
+	// Pre: ResetSession() *and* ResetAuthorID() must be successfully called.
+	EncodeToTxns(
+		inPayload      []byte,
+		inPayloadCodec PayloadCodec,
+		inTransfers    []*Transfer,
+		inTimeSealed   int64, // If non-zero, this is used in place of the current time
+	) ([][]byte, error)
 
-
-    // Generates a txn that destroys the given address from committing any further txns.
-    //EncodeDestruct(from ski.PubKey) (*Txn, error)
+	// Generates a txn that destroys the given address from committing any further txns.
+	//EncodeDestruct(from ski.PubKey) (*Txn, error)
 }
 
-
-
-
-
-// TxnDecoder decodes storage txns native to a specific remote StorageProvider into the original payloads.  
-// TxnDecoder is NOT assumed to be threadsafes unless specified otherswise 
+// TxnDecoder decodes storage txns native to a specific remote StorageProvider into the original payloads.
+// TxnDecoder is NOT assumed to be threadsafes unless specified otherswise
 type TxnDecoder interface {
 
-    // EncodingDesc returns a string for use in TxnEncoder.ResetSession()
-    EncodingDesc() string
+	// EncodingDesc returns a string for use in TxnEncoder.ResetSession()
+	EncodingDesc() string
 
-    // Decodes a raw txn from a StorageProvider (from a corresponding TxnEncoder)
-    // Also performs signature validation on the given txn, meaning that if no err is returned,
-    //    then the txn was indeed signed by outInfo.From.
-    // Returns the payload buffer segment buf.
-    DecodeRawTxn(
-        inRawTxn   []byte,      // Raw txn to be decoded
-        outInfo    *TxnInfo,    // If non-nil, populated w/ info extracted from inTxn
-    ) ([]byte, error)
-
+	// Decodes a raw txn from a StorageProvider (from a corresponding TxnEncoder)
+	// Also performs signature validation on the given txn, meaning that if no err is returned,
+	//    then the txn was indeed signed by outInfo.From.
+	// Returns the payload buffer segment buf.
+	DecodeRawTxn(
+		inRawTxn []byte,   // Raw txn to be decoded
+		outInfo  *TxnInfo, // If non-nil, populated w/ info extracted from inTxn
+	) ([]byte, error)
 }
-
-
-
-
-
-
-
-
-/*
-var storageMsgPool = sync.Pool{
-    New: func() interface{} {
-        return new(StorageMsg)
-    },
-}
-
-// RecycleStorageMsg effectively deallocates the item and makes it available for reuse
-func RecycleStorageMsg(inMsg *StorageMsg) {
-    for _, txn := range inMsg.Txns {
-        txn.Body = nil  // TODO: recycle plan.Blocks too
-    }
-    storageMsgPool.Put(inMsg)
-}
-
-// NewStorageMsg allocates a new StorageMsg
-func NewStorageMsg() *StorageMsg {
-
-    msg := storageMsgPool.Get().(*StorageMsg)
-    if msg == nil {
-        msg = &StorageMsg{}
-    } else {
-        msg.Txns = msg.Txns[:0]
-        msg.AlertCode = 0
-        msg.AlertMsg = ""
-    }
-
-    return msg
-}*/

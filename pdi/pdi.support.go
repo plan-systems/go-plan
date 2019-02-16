@@ -324,7 +324,6 @@ func NewStorageAlert(
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
 	inData           []byte,
-    inPayloadLabel   string,
     inPayloadCodec   PayloadCodec, 
 	inMaxSegmentSize int32,
 ) ([]*TxnInfo, error) {
@@ -345,7 +344,6 @@ func SegmentIntoTxns(
 
 		segs = append(segs, &TxnInfo{
             PayloadCodec: inPayloadCodec,
-            PayloadLabel: inPayloadLabel,
             SegSz: segSz,
 		})
 

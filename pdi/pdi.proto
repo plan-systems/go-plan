@@ -93,20 +93,12 @@ message TxnInfo {
     repeated    Transfer        transfers               = 2;
 
     /*****************************************************
-    ** Payload Info (identical for each segment)
+    ** Contents Info
     **/
 
     // Describes how to to decode the payload data (this value is identical for each segment that comprises a reassembled payload)
-                PayloadCodec    payload_codec           = 4;
-
-    // Arbitrary label passed to TxnEncoder.EncodeToTxns() when this txn (and its other segments) were created.
-    // During segment reassembly, it's used to determine which segments belong with which other segments.
-    // This is generally assumed to be a string-friendly variant of a hash of the payload.
-                string          payload_label           = 5;
-
-    /*****************************************************
-    ** Txn Packaging Info
-    **/
+    // This should be identical for each segment
+                PayloadCodec    payload_codec           = 5;
 
     // Segment byte size
                 int32           seg_sz                  = 8;
@@ -509,16 +501,6 @@ message ChannelList {
 enum EntryVersion {
     V0                          = 0;
 }
-
-
-
-// Entry is a convenience container for the pieces/parts that a PDI entry may be at during processing or transmission.
-message Entry {
-                EntryCrypt      crypt                   = 1;
-                EntryHeader     header                  = 2;
-                plan.Block      body                    = 3;
-}
-
 
 
 /*

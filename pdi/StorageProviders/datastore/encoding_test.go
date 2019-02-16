@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"math/rand"
 	"testing"
-    "fmt"
 
 	"github.com/plan-systems/go-plan/pdi"
 	"github.com/plan-systems/go-plan/plan"
@@ -103,7 +102,10 @@ func TestTxnEncoding(t *testing.T) {
 	}
 }
 
+
 func txnEncodingTest(A *testSession) {
+
+    //rand.Seed(55055)
 
 	// Test agent encode/decode
 	{
@@ -139,17 +141,16 @@ func txnEncodingTest(A *testSession) {
 
         collator := pdi.NewTxnCollater()
 
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 1000; i++ {
             testTime := plan.Now().UnixSecs
 
-			blobLen := int(rand.Int31n(1 + rand.Int31n(maxSegSize * 10)))
+			blobLen := int(rand.Int31n(1 + rand.Int31n(maxSegSize * 15)))
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)
 
 			rawTxns, err := encoder.EncodeToTxns(
 				payload,
-				fmt.Sprintf("e pluribus unum %d", i),
 				pdi.PayloadCodec_Unspecified,
 				nil,
                 testTime + int64(i),
@@ -159,7 +160,9 @@ func txnEncodingTest(A *testSession) {
 			}
 
             gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", i, len(rawTxns), len(payload))
-
+            if i == 16 {
+                err = nil
+            }
             prevUTID := ""
 
 			for idx, rawTxn := range rawTxns {
