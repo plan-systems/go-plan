@@ -9,6 +9,8 @@ type DecodedTxn struct {
 	UTID       string
 	Info       TxnInfo
 	PayloadSeg []byte
+
+
 }
 
 // DecodeRawTxn is a convenience function for TxnDecoder.DecodeRawTxn()
@@ -35,48 +37,43 @@ func (txn *DecodedTxn) DecodeRawTxn(
 
 // TxnCollater helps desegment/"collate" txns from multi-segment pieces into a single segment (that can be unmarshalled).
 type TxnCollater struct {
-	segGroups map[string]*segGroup
+    segMap     map[string]segEntry
+}
+
+type segEntry struct {
+    seg      *DecodedTxn    // if set, this is a seg waiting to be claimed 
+    segGroup *segGroup     // if set, this is the segGroup waiting for this seg
 }
 
 type segGroup struct {
-	Info        TxnInfo
 	SegsPresent uint32
 	Segs        []*DecodedTxn
+	Info        TxnInfo
+    UTID        string
 }
 
 // NewTxnCollater creates a new TxnCollater
 func NewTxnCollater() TxnCollater {
 	return TxnCollater{
-		segGroups: make(map[string]*segGroup),
+		segMap: make(map[string]segEntry),
 	}
 }
 
 // MergeSegment adds the given txn to this segment group
-func (group *segGroup) MergeSegment(seg *DecodedTxn) error {
+func (group *segGroup) MergeSegment(seg *DecodedTxn) bool {
 
 	//segInfo := seg.TxnInfo
 	idx := seg.Info.SegIndex
-	segSz := int32(len(seg.PayloadSeg))
-
-	if group.Info.SegTotal != seg.Info.SegTotal ||
-		group.Info.PayloadCodec != seg.Info.PayloadCodec {
-
-		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed consistency check", seg.UTID)
-	} else if idx >= seg.Info.SegTotal {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v seg index exceeds total", seg.UTID)
-	} else if segSz != seg.Info.SegSz {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v seg sz non consistent: expected %d, got %d", seg.UTID, seg.Info.SegSz, segSz)
-    } else if segSz > TxnSegmentMaxSz {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v seg sz %d exceeds max limit", seg.UTID, segSz)
-	}
 
 	if group.Segs[idx] == nil {
 		group.SegsPresent++
 	}
 
 	group.Segs[idx] = seg
-	return nil
+	return group.SegsPresent == group.Info.SegTotal
 }
+
+
 
 // CollateTxnSegment collates multisegment txns until all the segments are present.
 //
@@ -86,8 +83,8 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 	N := group.Info.SegTotal
 
 	// Exit if there's still more segments to go
-	if group.SegsPresent < N {
-		return nil, nil
+	if missing := N - group.SegsPresent; missing > 0 {
+		return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: missing %d out of %d segments", group.UTID, missing, N )
 	}
 
 	totalSz := int32(0)
@@ -96,7 +93,9 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 	// First verify all segments present and calc size
 	for _, seg := range group.Segs {
 
-        if seg.Info.SegPrev != prevUTID {
+        if seg.Info.SegTotal != group.Info.SegTotal || seg.Info.PayloadCodec != group.Info.PayloadCodec {
+            return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed group consistency check", seg.UTID)
+        } else if seg.Info.SegPrev != prevUTID {
 			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg UTID %v, got %v", seg.UTID, seg.Info.SegPrev, prevUTID)
 		}
 
@@ -134,6 +133,8 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 	return sole, nil
 }
 
+
+
 // Desegment collects decoded txns (payload segments) and returns ones that are a single segment.
 func (tc *TxnCollater) Desegment(seg *DecodedTxn) (*DecodedTxn, error) {
 
@@ -148,27 +149,59 @@ func (tc *TxnCollater) Desegment(seg *DecodedTxn) (*DecodedTxn, error) {
 		err = plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.UTID, seg.Info.SegIndex, seg.Info.SegTotal)
     } else if seg.Info.SegSz != segSz {
 		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.UTID, seg.Info.SegSz, segSz)
+    } else if seg.Info.SegIndex == 0 && seg.Info.SegPrev != "" {
+		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v has illegal SegPrev", seg.UTID)
 	} else if seg.Info.SegTotal == 1 {
 		sole = seg
 	} else {
-		group := tc.segGroups[seg.Info.PayloadLabel]
-		if group == nil {
-			group = &segGroup{
-				SegsPresent: 0,
-				Segs:        make([]*DecodedTxn, seg.Info.SegTotal),
-				Info:        seg.Info,
-			}
-			tc.segGroups[group.Info.PayloadLabel] = group
-		}
+        
+        entry := tc.segMap[seg.UTID]
 
-		err = group.MergeSegment(seg)
+        // Use the last segment as a catalyst to start a new group
+        if entry.segGroup == nil && seg.Info.SegIndex + 1 == seg.Info.SegTotal { 
 
-		if err == nil {
-			sole, err = group.Consolidate()
-			if sole != nil {
-				delete(tc.segGroups, group.Info.PayloadLabel)
-			}
-		}
+            entry.segGroup = &segGroup{
+                SegsPresent: 0,
+                Segs:        make([]*DecodedTxn, seg.Info.SegTotal),
+                Info:        seg.Info,
+                UTID:        seg.UTID,
+            }
+        }
+
+        entry.seg = seg
+        tc.segMap[seg.UTID] = entry
+
+        // if entry.segGroup is set, that means the given group is waiting on this segment
+        if entry.segGroup != nil {
+            group := entry.segGroup
+
+            // Advance the leading "edge" of the segGroup towards index 0 (the first segment in the group)
+            for entry.seg != nil && err == nil {
+        
+                canConsolidate := group.MergeSegment(entry.seg)
+                if canConsolidate {
+
+                    // Cleanup the seg map
+                    for _, seg := range group.Segs {
+                        delete(tc.segMap, seg.UTID)
+                    }
+
+                    sole, err = group.Consolidate()
+                    break
+                }
+
+                if err != nil || entry.seg.Info.SegIndex == 0 {
+                    break
+                }
+
+                segPrev := entry.seg.Info.SegPrev
+                prev := tc.segMap[segPrev]
+                prev.segGroup = group
+                tc.segMap[segPrev] = prev
+
+                entry = prev
+            }
+        }
 	}
 
 	return sole, err
