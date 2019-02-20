@@ -210,8 +210,6 @@ type SessionTool struct {
     UserName    string
     Session     Session
     CommunityID []byte
-
-    blocker     chan error   
 }
 
 
@@ -229,7 +227,6 @@ func NewSessionTool(
     st := &SessionTool{
         UserName: inUserName,
         CommunityID: inCommunityID,
-        blocker: make(chan error, 1),
     }
 
     if len(st.CommunityID) == 0 {
@@ -294,14 +291,6 @@ func (st *SessionTool) GenerateNewKey(
 // EndSession ends the current session
 func (st *SessionTool) EndSession(inReason string) {
 
-    st.Session.EndSession(inReason, func(inParam interface{}, inErr error) {
-        st.blocker <- inErr
-    })
-
-    err := <- st.blocker
-    if err != nil {
-        log.Fatal(err)
-    }
-
+    st.Session.EndSession(inReason)
 
 }

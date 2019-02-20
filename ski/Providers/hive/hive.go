@@ -77,7 +77,6 @@ func (provider *Provider) StartSession(
     }
 
     session := provider.NewSession(inPB)
-    session.onSessionEnded = inPB.OnSessionEnded
     session.parentProvider = provider
 
     // Bind the request op scope -- TODO
@@ -108,9 +107,6 @@ func (provider *Provider) EndSession(inSession *Session, inReason string) error 
             n := len(provider.sessions)-1
             provider.sessions[i] = provider.sessions[n]
             provider.sessions = provider.sessions[:n]
-            if inSession.onSessionEnded != nil {
-                inSession.onSessionEnded(inReason)
-            }
             return nil
         }
     }
@@ -140,7 +136,6 @@ type Session struct {
     //KeyRepos            map[plan.CommunityID]KeyRepo
     KeyRepo             *ski.KeyRepo
     allowedOps          [ski.NumKeyDomains]map[string]bool
-    onSessionEnded      func(inReason string)
 
     autoSave            *time.Ticker
 }
@@ -255,13 +250,11 @@ func (session *Session) resetAutoSave() {
 
 
 // EndSession -- see ski.Session
-func (session *Session) EndSession(inReason string, inOnCompletion plan.Action) {
-    err := session.parentProvider.EndSession(session, inReason)
+func (session *Session) EndSession(inReason string) {
+   session.parentProvider.EndSession(session, inReason)
 
     session.saveToFile()
 
-    inOnCompletion(nil, err)
-    return
 }
 
 func (session *Session) checkOpParamsAndPermissions(

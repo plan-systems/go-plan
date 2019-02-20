@@ -24,7 +24,7 @@ type Session interface {
 
 	// EndSession ends this SKI session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
 	// Following a call to EndSession(), no more references to this session should be made.
-	EndSession(inReason string, inOnCompletion plan.Action)
+	EndSession(inReason string)
 }
 
 /*****************************************************
@@ -37,7 +37,6 @@ type SessionParams struct {
     UserID         []byte
 	//AccessScopes   [NumKeyDomains]AccessScopes
 	BaseDir        string
-	OnSessionEnded func(inReason string)
 }
 
 // Provider wraps how an SKI connection is implemented.  Perhaps it's locally implemented, or perhaps the it uses a network connection.
