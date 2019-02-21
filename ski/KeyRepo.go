@@ -93,8 +93,8 @@ func (KR *KeyRepo) Marshal() ([]byte, error) {
             }
 
             bundle := &KeyBundle{
-                krSet.CommunityID,
-                make([]*KeyEntry, 0, entryCount),
+                CommunityId: krSet.CommunityID,
+                Keys:        make([]*KeyEntry, 0, entryCount),
             }
 
             for i := 0; i < int(NumKeyDomains); i++ {
@@ -241,7 +241,7 @@ func (krSet *KeyringSet) getKeyEntryInternal(
 func (krSet *KeyringSet) FetchKeys(
     inKeySpecs []*PubKey,
     ioKeyBundle *KeyBundle,
-)  []*PubKey {
+) []*PubKey {
 
     var keysNotFound []*PubKey
 
