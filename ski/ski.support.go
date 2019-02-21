@@ -17,6 +17,7 @@ import (
 type HashKit struct {
     HashKitID HashKitID
     Hasher    hash.Hash
+    HashSz    int
 }
 
 /*
@@ -106,6 +107,8 @@ func NewHashKit(inID HashKitID) (HashKit, error) {
         default:
             return HashKit{}, plan.Errorf(nil, plan.HashKitNotFound, "failed to recognize HashKitID %v", inID)
     }
+
+    kit.HashSz = kit.Hasher.Size()
 
     return kit, nil
 }
