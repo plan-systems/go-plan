@@ -1,6 +1,8 @@
 package datastore
 
 import (
+    "sync"
+
 	"github.com/plan-systems/go-plan/pdi"
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
@@ -14,14 +16,19 @@ const (
 type dsDecoder struct {
 	pdi.TxnDecoder
 
+    theadsafe    bool
+    mutex        sync.Mutex
 	encodingDesc string
 	hashKits     map[ski.HashKitID]ski.HashKit
 }
 
 // NewTxnDecoder creates a TxnDecoder for use with pdi-datastore
-func NewTxnDecoder() pdi.TxnDecoder {
+func NewTxnDecoder(
+    inMakeThreadsafe bool,
+) pdi.TxnDecoder {
 
 	dec := &dsDecoder{
+        theadsafe:    inMakeThreadsafe,
 		hashKits:     map[ski.HashKitID]ski.HashKit{},
 		encodingDesc: txnEncodingDesc1,
 	}
@@ -40,32 +47,43 @@ func (dec *dsDecoder) DecodeRawTxn(
 	outInfo *pdi.TxnInfo,
 ) ([]byte, error) {
 
-	txnLen := len(rawTxn)
+    const (
+        sigLenLen = 2
+    )
+
+	txnLen := uint32(len(rawTxn))
 	if txnLen < 50 {
-		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "raw txn is too small (txnLen=%v)", txnLen)
+		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "txn is too small (txnLen=%v)", txnLen)
 	}
 
 	// 1) Unmarshal the txn info
 	var txnInfo pdi.TxnInfo
-	pos := 2 + (int(rawTxn[0]) >> 8) + int(rawTxn[1])
+	pos := 2 + uint32(rawTxn[0]) | ( uint32(rawTxn[1]) << 8 )
+    if pos > txnLen {
+		return nil, plan.Error(nil, plan.FailedToUnmarshal, "txnInfo len exceeds txn buf size")
+    }
 	if err := txnInfo.Unmarshal(rawTxn[2:pos]); err != nil {
 		return nil, plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
 	}
 
 	// 2) Extract the payload buf
-	end := pos + int(txnInfo.SegSz)
+	end := pos + txnInfo.SegSz
 	if end > txnLen {
 		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
 	}
 	payloadBuf := rawTxn[pos:end]
 
-	// 3) Extract the sig -- the last byte is the sig len div 4
-	sigLen := int(rawTxn[txnLen-1]) << 2
-	txnLen -= 1 + sigLen
+	// 3) Extract the sig -- the last 2 bytes
+    sigLen := uint32(rawTxn[txnLen-2])| (uint32(rawTxn[txnLen-1]) << 8)
+	txnLen -= sigLenLen + sigLen
 	if txnLen < 10 {
 		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "txn sig len is wrong (txnLen=%v, sigLen=%v)", txnLen, sigLen)
 	}
 	sig := rawTxn[txnLen : txnLen+sigLen]
+
+    if dec.theadsafe {
+        dec.mutex.Lock()
+    }
 
 	// 4) Prep the hasher so we can generate a digest
 	hashKit, ok := dec.hashKits[txnInfo.HashKitId]
@@ -78,10 +96,17 @@ func (dec *dsDecoder) DecodeRawTxn(
 		dec.hashKits[txnInfo.HashKitId] = hashKit
 	}
 
+    miscBuf := make([]byte, 0, pdi.UTIDBinarySz + hashKit.HashSz)
+
 	// 5) Calculate the hash digest and thus UTID of the raw txn
 	hashKit.Hasher.Reset()
 	hashKit.Hasher.Write(rawTxn[:txnLen])
-	txnInfo.TxnHashname = hashKit.Hasher.Sum(nil)
+	txnInfo.TxnHashname = hashKit.Hasher.Sum(miscBuf)
+    txnInfo.UTID = pdi.UTIDFromInfo(miscBuf[hashKit.HashSz:hashKit.HashSz], txnInfo.TimeSealed, txnInfo.TxnHashname)
+
+    if dec.theadsafe {
+        dec.mutex.Unlock()
+    }
 
 	// 6) Verify the sig
 	pubKey := &ski.PubKey{

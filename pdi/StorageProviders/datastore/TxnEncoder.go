@@ -1,5 +1,6 @@
 package datastore
 
+
 import (
 	//"google.golang.org/grpc/encoding"
 
@@ -12,9 +13,8 @@ import (
 type dsEncoder struct {
 	pdi.TxnEncoder
 
-	SegmentMaxSz int32
+	SegmentMaxSz uint32
 
-	encodingDesc string
 	hashKit      ski.HashKit
 	author       ski.PubKey
 	communityID  []byte
@@ -27,7 +27,7 @@ type dsEncoder struct {
 // NewTxnEncoder creates a new StorageProviderAgent for use with a pdi-datastore StorageProvider.
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
-	inSegmentMaxSz int32,
+	inSegmentMaxSz uint32,
 ) (pdi.TxnEncoder, error) {
 
 	defaultKit, perr := ski.NewHashKit(ski.HashKitID_LegacyKeccak_256)
@@ -44,7 +44,7 @@ func NewTxnEncoder(
 		enc.SegmentMaxSz = 100 * 1024
 	}
 
-    maxSz := int32(pdi.TxnSegmentMaxSz) - 20000
+    maxSz := uint32(pdi.TxnSegmentMaxSz) - 20000
     if enc.SegmentMaxSz > maxSz {
         enc.SegmentMaxSz = maxSz
     }
@@ -54,16 +54,10 @@ func NewTxnEncoder(
 
 // ResetSession --see TxnEncoder
 func (enc *dsEncoder) ResetSession(
-	inEncodingDesc string,
 	inSession ski.Session,
 	inCommunityID []byte,
 ) error {
 
-	if inEncodingDesc != "" && inEncodingDesc != txnEncodingDesc1 {
-		return plan.Errorf(nil, plan.IncompatibleStorage, "incompatible storage requested: %s, have: %s", inEncodingDesc, txnEncodingDesc1)
-	}
-
-	enc.encodingDesc = inEncodingDesc
 	enc.skiSession = inSession
 	enc.communityID = inCommunityID
 
@@ -127,7 +121,7 @@ func (enc *dsEncoder) EncodeToTxns(
 	inPayloadCodec pdi.PayloadCodec,
 	inTransfers []*pdi.Transfer,
     timeSealed int64,
-) ([][]byte, error) {
+) ([]pdi.Txn, error) {
 
 	if err := enc.checkReady(); err != nil {
 		return nil, err
@@ -142,7 +136,7 @@ func (enc *dsEncoder) EncodeToTxns(
 		return nil, err
 	}
 
-	txns := make([][]byte, len(segs))
+	txns := make([]pdi.Txn, len(segs))
 
     // Put the transfers in the last segment
     segs[len(segs)-1].Transfers = inTransfers
@@ -161,8 +155,8 @@ func (enc *dsEncoder) EncodeToTxns(
 			CommunityID: enc.communityID,
 		}
 
-        pos := int32(0)
-        payloadSz := int32(len(inPayload))
+        pos := uint32(0)
+        payloadSz := uint32(len(inPayload))
 
 		for i, seg := range segs {
 
@@ -176,30 +170,35 @@ func (enc *dsEncoder) EncodeToTxns(
             seg.HashKitId = hashKit.HashKitID
 
             if i > 0 {
-                seg.SegPrev = pdi.FormUTID("", segs[i-1].TimeSealed, segs[i-1].TxnHashname)
+                seg.PrevUTID = txns[i-1].UTID
             }
 
-			// Add extra for length signature and len bytes
-			rawTxn := make([]byte, 500 + seg.Size() + int(seg.SegSz))
+			// Do one alloc for all out needs.  Add a lil extra for sig and len bytes.
+			buf := make([]byte, 200 + seg.Size() + int(seg.SegSz) + pdi.UTIDBinarySz + hashKit.HashSz)
 
 			// 1) Append the TxnInfo
-			infoLen, merr := seg.MarshalTo(rawTxn[2:])
+			infoLen, merr := seg.MarshalTo(buf[2:])
 			if merr != nil {
 				return nil, plan.Error(merr, plan.FailedToMarshal, "failed to marshal txnInfo")
 			}
-			rawTxn[0] = byte((infoLen >> 8) & 0xFF)
-			rawTxn[1] = byte(infoLen & 0xFF)
-			txnLen := int32(infoLen) + 2
+			buf[0] = byte(infoLen)
+			buf[1] = byte(infoLen >> 8)
+			txnLen := uint32(infoLen) + 2
 
 			// 2) Append the payload buf
-			copy(rawTxn[txnLen:txnLen + seg.SegSz], inPayload[pos:pos + seg.SegSz])
+			copy(buf[txnLen:txnLen + seg.SegSz], inPayload[pos:pos + seg.SegSz])
 			txnLen += seg.SegSz
             pos    += seg.SegSz
 
 			// 3) Calc the txn digest
 			hashKit.Hasher.Reset()
-			hashKit.Hasher.Write(rawTxn[:txnLen])
-			seg.TxnHashname = hashKit.Hasher.Sum(nil)
+			hashKit.Hasher.Write(buf[:txnLen])
+
+            // Use the extra we allocated to store the hashname and UTID
+            j := len(buf) - hashKit.HashSz - pdi.UTIDBinarySz
+			seg.TxnHashname = hashKit.Hasher.Sum(buf[j:j])
+            j += hashKit.HashSz
+            seg.UTID = pdi.UTIDFromInfo(buf[j:j], seg.TimeSealed, seg.TxnHashname)
 
 			if len(seg.TxnHashname) != hashKit.Hasher.Size() {
 				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
@@ -215,22 +214,25 @@ func (enc *dsEncoder) EncodeToTxns(
             // Append the seg
             {
                 sig := sigResults.Content
-                sigLen := int32(len(sig))
-                copy(rawTxn[txnLen:], sig)
+                sigLen := uint32(len(sig))
+                copy(buf[txnLen:], sig)
                 txnLen += sigLen
 
-                // Append the sig length div 4
-                rawTxn[txnLen] = byte(sigLen >> 2)
-                txnLen++
+                // Append the sig length (2 bytes)
+                for j := 0; j < 2; j++ {
+                    buf[txnLen] = byte(sigLen)
+                    sigLen >>= 8
+                    txnLen++
+                }
             }
 
-            txns[i] = rawTxn[:txnLen]
+            txns[i].UTID = seg.UTID
+            txns[i].RawTxn = buf[:txnLen]
 		}
 
         if pos != payloadSz {
 			return nil, plan.Error(nil, plan.AssertFailed, "payloadSz chk failed")
 		}
-
 	}
 
 	return txns, nil

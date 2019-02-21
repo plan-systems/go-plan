@@ -1,37 +1,41 @@
 package pdi
 
 import (
+    "bytes"
+
 	"github.com/plan-systems/go-plan/plan"
 )
 
 // DecodedTxn contains the contents of a decoded raw native txn from a StorageProvider
 type DecodedTxn struct {
-	UTID       string
+    UTID       string
+    RawTxn     []byte
 	Info       TxnInfo
 	PayloadSeg []byte
-
 
 }
 
 // DecodeRawTxn is a convenience function for TxnDecoder.DecodeRawTxn()
 func (txn *DecodedTxn) DecodeRawTxn(
-	inRawTxn []byte,
 	inDecoder TxnDecoder,
 ) error {
 
     // Don't even try to decode the txn if it's suspiciously large
-    if len(inRawTxn) > TxnSegmentMaxSz + 10000 {
+    if len(txn.RawTxn) > TxnSegmentMaxSz + 10000 {
         return plan.Errorf(nil, plan.TxnFailedToDecode, "txn exceeds safe max segment limit")
     }
 
 	var err error
-	txn.PayloadSeg, err = inDecoder.DecodeRawTxn(inRawTxn, &txn.Info)
-
+	txn.PayloadSeg, err = inDecoder.DecodeRawTxn(txn.RawTxn, &txn.Info)
 	if err != nil {
 		return err
 	}
 
-	txn.UTID = FormUTID("", txn.Info.TimeSealed, txn.Info.TxnHashname)
+	txn.UTID = UTID(txn.Info.UTID).String()
+    if len(txn.UTID) < UTIDTimestampStrLen {
+        return plan.Errorf(nil, plan.TxnFailedToDecode, "invalid txn UTID") 
+    }
+    
 	return nil
 }
 
@@ -87,27 +91,27 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 		return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: missing %d out of %d segments", group.UTID, missing, N )
 	}
 
-	totalSz := int32(0)
-	prevUTID := ""
+	totalSz := uint32(0)
+	var prevUTID []byte
 
 	// First verify all segments present and calc size
 	for _, seg := range group.Segs {
 
         if seg.Info.SegTotal != group.Info.SegTotal || seg.Info.PayloadCodec != group.Info.PayloadCodec {
             return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed group consistency check", seg.UTID)
-        } else if seg.Info.SegPrev != prevUTID {
-			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg UTID %v, got %v", seg.UTID, seg.Info.SegPrev, prevUTID)
+        } else if bytes.Compare(seg.Info.PrevUTID, prevUTID) != 0 {
+			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg UTID %v, got %v", seg.UTID, seg.Info.PrevUTID, prevUTID)
 		}
 
 		totalSz += seg.Info.SegSz
 
-		prevUTID = seg.UTID
+		prevUTID = seg.Info.UTID
 	}
 
 
 	// We know each segment is good to go b/c MergeSegment() checks each seg as it comes in.
 	soleBuf := make([]byte, totalSz)
-    pos := int32(0)
+    pos := uint32(0)
 
 	// Next, assemble the segment data
 	for _, seg := range group.Segs {
@@ -124,7 +128,7 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 	sole.Info.SegSz = totalSz
 	sole.Info.SegIndex = 0
 	sole.Info.SegTotal = 1
-	sole.Info.SegPrev = ""
+	sole.Info.PrevUTID = nil
 	sole.Info.TxnHashname = nil
 
 	group.Segs = group.Segs[:1]
@@ -142,15 +146,15 @@ func (tc *TxnCollater) Desegment(seg *DecodedTxn) (*DecodedTxn, error) {
 		sole *DecodedTxn
 		err  error
 	)
-	segSz := int32(len(seg.PayloadSeg))
+	segSz := uint32(len(seg.PayloadSeg))
 
 	// If there's only a single segment, we can decode immediately.
 	if seg.Info.SegTotal < 1 || seg.Info.SegIndex >= seg.Info.SegTotal {
 		err = plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.UTID, seg.Info.SegIndex, seg.Info.SegTotal)
     } else if seg.Info.SegSz != segSz {
 		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.UTID, seg.Info.SegSz, segSz)
-    } else if seg.Info.SegIndex == 0 && seg.Info.SegPrev != "" {
-		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v has illegal SegPrev", seg.UTID)
+    } else if seg.Info.SegIndex == 0 && len(seg.Info.PrevUTID) != 0 {
+		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v has illegal PrevUTID", seg.UTID)
 	} else if seg.Info.SegTotal == 1 {
 		sole = seg
 	} else {
@@ -194,7 +198,7 @@ func (tc *TxnCollater) Desegment(seg *DecodedTxn) (*DecodedTxn, error) {
                     break
                 }
 
-                segPrev := entry.seg.Info.SegPrev
+                segPrev := UTID(entry.seg.Info.PrevUTID).String()
                 prev := tc.segMap[segPrev]
                 prev.segGroup = group
                 tc.segMap[segPrev] = prev

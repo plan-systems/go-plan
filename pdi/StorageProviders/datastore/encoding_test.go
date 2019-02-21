@@ -112,7 +112,7 @@ func txnEncodingTest(A *testSession) {
 
 	// Test agent encode/decode
 	{
-        maxSegSize := int32(1000)
+        maxSegSize := uint32(10000)
         
 		blobBuf := make([]byte, 500000)
 		decoder := NewTxnDecoder(true)
@@ -146,7 +146,7 @@ func txnEncodingTest(A *testSession) {
 		for i := 0; i < 1000; i++ {
             testTime := plan.Now().UnixSecs
 
-			blobLen := int(1 + rand.Int31n(maxSegSize * 15))
+			blobLen := int(1 + rand.Int31n(int32(maxSegSize) * 25))
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)
@@ -171,6 +171,8 @@ func txnEncodingTest(A *testSession) {
 				decodedTxn := &pdi.DecodedTxn{
                     RawTxn: txnOut.RawTxn,
                 }
+
+                gTesting.Logf("Decoding idx %d of %d", idx, len(txnsOut))
 
 				err = decodedTxn.DecodeRawTxn(decoder)
 				if err != nil {
