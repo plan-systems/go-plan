@@ -27,13 +27,12 @@ const TxnSegmentMaxSz = 10 * 1024 * 1024
 //     native txns to be generated locally for submission to the remote StorageProvider.
 // The StorageProvider + txn Encoder/Decoder system preserves the property that a StorageProvider must operate deterministically,
 //     and can only validate txns and maintain a ledger of which public keys can post (and how much).
-// TxnEncoder is NOT assumed to be threadsafes unless specified otherswise
+// TxnEncoder is NOT assumed to be threadsafe unless specified otherswise
 type TxnEncoder interface {
 
 	// ResetSession -- resets the currently set community ID used for EncodeToTxns()
 	// This must be called before other calls into TxnEncoder.
 	ResetSession(
-		inEncodingDesc string,
 		inSession      ski.Session,
 		inCommunityID  []byte,
 	) error
@@ -55,7 +54,7 @@ type TxnEncoder interface {
 		inPayloadCodec PayloadCodec,
 		inTransfers    []*Transfer,
 		inTimeSealed   int64, // If non-zero, this is used in place of the current time
-	) ([][]byte, error)
+	) ([]Txn, error)
 
 	// Generates a txn that destroys the given address from committing any further txns.
 	//EncodeDestruct(from ski.PubKey) (*Txn, error)
@@ -65,7 +64,7 @@ type TxnEncoder interface {
 // TxnDecoder is NOT assumed to be threadsafes unless specified otherswise
 type TxnDecoder interface {
 
-	// EncodingDesc returns a string for use in TxnEncoder.ResetSession()
+	// EncodingDesc returns a string for use about this decoder
 	EncodingDesc() string
 
 	// Decodes a raw txn from a StorageProvider (from a corresponding TxnEncoder)
