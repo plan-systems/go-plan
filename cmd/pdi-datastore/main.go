@@ -7,9 +7,9 @@ import (
     log "github.com/sirupsen/logrus"
 
     //"bufio"
-    //"os"
-    "crypto/rand"
+    "os"
     //"time"
+    "crypto/rand"
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
@@ -28,49 +28,51 @@ func main() {
     flag.Parse()
 
     ctx := context.Background()
-    intrh, ctx := plan.SetupInterruptHandler(ctx)
-	defer intrh.Close()
+    interrupt, ctx := plan.SetupInterruptHandler(ctx)
+	defer interrupt.Close()
+
+    log.Infof("Starting, to stop: kill -s SIGINT %d\n", os.Getpid())
 
     {
-        sn, err := NewSnode(basePath)
+        sn, err := NewSnode(ctx, basePath)
         if err != nil {
             log.WithError(err).Fatalf("sn.NewSnode failed")
         }
 
         err = sn.ReadConfig(*init)
         if err != nil {
-            log.WithError(err).Fatalf("sn.ReadConfig faile")
+            log.WithError(err).Fatalf("sn.ReadConfig failed")
         }
 
         switch {
 
-        case *init == true:
-            // No op
+            case *init == true:
+                // No op
+                
+            case len(*create) > 0: {
+                createNewCommunity(
+                    sn,
+                    *implName,
+                    *create)
+            } 
             
-        case len(*create) > 0: {
-            createNewCommunity(
-                sn,
-                *implName,
-                *create)
-        } 
-        
-        default: {
+            default: {
 
-            err := sn.Startup()
-            if err != nil {
-                log.WithError(err).Fatalf("failed to startup node")
-            } else {
+                err := sn.Startup()
+                if err != nil {
+                    log.WithError(err).Fatalf("failed to startup node")
+                } else {
 
-                sn.StartServer()
+                    sn.StartServer()
 
-                log.Info("RUNNING")
+                    log.Info("RUNNING")
 
-                select {
-                    case <-ctx.Done():
-                }
+                    select {
+                        case <-ctx.Done():
+                    }
+                }     
             }
-            
-        } }
+        }
 
         sn.Shutdown()
     }
@@ -78,7 +80,6 @@ func main() {
     
     log.Print("Ending...")
 }
-
 
 
 func createNewCommunity(
@@ -109,10 +110,8 @@ func createNewCommunity(
     }
 
     // Create the admin acct
-    decoder := ds.NewTxnDecoder()
     encoder, err := ds.NewTxnEncoder(0)
     err = encoder.ResetSession(
-        decoder.TxnEncoderInvocation(),
         skiTool.Session,
         epoch.CommunityID,
     )

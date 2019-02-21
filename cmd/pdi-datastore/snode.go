@@ -60,8 +60,10 @@ const (
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
     Stores                      map[plan.CommunityID]*ds.Store
-
+    
     ActiveSessions              pservice.SessionGroup
+
+    ctx                         context.Context
 
     BasePath                    string
     Config                      Config
@@ -132,8 +134,13 @@ func (config *Config) WriteToFile(inPathname string) error {
 
 
 // NewSnode creates and initializes a new Snode instance
-func NewSnode(inBasePath *string) (*Snode, error) {
+func NewSnode(
+    inCtx context.Context,
+    inBasePath *string,
+) (*Snode, error) {
+
     sn := &Snode{
+        ctx: inCtx,
         grpcDone: make(chan struct{}),
         Stores: make(map[plan.CommunityID]*ds.Store),
     }
@@ -246,7 +253,7 @@ func (sn *Snode) CreateNewStore(
     }
 
     St := ds.NewStore(stConfig, sn.BasePath)
-    if err = St.Startup(true); err != nil {
+    if err = St.Startup(sn.ctx, true); err != nil {
         return err
     }
 
@@ -278,7 +285,7 @@ func (sn *Snode) Startup() error {
     }
 
     for _, St := range sn.Stores {
-        err := St.Startup(false)
+        err := St.Startup(sn.ctx, false)
         if err != nil {
             return err
         }
@@ -354,7 +361,7 @@ func (sn *Snode) Shutdown() {
 }
 
 // StartSession -- see service StorageProvider in pdi.proto
-func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) (*pdi.ProviderInfo, error) {
+func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) (*pdi.StorageInfo, error) {
     cID := plan.GetCommunityID(in.CommunityId)
 
     St := sn.Stores[cID]
@@ -371,8 +378,8 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
     session :=  sn.ActiveSessions.NewSession(ctx)
     session.Cookie = St
 
-    msg := &pdi.ProviderInfo{
-        TxnEncoderInvocation: St.TxnDecoder.TxnEncoderInvocation(),
+    msg := &pdi.StorageInfo{
+        EncodingDesc: St.TxnDecoder.EncodingDesc(),
     }
 	return msg, nil
 }
@@ -384,41 +391,70 @@ func (sn *Snode) Query(inQuery *pdi.TxnQuery, inOutlet pdi.StorageProvider_Query
         return err
     }
 
-    // TODO: use sync.Pool to reduce allocs
-    job := &ds.QueryJob{
-        TxnQuery:  inQuery,
-        Outlet:    inOutlet,
-        OnComplete: make(chan error),
+    St, _ := session.Cookie.(*ds.Store)
+    if St != nil {
+
+        job := ds.QueryJob{
+            TxnQuery:  inQuery,
+            Outlet:    inOutlet,
+            OnComplete: make(chan error),
+        }
+        
+        St.DoQueryJob(job)
+
+        err = <-job.OnComplete
     }
 
-    St := session.Cookie.(*ds.Store)
-    St.QueryInbox <- job
-
-    err = <-job.OnComplete
     return err
 }
 
-var txnAwaitingCommit = pdi.TxnMetaInfo{
-    TxnStatus: pdi.TxnStatus_AWAITING_COMMIT,
-}
-
-// CommitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) CommitTxn(inTxn *pdi.ReadiedTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
+// SendTxns -- see service StorageProvider in pdi.proto
+func (sn *Snode) SendTxns(inTxnBatch *pdi.TxnBatch, inOutlet pdi.StorageProvider_SendTxnsServer) error {
     session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
     if err != nil {
         return err
     }
-    job := &ds.CommitJob{
-        ReadiedTxn: inTxn,
-        Outlet:     inOutlet,
-        OnComplete: make(chan error),
+
+    St, _ := session.Cookie.(*ds.Store)
+    if St != nil {
+        
+        job := ds.SendJob{
+            UTIDs:     inTxnBatch.UTIDs,
+            Outlet:    inOutlet,
+            OnComplete: make(chan error),
+        }
+
+        St.DoSendJob(job)
+
+        err = <-job.OnComplete
     }
 
-    job.Outlet.Send(&txnAwaitingCommit)
+    return err
+}
 
-    St := session.Cookie.(*ds.Store)
-    St.CommitInbox <- job
 
-    err = <-job.OnComplete
+// CommitTxn -- see service StorageProvider in pdi.proto
+func (sn *Snode) CommitTxn(inRawTxn *pdi.RawTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
+    session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
+    if err != nil {
+        return err
+    }
+
+    St, _ := session.Cookie.(*ds.Store)
+    if St != nil {
+
+        job := ds.CommitJob{
+            Outlet:     inOutlet,
+            Txn:        pdi.DecodedTxn{
+                RawTxn: inRawTxn.Bytes,
+            },
+            OnComplete: make(chan error),
+        }
+
+        St.CommitInbox <- job
+
+        err = <-job.OnComplete
+    }
+
     return err
 }
