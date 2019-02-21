@@ -47,8 +47,8 @@ func (entry *EntryCrypt) GetEntryVersion() EntryVersion {
 	return EntryVersion(entry.CryptInfo & EntryVersionMask)
 }
 
-// ComputeHash hashes all fields of psi.EntryCrypt (except .EntrySig)
-func (entry *EntryCrypt) ComputeHash() []byte {
+// ComputeDigest hashes all fields of psi.EntryCrypt (except .EntrySig)
+func (entry *EntryCrypt) ComputeDigest() []byte {
 
 	hw := sha3.NewLegacyKeccak256()
 
@@ -325,15 +325,15 @@ func NewStorageAlert(
 func SegmentIntoTxns(
 	inData           []byte,
     inPayloadCodec   PayloadCodec, 
-	inMaxSegmentSize int32,
+	inMaxSegmentSize uint32,
 ) ([]*TxnInfo, error) {
 
-    payloadSz := int32(len(inData))
-	bytesRemain := int32(payloadSz)
+    payloadSz := uint32(len(inData))
+	bytesRemain := uint32(payloadSz)
 
 	N := (payloadSz + inMaxSegmentSize - 1) / inMaxSegmentSize
 	segs := make([]*TxnInfo, 0, N)
-    pos := int32(0)
+    pos := uint32(0)
 
 	for bytesRemain > 0 {
 
@@ -376,37 +376,82 @@ const (
 
     // UTIDTimestampSz is the bytesize of the timestamp stored in a UTID
     // This must be a multiple of 3 so that the encoded length doesn't have any bit overhang.
-    // 48 bits of unix seconds maxes around 8,800,000 CE, so we'll call that good for now.  :D 
     UTIDTimestampSz = 6
+
+    // UTIDTimeMax is the max time value 
+    // 48 bits of unix seconds maxes around 8,800,000 CE, so we'll call that good for now.  :D 
+    UTIDTimeMax = (1 << (UTIDTimestampSz * 8) ) - 1
 
     // UTIDTxnIDSz is the byte length of the ID bytes encoded within in a UTID.
     // This is also chosen to be a multiple of 3 such that the encoded txn hashname falls on base64 digit boundaries. 
     UTIDTxnIDSz = 27
 
-    // UTIDTotalSz is the total bytesize of a decoded UTID.
+    // UTIDBinarySz is the total bytesize of a decoded UTID.
     // UTID aka "Universal Transaction Identifier", an ASCII string that encodes 33 bytes using pdi.Base64: 
     //     6 bytes (rightmost BIG-endian bytes of TimeSealed) 
     //  + 27 bytes (rightmost-bytes of hash digest of this txn) ==> *33* bytes (total) ==> *44* chars (pdi.Base64 encoded)
-    UTIDTotalSz = UTIDTxnIDSz + UTIDTimestampSz
+    UTIDBinarySz = UTIDTxnIDSz + UTIDTimestampSz
 
-    // UTIDEncodedTimestmapLen is the base64 char len of an encoded timestamp.  To the right of this position, the txn hashname begins.
-    UTIDEncodedTimestmapLen = 8 * UTIDTimestampSz / 6
+    // UTIDTimestampStrLen is the base64 char len of an encoded timestamp.  To the right of this position, the txn hashname begins.
+    UTIDTimestampStrLen = 8 * UTIDTimestampSz / 6
 
-    // UTIDEncodedLen is the ASCII char length of an encoded UTID (44 chars)
-    UTIDEncodedLen = 8 * UTIDTxnIDSz / 6
+    // UTIDStrLen is the ASCII char length of an encoded UTID (44 chars)
+    UTIDStrLen = 8 * UTIDBinarySz / 6
 
 )
 
+// Encode64 encodes the given binary buffer into base64.
+func Encode64(in []byte) string {
+	return Base64.EncodeToString(in)
+}
 
-// FormUTID converts a txn timestamp and its binary identifier into a UTID aka "Universal Transaction Identifier",
-//     an ASCII string that encodes these two items in pdi.Base64 (see UTIDDecodedLen above).
-//
-// The purpose of a UTID is so that txns can be stored and traversed chronologically in O(1) time.
-//
-// If len(inID) == 0, then only the encoded timstamp is returned (8 base64 chars).
-// If a UTID is less than 44 chars, it is assumed to be left-padded with "zeros" (the '0' char)
-func FormUTID(inPrefix string, inTimestamp int64, inID []byte) string {
-    var raw [UTIDTotalSz]byte
+
+// UTID aka "Universal Transaction Identifier"
+// 
+// The purpose of a UTID is that it can be easily compared with others and easily sorted chronologically.
+type UTID []byte
+
+// String converts a binary UTID into its pdi.Base64 ASCII string representation.
+func (utid UTID) String() string {
+    var str [UTIDStrLen]byte
+
+    sz := len(utid)
+    if sz == UTIDBinarySz {
+        sz = UTIDStrLen
+    } else if sz == UTIDTimestampSz {
+        sz = UTIDTimestampStrLen
+    } else {
+        return ""
+    }
+        
+    Base64.Encode(str[:], utid)
+	return string(str[:sz])  
+}
+
+
+// UTIDFromInfo returns the binary/base256 form of a binary UTID aka "Universal Transaction Identifier"
+func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
+
+    idSz := len(inID)
+    utidLen := UTIDTimestampSz
+    if idSz > 0 {
+        utidLen += UTIDTxnIDSz
+    }
+
+    if inTimestamp > UTIDTimeMax {
+        inTimestamp = UTIDTimeMax
+    }
+
+    var raw []byte
+    {
+        sz := len(in)
+        newSz := sz + utidLen
+        if cap(in) >= newSz {
+            raw = in[sz:newSz]
+        } else {
+            raw = make([]byte, utidLen)
+        }
+    }
 
 	raw[0] = byte(inTimestamp >> 40)
 	raw[1] = byte(inTimestamp >> 32)
@@ -415,34 +460,22 @@ func FormUTID(inPrefix string, inTimestamp int64, inID []byte) string {
 	raw[4] = byte(inTimestamp >> 8)
 	raw[5] = byte(inTimestamp)
 
-    rawLen := UTIDTimestampSz
-
     // Use right-most bytes
-    idSz := len(inID)
     if idSz > 0 {
-        rawLen += UTIDTxnIDSz
-    	overhang := idSz - UTIDTxnIDSz
+        overhang := idSz - UTIDTxnIDSz
+
         if overhang > 0 {
-            copy(raw[8:], inID[overhang:])
+            copy(raw[6:], inID[overhang:])
         } else {
-            copy(raw[8-overhang:], inID)
+            for i := 6; i < -overhang; i++ {
+                raw[i] = 0
+            }
+            copy(raw[6-overhang:], inID)
         }
     }
 
-    prefixLen := len(inPrefix)
-
-    var out [64]byte
-    if prefixLen > 0 {
-        if prefixLen > 64 - UTIDEncodedLen {
-            prefixLen = 64 - UTIDEncodedLen
-        }
-        copy(out[:prefixLen], []byte(inPrefix))
-    }
-
-	Base64.Encode(out[prefixLen:], raw[:rawLen])
-	return string(out[:prefixLen+UTIDEncodedLen])
+    return raw[:utidLen]
 }
-
 
 
 // Deposit deposits the given transfer into this account
