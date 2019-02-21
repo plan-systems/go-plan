@@ -1,25 +1,19 @@
 package datastore
 
 import (
-	ds "github.com/ipfs/go-datastore"
+    "github.com/dgraph-io/badger"
 	"github.com/plan-systems/go-plan/plan"
 )
 
-// DsAccess is used to wrap a Datastore AND ds.Txn
-type DsAccess interface {
-	ds.Read
-	ds.Write
-}
 
 // TxnHelper wraps ds.Txn for easier Commit() reattempts
 type TxnHelper struct {
-	DsAccess DsAccess
-	ds       ds.Datastore
+	Txn      *badger.Txn
 
 	// Private
+    db          *badger.DB
 	maxAttempts int
 	readOnly    bool
-	dsTxn       ds.Txn // May be nil if this ds isn't a TxnDatastore
 	isDone      bool
 	commitErr   error
 	fatalErr    error
@@ -28,9 +22,9 @@ type TxnHelper struct {
 
 // NewTxnHelper returns a helper struct that wraps datastore.Txn for convenience.
 // This makes life easier for reattempting txns if they go stale, etc.
-func (St *Store) NewTxnHelper() TxnHelper {
+func NewTxnHelper(db *badger.DB) TxnHelper {
 	return TxnHelper{
-		ds:          St.ds,
+		db:          db,
 		maxAttempts: 5,
 		readOnly:    false,
 		tryNum:      0,
@@ -42,7 +36,7 @@ func (St *Store) NewTxnHelper() TxnHelper {
 //     2) Finish() has not been called with a non-nil error
 //     3) the txn has not yet been committed successfully yet.
 func (h *TxnHelper) NextAttempt() bool {
-	if h.DsAccess != nil {
+	if h.Txn != nil {
 		panic("BeginTry/EndTry mismatch")
 	}
 
@@ -55,24 +49,7 @@ func (h *TxnHelper) NextAttempt() bool {
 		return false
 	}
 
-	// If we have a TxnDatastore, make a new txn, otherwise we use the Datastore interface
-	txnDs, ok := h.ds.(ds.TxnDatastore)
-	if txnDs != nil && ok {
-		var err error
-		h.dsTxn, err = txnDs.NewTransaction(h.readOnly)
-		if err != nil {
-			h.fatalErr = plan.Errorf(err, plan.StorageNotReady, "txnDatastore.NewTransaction() failed")
-		}
-		h.DsAccess = h.dsTxn
-	} else {
-		h.DsAccess = h.ds
-	}
-
-	if h.fatalErr != nil {
-		h.dsTxn = nil
-		h.DsAccess = nil
-		return false
-	}
+	h.Txn = h.db.NewTransaction(!h.readOnly)
 
 	h.tryNum++
 	return true
@@ -89,29 +66,19 @@ func (h *TxnHelper) Finish(inFatalErr error) {
 		h.fatalErr = inFatalErr
 	}
 
-	if h.DsAccess != nil {
+	if h.Txn != nil {
 
-		// If h.dsTxn == nil, then this ds isn't a TxnDatastore
-		if h.dsTxn == nil {
-			h.isDone = true
-		} else {
-
-			if inFatalErr == nil {
-				err := h.dsTxn.Commit()
-				if err == nil {
-					h.isDone = true
-				} else {
-					h.commitErr = plan.Error(err, plan.StorageNotReady, "ds.Txn.Commit() failed")
-				}
-			} else {
-
-				// TODO: what causes a txn to go stale or fail?
-				h.dsTxn.Discard()
-			}
-		}
-
-		h.dsTxn = nil
-		h.DsAccess = nil
+        if inFatalErr == nil {
+            err := h.Txn.Commit()
+            if err == nil {
+                h.isDone = true
+            } else {
+                h.commitErr = plan.Error(err, plan.StorageNotReady, "badger.Txn.Commit() failed")
+            }
+        }
+        
+        h.Txn.Discard()
+		h.Txn = nil
 	}
 }
 

@@ -71,7 +71,7 @@ func TestTxnEncoding(t *testing.T) {
 	// Register providers to test
 	encodersToTest := []func() (pdi.TxnEncoder, pdi.TxnDecoder){
 		func() (pdi.TxnEncoder, pdi.TxnDecoder) {
-			decoder := NewTxnDecoder()
+			decoder := NewTxnDecoder(true)
 			encoder, _ := NewTxnEncoder(1000)
 			return encoder, decoder
 		},
@@ -102,22 +102,24 @@ func TestTxnEncoding(t *testing.T) {
 	}
 }
 
-
 func txnEncodingTest(A *testSession) {
 
-    //rand.Seed(55055)
+    seed := plan.Now().UnixSecs
+    //seed = int64(1550730342)
+    gTesting.Logf("using seed %d", seed)
+
+    rand.Seed(seed)
 
 	// Test agent encode/decode
 	{
         maxSegSize := int32(1000)
         
 		blobBuf := make([]byte, 500000)
-		decoder := NewTxnDecoder()
+		decoder := NewTxnDecoder(true)
 		encoder, _ := NewTxnEncoder(maxSegSize)
 
 		{
 			err := encoder.ResetSession(
-				decoder.EncodingDesc(),
 				A.Session,
 				gCommunityID[:],
 			)
@@ -144,12 +146,12 @@ func txnEncodingTest(A *testSession) {
 		for i := 0; i < 1000; i++ {
             testTime := plan.Now().UnixSecs
 
-			blobLen := int(rand.Int31n(1 + rand.Int31n(maxSegSize * 15)))
+			blobLen := int(1 + rand.Int31n(maxSegSize * 15))
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)
 
-			rawTxns, err := encoder.EncodeToTxns(
+			txnsOut, err := encoder.EncodeToTxns(
 				payload,
 				pdi.PayloadCodec_Unspecified,
 				nil,
@@ -159,30 +161,32 @@ func txnEncodingTest(A *testSession) {
 				gTesting.Fatal(err)
 			}
 
-            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", i, len(rawTxns), len(payload))
-            if i == 16 {
+            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", i, len(txnsOut), len(payload))
+            if i == 266 {
                 err = nil
             }
-            prevUTID := ""
+            var prevUTID []byte
 
-			for idx, rawTxn := range rawTxns {
-				decodedTxn := &pdi.DecodedTxn{}
+			for idx, txnOut := range txnsOut {
+				decodedTxn := &pdi.DecodedTxn{
+                    RawTxn: txnOut.RawTxn,
+                }
 
-				err = decodedTxn.DecodeRawTxn(
-					rawTxn,
-					decoder,
-				)
+				err = decodedTxn.DecodeRawTxn(decoder)
 				if err != nil {
 					gTesting.Fatal(err)
                 }
-                if prevUTID != decodedTxn.Info.SegPrev {
+                if bytes.Compare(txnOut.UTID, decodedTxn.Info.UTID) != 0 {
+                    gTesting.Fatal("decoded UTID doesn't match")
+                }
+                if bytes.Compare(prevUTID, decodedTxn.Info.PrevUTID) != 0 {
                     gTesting.Fatal("prev seg UTID not set properly")
                 }
 
                 txns[idx] = decodedTxn
-                prevUTID = decodedTxn.UTID
+                prevUTID = decodedTxn.Info.UTID
             }
-            N := len(rawTxns)
+            N := len(txnsOut)
 
             rand.Shuffle(N, func(i, j int) {
                 txns[i], txns[j] = txns[j], txns[i]
@@ -207,7 +211,7 @@ func txnEncodingTest(A *testSession) {
                 gTesting.Fatal("payload failed")
             }
 
-            if final.UTID != prevUTID {
+            if pdi.UTID(prevUTID).String() != final.UTID {
                 gTesting.Fatal("last UTID chk failed")
             }
 		}
