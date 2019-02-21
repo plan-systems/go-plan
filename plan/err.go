@@ -111,18 +111,24 @@ const (
     // ConfigNotRead denotes that the given file was not found/read
     ConfigNotRead
 
+    // ServiceShutdown means the host service is either shutting down is shutdown
+    ServiceShutdown
+
 	/*****************************************************
-	** PDI
+	** Repo
 	**/
 
-	// PDIEntryErrorFamily errors generally relate to pnode
-	PDIEntryErrorFamily = 5100 + iota
+	// RepoEntryErrorFamily errors generally relate to prepo
+	RepoEntryErrorFamily = 5100 + iota
 
 	// BadPDIEntryFormat means the PDI entry being processed is corrupted or was created using an unsupported format
 	BadPDIEntryFormat
 
 	// CommunityNotFound means the specified community name or ID did not match any of the registered communities
 	CommunityNotFound
+
+    // FailedToConnectStorageProvider means the connection attempt the StorageProvider failed
+    FailedToConnectStorageProvider
 
 	// ChannelNotFound means the given ChannelID was not found in the community repo
 	ChannelNotFound
@@ -157,6 +163,20 @@ const (
 	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
 	TargetChannelEpochExpired
 
+    // TxnDBNotReady means the txnDB failed to read or write txn data
+    TxnDBNotReady
+
+    // TxnNotConsistent means info in one or more txns is at odds, meaning malicious txn packaging may be in play 
+    TxnNotConsistent
+
+    // TxnDecodeFailed means the given txn failed to be decoded
+    TxnDecodeFailed
+
+    // UnsupportedPayloadCodec means the given txn payload codec type is not recognized or supported
+    UnsupportedPayloadCodec
+
+    // CannotExtractTxnPayload means the txn payload failed to be extracted
+    CannotExtractTxnPayload
 
 
     /*****************************************************
@@ -239,7 +259,7 @@ const (
     KeyTomeFailedToWrite
 
 	/*****************************************************
-	** StorageSession / StorageProvider
+	** StorageProvider
 	**/
 
 	// StorageErrorFamily errors relate to PLAN's PDI Storage abstraction
