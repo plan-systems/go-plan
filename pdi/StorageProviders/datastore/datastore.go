@@ -56,7 +56,7 @@ type Store struct {
     acctDB                      *badger.DB
 
     // UTIDs newly committed.  Intelligently processed such that TxnQuery jobs that are flagged to report new commits receive said new txns
-    newTxns                     chan pdi.UTID
+    completedCommits            chan pdi.UTID
 
     // Fan-out to committed txn "subscribers"
     subsMutex                   sync.Mutex
@@ -76,8 +76,7 @@ type Store struct {
     //shuttingDown                chan *sync.WaitGroup
 
     // When OpState == Stopping, shutdown.Wait() is used to block until all queued work is complete.
-    level1                      sync.WaitGroup
-    level0                      sync.WaitGroup
+    resources                    sync.WaitGroup
 
     // When OpState == Stopping, this context is in a ca
     ctx                         context.Context
@@ -90,20 +89,17 @@ type Store struct {
 }
 
 
-// OpState specifices this Store's current operatational state. 
+// OpState specifices this Store's current operational state. 
 type OpState int
 const (
 
-    // Stopped means this Store is fully shutdown and idle and it is safe to exit this process
-    Stopped OpState = 0
-
-    // Starting means this Store is starting up, doi
-    Starting
+    // Shutdown means this Store is fully shutdown and idle and it is safe to exit this process
+    Shutdown OpState = 0
 
     // Running means this service is running normally
     Running
 
-    // Stopping means this service is currently shuttiing down
+    // Stopping means this service is currently shutting down
     Stopping
 )
 
@@ -141,7 +137,7 @@ func (St *Store) Startup(
     inFirstTime bool,
 ) error {
 
-    if St.OpState != Stopped {
+    if St.OpState != Shutdown {
         return plan.Errorf(nil, plan.AssertFailed, "Store.Startup() cannot start in state %v",  St.OpState)
     }
 
@@ -181,6 +177,8 @@ func (St *Store) Startup(
                 St.acctDB, err = badger.Open(opts)
                 if err != nil {
                     err = plan.Error(err, plan.FailedToLoadDatabase, "acctDB Open() failed")
+                    St.txnDB.Close()
+                    St.txnDB = nil
                 }
             }
 
@@ -192,25 +190,42 @@ func (St *Store) Startup(
         return err
     }
 
-    St.OpState = Starting
-
-    St.level0.Add(1)
+    St.resources.Add(1)
     St.ctx, St.ctxCancel = context.WithCancel(inCtx)
 
 
     // Small buffer needed for the txn notifications to ensure that the txn writer doesn't get blocked
-    St.newTxns = make(chan pdi.UTID, 2)
-    St.level1.Add(1)
+    St.completedCommits = make(chan pdi.UTID, 2)
     go func() {
-        for newTxn := range St.newTxns {
+        for newTxn := range St.completedCommits {
             St.subsMutex.Lock()
             for _, sub := range St.subs {
                 sub <- newTxn
             }
             St.subsMutex.Unlock()
         }
+        St.log.Info("1) commit notification exited")
 
-        St.level1.Done()
+        // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
+        for {
+            time.Sleep(100 * time.Millisecond)
+            if atomic.LoadInt32(&St.numQueryJobs) == 0 && atomic.LoadInt32(&St.numSendJobs) == 0 {
+                break
+            }
+        }
+
+        St.txnDB.Close()
+        St.txnDB = nil
+
+        St.acctDB.Close()
+        St.acctDB = nil
+
+        St.log.Info("0) resources released")
+
+        St.OpState = Shutdown
+        St.ctx = nil
+
+        St.resources.Done()
     }()
 
 
@@ -222,8 +237,11 @@ func (St *Store) Startup(
             // Unlike QueryJobs, we only process once commit job at a time
             St.doCommitJob(job)
         }
+        St.log.Info("2) commit pipeline exited")
 
-        close(St.newTxns)
+        // Cause all subs to fire, causing them to exit when they see St.OpState == Stopping
+        St.completedCommits <- pdi.UTID{}
+        close(St.completedCommits)
     }()
 
 
@@ -244,6 +262,7 @@ func (St *Store) Startup(
                 St.decodedCommits <- job
             }
         }
+        St.log.Info("3) decoder pipeline exited")
 
         close(St.decodedCommits)
     }()
@@ -259,25 +278,9 @@ func (St *Store) Startup(
 
         St.OpState = Stopping
 
-        // This will initiate a close cascade causing level1 to be released
+        // This will initiate a close-cascade causing St.resources to be released
         close(St.CommitInbox)
-
-        // Wait until all the queries are donzo
-        for atomic.LoadInt32(&St.numQueryJobs) > 0 || atomic.LoadInt32(&St.numSendJobs) > 0 {
-            time.Sleep(100 * time.Millisecond)
-        }
-
-        St.level1.Wait()
-
-        St.txnDB.Close()
-        St.txnDB = nil
-
-        St.acctDB.Close()
-        St.acctDB = nil
-
-        St.OpState = Stopped
-
-        St.level0.Done()
+  
     }()
 
 
@@ -286,37 +289,21 @@ func (St *Store) Startup(
 
 
 
-// Shutdown closes this datastore, if open, blocking until completion.
-func (St *Store) Shutdown(inGroup *sync.WaitGroup) {
+// Shutdown closes this datastore, if open, blocking until completion.  No-op if this Store is already shutdown.
+//
+// THREADSAFE; 
+func (St *Store) Shutdown(onComplete *sync.WaitGroup) {
 
     if St.OpState == Running {
         St.ctxCancel()
     }
 
-    St.level0.Wait()
-
-   if inGroup != nil {
-       inGroup.Done()
-   }
-}
-
-
-// RetryCriticalOp is called when the given error has occurred and represents a critical block from providing core services.  
-//    (e.g. db error while accessing the main txn DB).
-//
-// No op and returns false if inErr == nil.
-//
-// Returns true if the caller should retry the given operation, otherwise this CR will transition into a protected/halted state.
-func (St *Store) RetryCriticalOp(inErr error) bool {
-
-    if inErr == nil {
-        return false
+    if St.OpState >= Running {
+        St.resources.Wait()
+        St.log.Print("shutdown complete")
     }
 
-    // TODO: log to disk, etc
-    St.log.WithError(inErr).Warnf("critical op failed")
-
-    return false
+    onComplete.Done()
 }
 
 
@@ -531,7 +518,7 @@ func (St *Store) doCommitJob(job CommitJob) {
         txnMetaInfo.TxnStatus = pdi.TxnStatus_FINALIZED
         job.Outlet.Send(&txnMetaInfo)
 
-        St.newTxns <- job.Txn.Info.UTID
+        St.completedCommits <- job.Txn.Info.UTID
 
     } else {
 
@@ -557,8 +544,6 @@ func (St *Store) doCommitJob(job CommitJob) {
     // This releases the GRPC handler
     job.OnComplete <- err
 }
-
-
 
 
 func (St *Store) AddTxnSubscriber() chan pdi.UTID {
@@ -588,6 +573,7 @@ func (St *Store) RemoveTxnSubscriber(inSub chan pdi.UTID) {
     St.subsMutex.Unlock()
 
 }
+
 
 
 // DoQueryJob queues the given QueryJob
@@ -817,13 +803,15 @@ func (St *Store) doQueryJob(job QueryJob) error {
             select {
 
                 case newTxn := <- job.NewTxns:
-                    copy(UTIDs[batchCount], newTxn[:])
-                    batchCount++
+                    if len(newTxn) != pdi.UTIDBinarySz {
+                        copy(UTIDs[batchCount], newTxn)
+                        batchCount++
 
-                    if batchCount == 1 {
-                        wakeTimer = batchLag.C
-                        for len(wakeTimer) > 0 {
-                            <-wakeTimer
+                        if batchCount == 1 {
+                            wakeTimer = batchLag.C
+                            for len(wakeTimer) > 0 {
+                                <-wakeTimer
+                            }
                         }
                     }
                         
@@ -832,6 +820,10 @@ func (St *Store) doQueryJob(job QueryJob) error {
                         UTIDs: UTIDs[:batchCount],
                     })
                     wakeTimer = heartbeat.C
+            }
+
+            if err == nil {
+                err = St.CheckState()
             }
         }
 

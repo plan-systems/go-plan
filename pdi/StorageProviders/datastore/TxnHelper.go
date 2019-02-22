@@ -75,9 +75,10 @@ func (h *TxnHelper) Finish(inFatalErr error) {
             } else {
                 h.commitErr = plan.Error(err, plan.StorageNotReady, "badger.Txn.Commit() failed")
             }
+        } else {
+            h.Txn.Discard()
         }
         
-        h.Txn.Discard()
 		h.Txn = nil
 	}
 }

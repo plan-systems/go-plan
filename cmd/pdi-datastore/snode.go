@@ -339,21 +339,22 @@ func (sn *Snode) StartServer() error {
 
 // Shutdown performs a shutdown and cleanup
 func (sn *Snode) Shutdown() {
-    log.Info("Shutting down...")
 
-    if sn.grpcServer != nil {
-        sn.grpcServer.GracefulStop()
+    // Shutdown the Stores FIRST so that all we have to do is wait on the server to stop.
+    group := sync.WaitGroup{}
 
-        log.Info("Waiting on server")
-        <- sn.grpcDone
+    log.Info("Shutting down stores...")
+    for _, St := range sn.Stores {
+        group.Add(1)
+        go St.Shutdown(&group)
     }
 
-    group := sync.WaitGroup{}
-    group.Add(len(sn.Stores))
+    if sn.grpcServer != nil {
+        log.Info("initiating grpc graceful stop")
+        sn.grpcServer.GracefulStop()
 
-    log.Debug("Shutting down stores...")
-    for _, St := range sn.Stores {
-        go St.Shutdown(&group)
+        <- sn.grpcDone
+        log.Info("grpc server done")
     }
 
     group.Wait()
@@ -369,7 +370,6 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
         return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found {ID:%v}", in.CommunityId)
     }
 
-
     /******* gRPC Server Notes **********
         1) An endpoint w/ a stream response sends an io.EOF once the handler proc returns (even if streamer stays open)
     */
@@ -384,77 +384,83 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
 	return msg, nil
 }
 
+// FetchSessionStore uses the metadata in the given session to recover the session info and associated Store
+func (sn *Snode) FetchSessionStore(ctx context.Context) (*ds.Store, error) {
+    session, err := sn.ActiveSessions.FetchSession(ctx)
+    if err != nil {
+        return nil, err
+    }
+
+    St, _ := session.Cookie.(*ds.Store)
+    if St == nil {
+        return nil, plan.Errorf(nil, plan.AssertFailed, "internal type assertion err")
+    }
+
+    err = St.CheckState()
+    if err != nil {
+        return nil, err
+    }
+
+    return St, nil
+}
+
 // Query -- see service StorageProvider in pdi.proto
 func (sn *Snode) Query(inQuery *pdi.TxnQuery, inOutlet pdi.StorageProvider_QueryServer) error {
-    session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
+    St, err := sn.FetchSessionStore(inOutlet.Context())
     if err != nil {
         return err
     }
 
-    St, _ := session.Cookie.(*ds.Store)
-    if St != nil {
-
-        job := ds.QueryJob{
-            TxnQuery:  inQuery,
-            Outlet:    inOutlet,
-            OnComplete: make(chan error),
-        }
-        
-        St.DoQueryJob(job)
-
-        err = <-job.OnComplete
+    job := ds.QueryJob{
+        TxnQuery:  inQuery,
+        Outlet:    inOutlet,
+        OnComplete: make(chan error),
     }
+    
+    St.DoQueryJob(job)
 
+    err = <-job.OnComplete
     return err
 }
 
 // SendTxns -- see service StorageProvider in pdi.proto
 func (sn *Snode) SendTxns(inTxnBatch *pdi.TxnBatch, inOutlet pdi.StorageProvider_SendTxnsServer) error {
-    session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
+    St, err := sn.FetchSessionStore(inOutlet.Context())
     if err != nil {
         return err
     }
-
-    St, _ := session.Cookie.(*ds.Store)
-    if St != nil {
         
-        job := ds.SendJob{
-            UTIDs:     inTxnBatch.UTIDs,
-            Outlet:    inOutlet,
-            OnComplete: make(chan error),
-        }
-
-        St.DoSendJob(job)
-
-        err = <-job.OnComplete
+    job := ds.SendJob{
+        UTIDs:     inTxnBatch.UTIDs,
+        Outlet:    inOutlet,
+        OnComplete: make(chan error),
     }
 
+    St.DoSendJob(job)
+
+    err = <-job.OnComplete
     return err
 }
-
 
 // CommitTxn -- see service StorageProvider in pdi.proto
 func (sn *Snode) CommitTxn(inRawTxn *pdi.RawTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
-    session, err := sn.ActiveSessions.FetchSession(inOutlet.Context())
+    St, err := sn.FetchSessionStore(inOutlet.Context())
     if err != nil {
         return err
     }
 
-    St, _ := session.Cookie.(*ds.Store)
-    if St != nil {
-
-        job := ds.CommitJob{
-            Outlet:     inOutlet,
-            Txn:        pdi.DecodedTxn{
-                RawTxn: inRawTxn.Bytes,
-            },
-            OnComplete: make(chan error),
-        }
-
-        St.CommitInbox <- job
-
-        err = <-job.OnComplete
+    job := ds.CommitJob{
+        Outlet:     inOutlet,
+        Txn:        pdi.DecodedTxn{
+            RawTxn: inRawTxn.Bytes,
+        },
+        OnComplete: make(chan error),
     }
 
+    St.CommitInbox <- job
+
+    err = <-job.OnComplete
     return err
 }
+
+

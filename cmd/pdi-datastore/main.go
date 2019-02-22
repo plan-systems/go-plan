@@ -77,8 +77,6 @@ func main() {
         sn.Shutdown()
     }
 
-    
-    log.Print("Ending...")
 }
 
 
