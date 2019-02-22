@@ -20,20 +20,19 @@ func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
 // GUI error philosophy: errors can be suppressed by type or by item that they are for.
 
 // Err is PLAN's common error struct.  Err.Code allows easy matching while allowing error strings to contain useful contextual information.
-type Err struct {  
-    Status  
+type Err struct {
+	Status
 
-	Err  error
+	Err error
 }
 
 // Error create a new PError
 func Error(inErr error, inCode int32, inMsg string) *Err {
 	return &Err{
 		Status{
-            inCode,
-            inMsg,
-            nil,
-        },
+			Code: inCode,
+			Msg:  inMsg,
+		},
 		inErr,
 	}
 }
@@ -42,10 +41,9 @@ func Error(inErr error, inCode int32, inMsg string) *Err {
 func Errorf(inErr error, inCode int32, inFormat string, inArgs ...interface{}) *Err {
 	return &Err{
 		Status{
-            inCode,
-            fmt.Sprintf(inFormat, inArgs...),
-            nil,
-        },
+			Code: inCode,
+			Msg:  fmt.Sprintf(inFormat, inArgs...),
+		},
 		inErr,
 	}
 }
@@ -96,23 +94,23 @@ const (
 	// MissingParam one or more params was missing, nil, or not otherwise given
 	MissingParam
 
-    // FailedToMarshal means Marshal() returned an error
-    FailedToMarshal
+	// FailedToMarshal means Marshal() returned an error
+	FailedToMarshal
 
-    // FailedToUnmarshal means Unmarshal() returned an error
-    FailedToUnmarshal
+	// FailedToUnmarshal means Unmarshal() returned an error
+	FailedToUnmarshal
 
-    // Unimplemented means flow hit a point requiring deeper implementation
-    Unimplemented
+	// Unimplemented means flow hit a point requiring deeper implementation
+	Unimplemented
 
-    // FileSysError means an unexpected file sys error occured
-    FileSysError
+	// FileSysError means an unexpected file sys error occured
+	FileSysError
 
-    // ConfigNotRead denotes that the given file was not found/read
-    ConfigNotRead
+	// ConfigNotRead denotes that the given file was not found/read
+	ConfigNotRead
 
-    // ServiceShutdown means the host service is either shutting down is shutdown
-    ServiceShutdown
+	// ServiceShutdown means the host service is either shutting down is shutdown
+	ServiceShutdown
 
 	/*****************************************************
 	** Repo
@@ -127,8 +125,8 @@ const (
 	// CommunityNotFound means the specified community name or ID did not match any of the registered communities
 	CommunityNotFound
 
-    // FailedToConnectStorageProvider means the connection attempt the StorageProvider failed
-    FailedToConnectStorageProvider
+	// FailedToConnectStorageProvider means the connection attempt the StorageProvider failed
+	FailedToConnectStorageProvider
 
 	// ChannelNotFound means the given ChannelID was not found in the community repo
 	ChannelNotFound
@@ -163,23 +161,22 @@ const (
 	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
 	TargetChannelEpochExpired
 
-    // TxnDBNotReady means the txnDB failed to read or write txn data
-    TxnDBNotReady
+	// TxnDBNotReady means the txnDB failed to read or write txn data
+	TxnDBNotReady
 
-    // TxnNotConsistent means info in one or more txns is at odds, meaning malicious txn packaging may be in play 
-    TxnNotConsistent
+	// TxnNotConsistent means info in one or more txns is at odds, meaning malicious txn packaging may be in play
+	TxnNotConsistent
 
-    // TxnDecodeFailed means the given txn failed to be decoded
-    TxnDecodeFailed
+	// TxnDecodeFailed means the given txn failed to be decoded
+	TxnDecodeFailed
 
-    // UnsupportedPayloadCodec means the given txn payload codec type is not recognized or supported
-    UnsupportedPayloadCodec
+	// UnsupportedPayloadCodec means the given txn payload codec type is not recognized or supported
+	UnsupportedPayloadCodec
 
-    // CannotExtractTxnPayload means the txn payload failed to be extracted
-    CannotExtractTxnPayload
+	// CannotExtractTxnPayload means the txn payload failed to be extracted
+	CannotExtractTxnPayload
 
-
-    /*****************************************************
+	/*****************************************************
 	** SKI / Security
 	**/
 
@@ -192,17 +189,17 @@ const (
 	// InvocationAlreadyExists means an ski.Provider has already been registered with the given invocation string
 	InvocationAlreadyExists
 
-    // CryptoKitIDAlreadyRegistered  means the given package ID was already registered
-    CryptoKitIDAlreadyRegistered
+	// CryptoKitIDAlreadyRegistered  means the given package ID was already registered
+	CryptoKitIDAlreadyRegistered
 
-    // CryptoKitNotFound means the requested CryptoKitID was not registered for any CryptoKitID
-    CryptoKitNotFound
+	// CryptoKitNotFound means the requested CryptoKitID was not registered for any CryptoKitID
+	CryptoKitNotFound
 
-    // HashKitNotFound means the requested HashKitID was not found
-    HashKitNotFound
+	// HashKitNotFound means the requested HashKitID was not found
+	HashKitNotFound
 
-    // KeyGenerationFailed means key generation failed
-    KeyGenerationFailed
+	// KeyGenerationFailed means key generation failed
+	KeyGenerationFailed
 
 	// KeyringNotSpecified means no keyring scope name was given for the SKI operation
 	KeyringNotSpecified
@@ -213,8 +210,8 @@ const (
 	// KeyDomainNotFound means the KeyDomain given was not known (and out of range)
 	KeyDomainNotFound
 
-    // CommunityNotSpecified means inArgs.KeySpecs.CommunityID was not set (and so the op can't proceed)
-    CommunityNotSpecified
+	// CommunityNotSpecified means inArgs.KeySpecs.CommunityID was not set (and so the op can't proceed)
+	CommunityNotSpecified
 
 	// UnknownSKIOpName means the given SKI op name was not recognized
 	UnknownSKIOpName
@@ -231,8 +228,8 @@ const (
 	// KeyIDCollision occurs when a key is placed in a keyring that already contains the key ID
 	KeyIDCollision
 
-    // KeyImportFailed means one or more keys that tried to be imported failed.
-    KeyImportFailed
+	// KeyImportFailed means one or more keys that tried to be imported failed.
+	KeyImportFailed
 
 	// BadKeyFormat means key data was a length or format that was invalid or unexpected
 	BadKeyFormat
@@ -249,14 +246,14 @@ const (
 	// FailedToDecryptData means either the key or buffer to to be decrypted failed verification,
 	FailedToDecryptData
 
-    // VerifySignatureFailed means either the given signature did not match the given digest.
-    VerifySignatureFailed
+	// VerifySignatureFailed means either the given signature did not match the given digest.
+	VerifySignatureFailed
 
-    // KeyTomeFailedToLoad means the cold storage for a keyring failed to load or does not exist
-    KeyTomeFailedToLoad
+	// KeyTomeFailedToLoad means the cold storage for a keyring failed to load or does not exist
+	KeyTomeFailedToLoad
 
-    // KeyTomeFailedToWrite means an error occured while trying to write a key file
-    KeyTomeFailedToWrite
+	// KeyTomeFailedToWrite means an error occured while trying to write a key file
+	KeyTomeFailedToWrite
 
 	/*****************************************************
 	** StorageProvider
@@ -271,8 +268,8 @@ const (
 	// InvalidDatabaseID means the database ID provided is suspiciously short or long
 	InvalidDatabaseID
 
-    // FailedToAccessPath means a pathname was unable to be created or otherwise accessed
-    FailedToAccessPath
+	// FailedToAccessPath means a pathname was unable to be created or otherwise accessed
+	FailedToAccessPath
 
 	// FailedToLoadDatabase means an error was encountered when creating or loading the database
 	FailedToLoadDatabase
@@ -280,42 +277,41 @@ const (
 	// FailedToCommitTxn means an unexpected fatal error occurred while committing one ore more txns
 	FailedToCommitTxn
 
-    // IncompatibleStorage means the given TxnEncoder desc string reflects that the SP and client are incompatible
-    IncompatibleStorage
+	// IncompatibleStorage means the given TxnEncoder desc string reflects that the SP and client are incompatible
+	IncompatibleStorage
 
-    // EncoderSessionNotReady means that TxnEncoder.ResetSession() has either not yet been called or the SKI session associated with it has closed.
-    EncoderSessionNotReady
+	// EncoderSessionNotReady means that TxnEncoder.ResetSession() has either not yet been called or the SKI session associated with it has closed.
+	EncoderSessionNotReady
 
-    // StorageImplNotFound means the requested storage impl is not available, etc.
-    StorageImplNotFound
+	// StorageImplNotFound means the requested storage impl is not available, etc.
+	StorageImplNotFound
 
-    // TxnPartsMissing means one or more required txn parts are not present
-    TxnPartsMissing
+	// TxnPartsMissing means one or more required txn parts are not present
+	TxnPartsMissing
 
-    // AccountNotAvailable means the StorageProvider failed to find the account associated w/ the txn's "from" public key (or is damaged)
-    AccountNotAvailable
+	// AccountNotAvailable means the StorageProvider failed to find the account associated w/ the txn's "from" public key (or is damaged)
+	AccountNotAvailable
 
-    // InsufficientFuel means the sender does not have a balance with sufficient gas to commit the txn
-    InsufficientFuel
+	// InsufficientFuel means the sender does not have a balance with sufficient gas to commit the txn
+	InsufficientFuel
 
-    // TransferFailed means the gas/fiat transfer failed (e.g. insufficient funds)
-    TransferFailed
+	// TransferFailed means the gas/fiat transfer failed (e.g. insufficient funds)
+	TransferFailed
 
-    // StorageNotReady means a problem occurred at the storage level
-    StorageNotReady
+	// StorageNotReady means a problem occurred at the storage level
+	StorageNotReady
 
-    // NetworkNotReady means the network is in an unusable state
-    NetworkNotReady
+	// NetworkNotReady means the network is in an unusable state
+	NetworkNotReady
 
-    // ConfigFailure means something went wrong loading/reading config 
-    ConfigFailure
+	// ConfigFailure means something went wrong loading/reading config
+	ConfigFailure
 
-    // TxnQueryFailed means the txn query failed to execute 
-    TxnQueryFailed
+	// TxnQueryFailed means the txn query failed to execute
+	TxnQueryFailed
 
-    // TxnFailedToDecode means TxnDecoder.DecodeRawTxn() returned an error
-    TxnFailedToDecode
-
+	// TxnFailedToDecode means TxnDecoder.DecodeRawTxn() returned an error
+	TxnFailedToDecode
 
 	/*****************************************************
 	** Network
@@ -327,7 +323,6 @@ const (
 	// SessionTokenMissing means a session token was not found in the request context
 	SessionTokenMissing
 
-    // SessionTokenNotValid means the session token that was supplied didn't match anything
-    SessionTokenNotValid
-
+	// SessionTokenNotValid means the session token that was supplied didn't match anything
+	SessionTokenNotValid
 )
