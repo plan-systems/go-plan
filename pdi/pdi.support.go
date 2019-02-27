@@ -59,7 +59,7 @@ func (entry *EntryCrypt) ComputeDigest() []byte {
 
 	hw.Write(scrap[:pos])
 	hw.Write(entry.CommunityKeyId)
-	hw.Write(entry.HeaderCrypt)
+	hw.Write(entry.InfoCrypt)
 	hw.Write(entry.BodyCrypt)
 
 	return hw.Sum(nil)
@@ -378,9 +378,9 @@ const (
     // This must be a multiple of 3 so that the encoded length doesn't have any bit overhang.
     UTIDTimestampSz = 6
 
-    // UTIDTimeMax is the max time value 
+    // UTIDTimestampMax is the max time value 
     // 48 bits of unix seconds maxes around 8,800,000 CE, so we'll call that good for now.  :D 
-    UTIDTimeMax = (1 << (UTIDTimestampSz * 8) ) - 1
+    UTIDTimestampMax = (1 << (UTIDTimestampSz * 8) ) - 1
 
     // UTIDTxnIDSz is the byte length of the ID bytes encoded within in a UTID.
     // This is also chosen to be a multiple of 3 such that the encoded txn hashname falls on base64 digit boundaries. 
@@ -438,8 +438,8 @@ func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
         utidLen += UTIDTxnIDSz
     }
 
-    if inTimestamp > UTIDTimeMax {
-        inTimestamp = UTIDTimeMax
+    if inTimestamp > UTIDTimestampMax {
+        inTimestamp = UTIDTimestampMax
     }
 
     var raw []byte
