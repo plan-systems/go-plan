@@ -424,14 +424,14 @@ func (sn *Snode) Query(inQuery *pdi.TxnQuery, inOutlet pdi.StorageProvider_Query
 }
 
 // SendTxns -- see service StorageProvider in pdi.proto
-func (sn *Snode) SendTxns(inTxnBatch *pdi.TxnBatch, inOutlet pdi.StorageProvider_SendTxnsServer) error {
+func (sn *Snode) SendTxns(inTxnList *pdi.TxnList, inOutlet pdi.StorageProvider_SendTxnsServer) error {
     St, err := sn.FetchSessionStore(inOutlet.Context())
     if err != nil {
         return err
     }
         
     job := ds.SendJob{
-        UTIDs:     inTxnBatch.UTIDs,
+        UTIDs:     inTxnList.UTIDs,
         Outlet:    inOutlet,
         OnComplete: make(chan error),
     }
@@ -443,24 +443,23 @@ func (sn *Snode) SendTxns(inTxnBatch *pdi.TxnBatch, inOutlet pdi.StorageProvider
 }
 
 // CommitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) CommitTxn(inRawTxn *pdi.RawTxn, inOutlet pdi.StorageProvider_CommitTxnServer) error {
-    St, err := sn.FetchSessionStore(inOutlet.Context())
+func (sn *Snode) CommitTxn(ctx context.Context, inTxn *pdi.RawTxn) (*plan.Status, error) {
+    St, err := sn.FetchSessionStore(ctx)
     if err != nil {
-        return err
+        return nil, err
     }
 
-    job := ds.CommitJob{
-        Outlet:     inOutlet,
-        Txn:        pdi.DecodedTxn{
-            RawTxn: inRawTxn.Bytes,
+    err = St.DoCommitJob(ds.CommitJob{
+        Txn: pdi.DecodedTxn{
+            RawTxn: inTxn.Bytes,
         },
-        OnComplete: make(chan error),
+    })
+
+    if err != nil {
+        return nil, err
     }
 
-    St.CommitInbox <- job
-
-    err = <-job.OnComplete
-    return err
+    return &plan.Status{}, nil
 }
 
 

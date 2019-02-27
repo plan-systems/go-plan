@@ -55,20 +55,20 @@ type Store struct {
     txnDB                       *badger.DB
     acctDB                      *badger.DB
 
-    // UTIDs newly committed.  Intelligently processed such that TxnQuery jobs that are flagged to report new commits receive said new txns
-    completedCommits            chan pdi.UTID
+    // txn status updates.  Intelligently processed such that TxnQuery jobs that are flagged to report new commits receive said new txns
+    txnUpdates                   chan txnUpdate
 
     // Fan-out to committed txn "subscribers"
     subsMutex                   sync.Mutex
-    subs                        []chan pdi.UTID
+    subs                        []chan txnUpdate
 
     //queryLimit                  *semaphore.Weighted
     //SendJobInbox                chan SendJob
-    CommitInbox                 chan CommitJob
-    decodedCommits              chan CommitJob
+    DecodedCommits              chan CommitJob
 
     numQueryJobs                int32
     numSendJobs                 int32
+    numCommitJobs               int32
  
     TxnDecoder                  pdi.TxnDecoder
 
@@ -76,7 +76,7 @@ type Store struct {
     //shuttingDown                chan *sync.WaitGroup
 
     // When OpState == Stopping, shutdown.Wait() is used to block until all queued work is complete.
-    resources                    sync.WaitGroup
+    resources                   sync.WaitGroup
 
     // When OpState == Stopping, this context is in a ca
     ctx                         context.Context
@@ -89,8 +89,14 @@ type Store struct {
 }
 
 
+type txnUpdate struct {
+    UTID            pdi.UTID
+    TxnStatus       pdi.TxnStatus
+}
+
+
 // OpState specifices this Store's current operational state. 
-type OpState int
+type OpState int32
 const (
 
     // Shutdown means this Store is fully shutdown and idle and it is safe to exit this process
@@ -192,15 +198,17 @@ func (St *Store) Startup(
 
     St.resources.Add(1)
     St.ctx, St.ctxCancel = context.WithCancel(inCtx)
-
-
+    //
+    //
+    //
+    //
     // Small buffer needed for the txn notifications to ensure that the txn writer doesn't get blocked
-    St.completedCommits = make(chan pdi.UTID, 2)
+    St.txnUpdates = make(chan txnUpdate, 8)
     go func() {
-        for newTxn := range St.completedCommits {
+        for update := range St.txnUpdates {
             St.subsMutex.Lock()
             for _, sub := range St.subs {
-                sub <- newTxn
+                sub <- update
             }
             St.subsMutex.Unlock()
         }
@@ -227,44 +235,25 @@ func (St *Store) Startup(
 
         St.resources.Done()
     }()
-
-
-    St.decodedCommits = make(chan CommitJob, 1)
+    //
+    //
+    //
+    //
+    St.DecodedCommits = make(chan CommitJob, 1)
     go func() {
 
-        for job := range St.decodedCommits {
+        for job := range St.DecodedCommits {
             
-            // Unlike QueryJobs, we only process once commit job at a time
+            // Process once commit job at a time
             St.doCommitJob(job)
+
+            atomic.AddInt32(&St.numCommitJobs, -1)
         }
-        St.log.Info("2) commit pipeline exited")
+        St.log.Info("2) commit pipeline closed")
 
         // Cause all subs to fire, causing them to exit when they see St.OpState == Stopping
-        St.completedCommits <- pdi.UTID{}
-        close(St.completedCommits)
-    }()
-
-
-    // No buffer needed for the entry point channel and would serve no purpose.
-    St.CommitInbox = make(chan CommitJob)
-    go func() {
-
-        for job := range St.CommitInbox {
-            
-            err := job.Txn.DecodeRawTxn(St.TxnDecoder)
-            if err == nil {
-                err = job.Outlet.Send(&pdi.TxnMetaInfo{
-                    TxnStatus: pdi.TxnStatus_AWAITING_COMMIT,
-                })
-            }
-
-            if err == nil {
-                St.decodedCommits <- job
-            }
-        }
-        St.log.Info("3) decoder pipeline exited")
-
-        close(St.decodedCommits)
+        St.txnUpdates <- txnUpdate{}
+        close(St.txnUpdates)
     }()
 
 
@@ -278,8 +267,18 @@ func (St *Store) Startup(
 
         St.OpState = Stopping
 
+        // Wait until we're sure a commit didn't sneak in b/c 
+        for {
+            time.Sleep(100 * time.Millisecond)
+            if atomic.LoadInt32(&St.numCommitJobs) == 0 {
+                break
+            }
+        }
+
+        St.log.Info("2) pending commits complete")
+
         // This will initiate a close-cascade causing St.resources to be released
-        close(St.CommitInbox)
+        close(St.DecodedCommits)
   
     }()
 
@@ -291,7 +290,7 @@ func (St *Store) Startup(
 
 // Shutdown closes this datastore, if open, blocking until completion.  No-op if this Store is already shutdown.
 //
-// THREADSAFE; 
+// THREADSAFE
 func (St *Store) Shutdown(onComplete *sync.WaitGroup) {
 
     if St.OpState == Running {
@@ -313,7 +312,7 @@ func (St *Store) Shutdown(onComplete *sync.WaitGroup) {
 type QueryJob struct {
     TxnQuery   *pdi.TxnQuery
     Outlet     pdi.StorageProvider_QueryServer
-    NewTxns    chan pdi.UTID
+    txnUpdates chan txnUpdate
     OnComplete chan error
 }
 
@@ -327,8 +326,8 @@ type SendJob struct {
 // CommitJob represents a pending CommitTxn() call to a StorageProvider
 type CommitJob struct {
     Txn        pdi.DecodedTxn
-    Outlet     pdi.StorageProvider_CommitTxnServer
-    OnComplete chan error
+    //Stream     pdi.StorageProvider_CommitTxnsServer
+    //OnComplete chan error
 }
 
 
@@ -431,18 +430,15 @@ func (St *Store) DepositTransfers(inTransfers []*pdi.Transfer) error {
 
 
 
-func (St *Store) doCommitJob(job CommitJob) {
+func (St *Store) doCommitJob(job CommitJob) error {
 
     var (
         err error
-        txnMetaInfo pdi.TxnMetaInfo
     ) 
+
 
     if err == nil {
         
-        txnMetaInfo.TxnStatus = pdi.TxnStatus_COMMITTING
-        job.Outlet.Send(&txnMetaInfo)
-
         batch := NewTxnHelper(St.acctDB)
         for batch.NextAttempt() {
 
@@ -512,42 +508,37 @@ func (St *Store) doCommitJob(job CommitJob) {
         }
     }
 
-    if err == nil {
 
-        // Since this is a centralized db, every txn committed is finalized
-        txnMetaInfo.TxnStatus = pdi.TxnStatus_FINALIZED
-        job.Outlet.Send(&txnMetaInfo)
+    {
+        txnStatus := pdi.TxnStatus_COMMITTED
 
-        St.completedCommits <- job.Txn.Info.UTID
+        if err != nil {
+            txnStatus = pdi.TxnStatus_COMMIT_FAILED
 
-    } else {
+            perr, _ := err.(*plan.Err)
+            if perr == nil {
+                perr = plan.Error(err, plan.FailedToCommitTxn, "txn commit failed")
+            }
 
-        perr, _ := err.(*plan.Err)
-        if perr == nil {
-            perr = plan.Error(err, plan.FailedToCommitTxn, "txn commit failed")
+            St.log.WithFields(log.Fields{
+                "UTID": job.Txn.UTID,
+            }).WithError(err).Warn("CommitJob error")
+        
+            err = perr
         }
 
-        St.log.WithFields(log.Fields{
-            "UTID": job.Txn.UTID,
-        }).Warn(err)
-
-        txnMetaInfo.TxnStatus = pdi.TxnStatus_FAILED_TO_COMMIT
-        txnMetaInfo.Alert =  &plan.Status{
-            Code: perr.Code,
-            Msg: perr.Msg,
+        St.txnUpdates <- txnUpdate{
+            job.Txn.Info.UTID, 
+            txnStatus,
         }
-        job.Outlet.Send(&txnMetaInfo)
-
-        St.log.WithError(err).Warn("CommitJob error")
     }
 
-    // This releases the GRPC handler
-    job.OnComplete <- err
+    return err
 }
 
 
-func (St *Store) AddTxnSubscriber() chan pdi.UTID {
-    sub := make(chan pdi.UTID, 1)
+func (St *Store) addTxnSubscriber() chan txnUpdate {
+    sub := make(chan txnUpdate, 1)
     
     St.subsMutex.Lock()
     St.subs = append(St.subs, sub)
@@ -557,7 +548,7 @@ func (St *Store) AddTxnSubscriber() chan pdi.UTID {
 }
 
 
-func (St *Store) RemoveTxnSubscriber(inSub chan pdi.UTID) {
+func (St *Store) removeTxnSubscriber(inSub chan txnUpdate) {
 
     St.subsMutex.Lock()
     N := len(St.subs)
@@ -579,13 +570,14 @@ func (St *Store) RemoveTxnSubscriber(inSub chan pdi.UTID) {
 // DoQueryJob queues the given QueryJob
 func (St *Store) DoQueryJob(job QueryJob) {
 
+    atomic.AddInt32(&St.numQueryJobs, 1)
+
     err := St.CheckState()
     if err != nil {
         job.OnComplete <- err
+        atomic.AddInt32(&St.numQueryJobs, -1)
         return
     }
-
-    atomic.AddInt32(&St.numQueryJobs, 1)
 
     // TODO: use semaphore.NewWeighted() to bound the number of query jobs
     go func() {
@@ -603,17 +595,16 @@ func (St *Store) DoQueryJob(job QueryJob) {
 }
 
 
-
 // DoSendJob queues the given SendJob
 func (St *Store) DoSendJob(job SendJob) {
+    atomic.AddInt32(&St.numSendJobs, 1)
 
     err := St.CheckState()
     if err != nil {
         job.OnComplete <- err
+        atomic.AddInt32(&St.numSendJobs, -1)
         return
     }
-
-    atomic.AddInt32(&St.numSendJobs, 1)
 
     go func() {
         err := St.doSendJob(job)
@@ -628,6 +619,31 @@ func (St *Store) DoSendJob(job SendJob) {
         atomic.AddInt32(&St.numSendJobs, -1)
     }()
 
+}
+
+
+// DoCommitJob queues the given CommitJob
+func (St *Store) DoCommitJob(job CommitJob) error {
+    atomic.AddInt32(&St.numCommitJobs, 1)
+
+    err := St.CheckState()
+    if err == nil {
+        err = job.Txn.DecodeRawTxn(St.TxnDecoder)
+    }
+
+    if err != nil {
+        atomic.AddInt32(&St.numSendJobs, -1)
+        return err
+    }
+
+    St.txnUpdates <- txnUpdate{
+        job.Txn.Info.UTID, 
+        pdi.TxnStatus_COMMITTING,
+    }
+
+    St.DecodedCommits <- job
+
+    return nil
 }
 
 // CheckState returns an error if this Store is shutting down (or otherwise not in a state to continue service)
@@ -705,21 +721,20 @@ func (St *Store) doQueryJob(job QueryJob) error {
     var err error
 
     const (
-        batchMax = 30
+        batchMax = 20
         batchBufSz = batchMax * pdi.UTIDBinarySz
     )
     var (
-        batchBuf [batchBufSz]byte
         UTIDs [batchMax][]byte
     )
+    statuses := make([]byte, batchMax)
     for i := 0; i < batchMax; i++ {
-        pos := i * batchBufSz
-        UTIDs[i] = batchBuf[pos:pos+batchBufSz]
+        statuses[i] = byte(pdi.TxnStatus_FINALIZED)
     }
 
     // Before we start the db txn (and effectively get locked to a db rev in time), subscribe this job to receive new commits
-    if job.TxnQuery.ReportNewCommits {
-        job.NewTxns = St.AddTxnSubscriber()
+    if job.TxnQuery.SendTxnUpdates {
+        job.txnUpdates = St.addTxnSubscriber()
     }
 
     dbTxn := St.txnDB.NewTransaction(false)
@@ -777,10 +792,11 @@ func (St *Store) doQueryJob(job QueryJob) error {
                     break
                 }
             }
-           
+
             if err == nil && batchCount > 0 {
-                err = job.Outlet.Send(&pdi.TxnBatch{
-                    UTIDs: UTIDs[:batchCount],
+                err = job.Outlet.Send(&pdi.TxnList{
+                    UTIDs:    UTIDs[:batchCount],
+                    Statuses: statuses[:batchCount],
                 })
             }
         }
@@ -791,20 +807,21 @@ func (St *Store) doQueryJob(job QueryJob) error {
     dbTxn.Discard()
     dbTxn = nil
 
-    if job.TxnQuery.ReportNewCommits {
+    if job.TxnQuery.SendTxnUpdates {
         heartbeat := time.NewTicker(time.Second * 10)
         batchLag  := time.NewTicker(time.Millisecond * 300)
 
         batchCount := int32(0)
         wakeTimer := heartbeat.C
 
-        for err == nil {
+        for err == nil && St.CheckState() != nil {
 
             select {
 
-                case newTxn := <- job.NewTxns:
-                    if len(newTxn) != pdi.UTIDBinarySz {
-                        copy(UTIDs[batchCount], newTxn)
+                case txnUpdate := <- job.txnUpdates:
+                    if len(txnUpdate.UTID) != pdi.UTIDBinarySz {
+                        copy(UTIDs[batchCount], txnUpdate.UTID)
+                        statuses[batchCount] = byte(txnUpdate.TxnStatus)
                         batchCount++
 
                         if batchCount == 1 {
@@ -816,18 +833,15 @@ func (St *Store) doQueryJob(job QueryJob) error {
                     }
                         
                 case <- wakeTimer:
-                    err = job.Outlet.Send(&pdi.TxnBatch{
+                    err = job.Outlet.Send(&pdi.TxnList{
                         UTIDs: UTIDs[:batchCount],
+                        Statuses: statuses[:batchCount],
                     })
                     wakeTimer = heartbeat.C
             }
-
-            if err == nil {
-                err = St.CheckState()
-            }
         }
 
-        St.RemoveTxnSubscriber(job.NewTxns)
+        St.removeTxnSubscriber(job.txnUpdates)
     }
 
     return err
