@@ -404,20 +404,20 @@ func (sn *Snode) FetchSessionStore(ctx context.Context) (*ds.Store, error) {
     return St, nil
 }
 
-// Query -- see service StorageProvider in pdi.proto
-func (sn *Snode) Query(inQuery *pdi.TxnQuery, inOutlet pdi.StorageProvider_QueryServer) error {
+// Scan -- see service StorageProvider in pdi.proto
+func (sn *Snode) Scan(inScanPB *pdi.TxnScan, inOutlet pdi.StorageProvider_ScanServer) error {
     St, err := sn.FetchSessionStore(inOutlet.Context())
     if err != nil {
         return err
     }
 
-    job := ds.QueryJob{
-        TxnQuery:  inQuery,
+    job := ds.ScanJob{
+        TxnScan:   inScanPB,
         Outlet:    inOutlet,
         OnComplete: make(chan error),
     }
     
-    St.DoQueryJob(job)
+    St.DoScanJob(job)
 
     err = <-job.OnComplete
     return err
@@ -461,5 +461,3 @@ func (sn *Snode) CommitTxn(ctx context.Context, inTxn *pdi.RawTxn) (*plan.Status
 
     return &plan.Status{}, nil
 }
-
-

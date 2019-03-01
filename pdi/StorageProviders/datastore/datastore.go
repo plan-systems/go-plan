@@ -66,7 +66,7 @@ type Store struct {
     //SendJobInbox                chan SendJob
     DecodedCommits              chan CommitJob
 
-    numQueryJobs                int32
+    numScanJobs                 int32
     numSendJobs                 int32
     numCommitJobs               int32
  
@@ -217,7 +217,7 @@ func (St *Store) Startup(
         // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
         for {
             time.Sleep(100 * time.Millisecond)
-            if atomic.LoadInt32(&St.numQueryJobs) == 0 && atomic.LoadInt32(&St.numSendJobs) == 0 {
+            if atomic.LoadInt32(&St.numScanJobs) == 0 && atomic.LoadInt32(&St.numSendJobs) == 0 {
                 break
             }
         }
@@ -308,10 +308,10 @@ func (St *Store) Shutdown(onComplete *sync.WaitGroup) {
 
 
 
-// QueryJob represents a pending Query() call to a StorageProvider
-type QueryJob struct {
-    TxnQuery   *pdi.TxnQuery
-    Outlet     pdi.StorageProvider_QueryServer
+// ScanJob represents a pending Query() call to a StorageProvider
+type ScanJob struct {
+    TxnScan   *pdi.TxnScan
+    Outlet     pdi.StorageProvider_ScanServer
     txnUpdates chan txnUpdate
     OnComplete chan error
 }
@@ -567,21 +567,21 @@ func (St *Store) removeTxnSubscriber(inSub chan txnUpdate) {
 
 
 
-// DoQueryJob queues the given QueryJob
-func (St *Store) DoQueryJob(job QueryJob) {
+// DoScanJob queues the given ScanJob
+func (St *Store) DoScanJob(job ScanJob) {
 
-    atomic.AddInt32(&St.numQueryJobs, 1)
+    atomic.AddInt32(&St.numScanJobs, 1)
 
     err := St.CheckState()
     if err != nil {
         job.OnComplete <- err
-        atomic.AddInt32(&St.numQueryJobs, -1)
+        atomic.AddInt32(&St.numScanJobs, -1)
         return
     }
 
     // TODO: use semaphore.NewWeighted() to bound the number of query jobs
     go func() {
-        err := St.doQueryJob(job)
+        err := St.doScanJob(job)
 
         if err != nil {
             St.log.WithError(err).Warn("doQueryJob() returned error")   
@@ -590,7 +590,7 @@ func (St *Store) DoQueryJob(job QueryJob) {
         // This releases the GRPC handler
         job.OnComplete <- err
 
-        atomic.AddInt32(&St.numQueryJobs, -1)
+        atomic.AddInt32(&St.numScanJobs, -1)
     }()
 }
 
@@ -716,7 +716,7 @@ func (St *Store) doSendJob(job SendJob) error {
 
 
 
-func (St *Store) doQueryJob(job QueryJob) error {
+func (St *Store) doScanJob(job ScanJob) error {
 
     var err error
 
@@ -733,7 +733,7 @@ func (St *Store) doQueryJob(job QueryJob) error {
     }
 
     // Before we start the db txn (and effectively get locked to a db rev in time), subscribe this job to receive new commits
-    if job.TxnQuery.SendTxnUpdates {
+    if job.TxnScan.SendTxnUpdates {
         job.txnUpdates = St.addTxnSubscriber()
     }
 
@@ -741,7 +741,7 @@ func (St *Store) doQueryJob(job QueryJob) error {
     {
         opts := badger.DefaultIteratorOptions
         opts.PrefetchValues = false
-        opts.Reverse = job.TxnQuery.TimestampStart > job.TxnQuery.TimestampStop
+        opts.Reverse = job.TxnScan.TimestampStart > job.TxnScan.TimestampStop
         itr := dbTxn.NewIterator(opts)
 
         var (
@@ -749,8 +749,8 @@ func (St *Store) doQueryJob(job QueryJob) error {
             keyBuf [pdi.UTIDBinarySz]byte
         )
 
-        itr.Seek(  pdi.UTIDFromInfo(keyBuf[:0], job.TxnQuery.TimestampStart, nil))
-        stopKey := pdi.UTIDFromInfo(keyBuf[:0], job.TxnQuery.TimestampStop,  nil)
+        itr.Seek(  pdi.UTIDFromInfo(keyBuf[:0], job.TxnScan.TimestampStart, nil))
+        stopKey := pdi.UTIDFromInfo(keyBuf[:0], job.TxnScan.TimestampStop,  nil)
 
         if opts.Reverse {
             dir = -1
@@ -785,7 +785,7 @@ func (St *Store) doQueryJob(job QueryJob) error {
 
                 batchCount++
                 totalCount++
-                if totalCount == job.TxnQuery.MaxTxns {
+                if totalCount == job.TxnScan.MaxTxns {
                     dir = 0
                     break
                 } else if batchCount == batchMax {
@@ -807,7 +807,7 @@ func (St *Store) doQueryJob(job QueryJob) error {
     dbTxn.Discard()
     dbTxn = nil
 
-    if job.TxnQuery.SendTxnUpdates {
+    if job.TxnScan.SendTxnUpdates {
         heartbeat := time.NewTicker(time.Second * 10)
         batchLag  := time.NewTicker(time.Millisecond * 300)
 
