@@ -14,19 +14,94 @@ enum KeyType {
 }
 
 
-enum KeyDomain {
+enum CryptOp {
 
-    // Keys scoped outside this community
-    GLOBAL              = 0;
+	// Generates a signature for BufIn using the referenced signing key, placing the signature into BufOut.
+    SIGN                = 0;
 
-    // Keys shared with all other community members
-    COMMUNITY           = 1;
 
-    // Keys explicitly shared with select community members (e.g. private channel keys)
-    PEERS               = 2;
+	// Encrypts BufIn using the symmetric key referenced by a Keyring "name" and key named by its pub key. 
+    ENCRYPT_SYM         = 1;
 
-    // Private keyring -- should never be shared with others, even peers in the community.
-    PERSONAL            = 3;
+	// Decrypts BufIn using the referenced symmetric key.
+    DECRYPT_SYM         = 2;
+
+
+	// Encrypts BufIn for a recipient holding the private key associated with PeerPubKey using the referenced asymmetric key,
+    //    placing the encrypted result into BufOut.
+    ENCRYPT_TO_PEER     = 3;
+
+	// Decrypts BufIn from a sender holding the key associated with PeerPubKey using the referenced asymmetric key, 
+    //    placing the decrypted result into BufOut.
+    DECRYPT_FROM_PEER   = 4;
+
+
+    // Companion op to EXPORT_TO_PEER
+    // First, performs as DECRYPT_FROM_PEER.  
+    // The result/output buf is then unmarshalled (assumed to be a KeyTome protobuf) and is merged into the host KeyTome. 
+    // Note: incoming duplicate key entries are ignored/dropped.
+    IMPORT_FROM_PEER    = 5;
+
+    // Companion op to IMPORT_FROM_PEER
+    // For each entry in CryptOpArgs.TomeIn, PubKey is used to lookup a corresponding KeyEntry in the host KeyTome.
+    // Each KeyEntry with a matching PubKey is copied into a new temp KeyTome, into the appropriate Keyring, 
+    //    creating a Keyring if it does not yet exist.
+    // If a Keyring appears in CryptOpArgs.TomeIn but contains no entries, the entire Keyring will be exported.
+    // If a Keyring or KeyEntry from TomeIn isn't found, an error is returned.
+    // On completion, the temp KeyTome is serialized, assigned to CryptOpArgs.BufIn, and ENCRYPT_TO_PEER is executed.
+    EXPORT_TO_PEER       = 6;
+
+
+    // Generates a new KeyEntry for each entry in CryptOpArgs.TomeIn (based on the entry's KeyType and CryptoKitID) and merges it
+    //    with the host KeyTome. A copy of each newly generated entry (except for PrivKey) is placed into TomeOut.
+    // See "KeyGen mode" notes where KeyEntry is declared. 
+    GENERATE_KEYS        = 7;
+
+}
+
+/*
+message KeyGenRequest {
+
+                KeyType         key_type                = 1;
+
+                CryptoKitID     crypto_kit_id           = 2;
+
+                bytes           keyring_name            = 3;
+}
+*/
+
+
+message CryptOpArgs {
+
+    // Specifies which op to invoke for these given set of args
+                CryptOp         crypt_op                = 1;
+
+    // The source/input buffer that is signed/encrypted/decrypted.
+                bytes           buf_in                  = 2;
+
+    // A reference to an existing KeyEntry in the host's KeyTome used as the key for this op's encryption/decryption.
+                KeyRef          op_key                  = 3;
+
+    // Specifies the recipient or sender for asymmetric crypto ops.
+    // Used for ENCRYPT_TO_PEER, DECRYPT_FROM_PEER, IMPORT_FROM_PEER, and EXPORT_TO_PEER.
+                bytes           peer_pub_key            = 5;
+
+    // Keyring and key info used to identify existing (or to-be-created) keys in the host's KeyTome.
+    // Used for EXPORT_TO_PEER and GENERATE_KEYS.
+                KeyTome         tome_in                 = 6;
+}
+
+
+message CryptOpOut {
+
+    // Output buf from the given crypto op (and depends on the given CryptOp)
+                bytes           buf_out                 = 1;
+
+    // Returns the pub key used in the op (needed when CryptOpArgs.OpKey.PubKey wasn't specified)
+                bytes           op_pub_key              = 2;
+
+    // Used for select ops.
+                KeyTome         tome_out                = 6;
 
 }
 
@@ -46,40 +121,31 @@ enum  HashKitID {
     SHA3_512            = 4;
 }
 
-message PubKey {
+message KeyRef {
 
-    // Specifies what type of KeyType this is (or NOT_SET)
-                KeyType         key_type                = 1;
+   // Specifies the Keyring that the key resides on (required when referencing a KeyEntry in a KeyTome)
+                bytes           keyring_name              = 1;
 
-   // Specifies which domain/area this key is used in (optional in some cases)
-                KeyDomain       key_domain              = 2;
-
-    // Specifies which CryptoKit handles this key
-                CryptoKitID     crypto_kit_id           = 3;
-                
-    // Key data stored in the form specified by PubKey.Encoding.
-    // Encoding must ensure that PubKey.Bytes con be used to check key equivalence.
-                bytes           bytes                   = 4;
+    // The pub key of the key being referenced (or len()==0 to imply the newest key in the cited keyring).
+    // Note that the complete pub key isn't required, just a sufficiently long matching prefix (typically 16-64 bytes).
+                bytes           pub_key                   = 2;
 
 }
 
 
- 
-
 // KeyEntry is used in 3 ways:
-//    1) Storage/Export mode: KeyEntry used to store all fields of a fully generated key 
+//    1) Storage/Export mode: used to store all fields of a fully generated key 
 //         a) KeyEntry.PrivKey != nil
-//    2) Ref/Spec mode: KeyEntry used to reference/specifiy an existing key somewhere else 
+//    2) Ref/Spec mode: used to reference an existing key somewhere else 
 //         a) KeyEntry.PrivKey == nil
-//         b) Fields used: KeyDomain, PubKey (other fields ignored)
-//    3) KeyGen mode: KeyEntry used to generate a new key
-//         a) Fields used: KeyType, KeyDomain, CryptoKitID (other fields ignored)
+//         b) Fields used: PubKey (other fields ignored)
+//    3) KeyGen mode: used as a guide to generate a new key
+//         a) Fields used: KeyType and CryptoKitID (other fields ignored)
 message KeyEntry {
     
     // See fields for PubKey
                 KeyType         key_type                = 1;
-                KeyDomain       key_domain              = 2;
-                CryptoKitID     crypto_kit_id           = 3;
+                CryptoKitID     crypto_kit_id           = 2;
 
     // Unix timestamp when this key was created (or 0 if not set)
                 int64           time_created            = 4;
@@ -96,30 +162,36 @@ message KeyEntry {
 
 
 
+message Keyring {
 
+    // Any binary name for this Keyring (except a zero-length name).
+    // In general, names are desired to be as pseudo-random as possible for efficient lookup and sorting.
+                bytes           name                    = 1;
 
-// KeyBundle packages a set of KeyEntry structs (for one of the above three prescribed purposes).
-// When a KeyBundle is serialized, it's identified by the codec name ski.KeyBundleProtobufCodec.
-message KeyBundle {
-
-    // The community associated with the keys in this bundle
-                bytes           community_id            = 1;
-
-    // Key storage
+    // Ordered list of KeyEntry (potentially sorted by PubKey)
     repeated    KeyEntry        keys                    = 2;
+
+    // If set, []Keys is sorted by KeyEntry.PubKey via ski.CompareEntries() 
+                bool            sorted_by_pub_key       = 3;
+
+    // PubKey of the KeyEntry in this keyring that has the largest TimeCreated (or nil if not known/determined)
+                bytes           newest_pub_key          = 4;
 }
+
 
 
 
 message KeyTome {
 
-    // Unix timestamp in secs of when this was created (or 0 if not set)
-                int64           time_created            = 1;
+    // Incremented each time this KeyTome is altered.
+                int64           rev                     = 1;
 
-    // Key storage
-    repeated    KeyBundle       bundles                 = 2;
+    // Ordered list of Keyrings (potentially sorted by Keyring.Name)
+    repeated    Keyring         keyrings                = 2;
+
+    // If set, []Keyrings is sorted by Keyring.Name via bytes.Compare() 
+                bool            sorted_by_name          = 3;
 }
-
 
 
 
@@ -128,7 +200,7 @@ message SigBlock {
 
     // Used to specify an explicit key to sign the given digest.
     // Can be under-specified indicating that the signer knows which key to use.
-                PubKey              signee              = 1;
+                KeyRef              signee              = 1;
 
     // Digest to be signed
                 bytes               digest              = 2;
@@ -137,4 +209,5 @@ message SigBlock {
                 bytes               sig                 = 3;
                 
 }
+
 

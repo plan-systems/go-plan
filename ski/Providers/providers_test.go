@@ -10,17 +10,15 @@ import (
     "testing"
 
 	"github.com/plan-systems/go-plan/ski"
-	"github.com/plan-systems/go-plan/plan"
+	//"github.com/plan-systems/go-plan/plan"
 
     "github.com/plan-systems/go-plan/ski/Providers/hive"
 
 )
 
 
-
 var gTesting *testing.T
-var gCommunityID = [4]byte{0, 1, 2, 3}
-
+var gCommunityID = [8]byte{0, 1, 2, 3, 4, 5, 6, 7}
 
 func TestFileSysSKI(t *testing.T) {
 
@@ -38,8 +36,8 @@ func TestFileSysSKI(t *testing.T) {
         A := newSession(providerFactory(), "Test-Alice")
         B := newSession(providerFactory(), "Test-Bob")
 
-        fmt.Printf("%s's encryptPubKey %v\n", A.UserName, A.encryptPubKey)
-        fmt.Printf("%s's encryptPubKey %v\n", B.UserName, B.encryptPubKey)
+        fmt.Printf("%s's encryptKey %v\n", A.UserName, A.encryptKey)
+        fmt.Printf("%s's encryptKey %v\n", B.UserName, B.encryptKey)
 
         doProviderTest(A, B)
 
@@ -51,74 +49,74 @@ func TestFileSysSKI(t *testing.T) {
 
 
 
-
 func doProviderTest(A, B *testSession) {
 
     // 1) Generate a new community key (on A)
-    communityKey := A.GenerateNewKey(ski.KeyType_SYMMETRIC_KEY, ski.KeyDomain_COMMUNITY)
- 
+    communityKeyRef, err := A.GenerateNewKey(ski.KeyType_SYMMETRIC_KEY, A.CommunityKey.KeyringName)
+    if err != nil {
+        gTesting.Fatal(err)
+    }
+
     // 2) export the community key from A
-    opResults := A.doOp(ski.OpArgs{
-        OpName: ski.OpExportNamedKeys,
-        OpKeySpec: *A.encryptPubKey,
-        CommunityID: gCommunityID[:],
-        KeySpecs: []*ski.PubKey{
-            communityKey,
+    opBuf := A.doOp(ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_EXPORT_TO_PEER,
+        OpKey: A.encryptKey,
+        PeerPubKey: B.encryptKey.PubKey,
+        TomeIn: &ski.KeyTome{
+            Keyrings: []*ski.Keyring{
+                &ski.Keyring{
+                    Name: communityKeyRef.KeyringName,
+                },
+            },
         },
-        PeerPubKey: B.encryptPubKey.Bytes,
     })
 
     // 3) insert the new community key into B
-    opResults = B.doOp(ski.OpArgs{
-        OpName: ski.OpImportKeys,
-        Msg: opResults.Content,
-        OpKeySpec: *B.encryptPubKey,
-        CommunityID: gCommunityID[:],
-        PeerPubKey: A.encryptPubKey.Bytes,
+    opBuf = B.doOp(ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_IMPORT_FROM_PEER,
+        BufIn: opBuf,
+        OpKey: B.encryptKey,
+        PeerPubKey: A.encryptKey.PubKey,
     })
 
 
 	clearMsg := []byte("hello, PLAN community!")
 
     // 4) Encrypt a new community msg (sent from A)
-	opResults = A.doOp(ski.OpArgs{
-        OpName: ski.OpEncrypt,
-        OpKeySpec: *communityKey,
-        CommunityID: gCommunityID[:],
-        Msg: clearMsg,
+	opBuf = A.doOp(ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_ENCRYPT_SYM,
+        BufIn: clearMsg,
+        OpKey: communityKeyRef,
     })
 
-    encryptedAtoB := opResults.Content
+    encryptedAtoB := opBuf
 
     // 5) Send the encrypted community message to B
-	opResults = B.doOp(ski.OpArgs{
-        OpName: ski.OpDecrypt,
-        OpKeySpec: *communityKey,
-        CommunityID: gCommunityID[:],
-        Msg:  encryptedAtoB,
+	opBuf = B.doOp(ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_DECRYPT_SYM,
+        BufIn: encryptedAtoB,
+        OpKey: communityKeyRef,
     })
 
-    decryptedMsg := opResults.Content
+    decryptedMsg := opBuf
 
     // 6) Now check that B can send an encrypted community msg to A
-	opResults = B.doOp(ski.OpArgs{
-        OpName: ski.OpEncrypt,
-        OpKeySpec: *communityKey,
-        CommunityID: gCommunityID[:],
-        Msg: decryptedMsg,
+	opBuf = B.doOp(ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_ENCRYPT_SYM,
+        BufIn: decryptedMsg,
+        OpKey: communityKeyRef,
     })
-    encryptedBtoA := opResults.Content
-	opResults = A.doOp(ski.OpArgs{
-        OpName: ski.OpDecrypt,
-        OpKeySpec: *communityKey,
-        CommunityID: gCommunityID[:],
-        Msg: encryptedBtoA,
+    encryptedBtoA := opBuf
+	opBuf = A.doOp(ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_DECRYPT_SYM,
+        BufIn: encryptedBtoA,
+        OpKey: communityKeyRef,
     })
 
     // 7) Did the round trip work?
     //    clearMsg => A => encryptedAtoB => B => decryptedMsg => B => encryptedBtoA => A => opResults.Content
-	if ! bytes.Equal(clearMsg, opResults.Content) {
-		gTesting.Fatalf("expected %v, got %v after decryption", clearMsg, opResults.Content)
+	if ! bytes.Equal(clearMsg, opBuf) {
+		gTesting.Fatalf("expected %v, got %v after decryption", clearMsg, opBuf)
     }
 
     badMsg := make([]byte, len(encryptedAtoB))
@@ -131,11 +129,10 @@ func doProviderTest(A, B *testSession) {
         copy(badMsg, encryptedAtoB)
         badMsg[rndPos] += rndAdj
 
-        _, opErr := B.DoOp(ski.OpArgs{
-            OpName: ski.OpDecrypt,
-            OpKeySpec: *communityKey,
-            CommunityID: gCommunityID[:],
-            Msg: badMsg,
+        _, opErr := B.DoOp(ski.CryptOpArgs{
+            CryptOp: ski.CryptOp_DECRYPT_SYM,
+            BufIn: badMsg,
+            OpKey: communityKeyRef,
         })
         if opErr == nil {
             gTesting.Fatal("there should have been a decryption error!")
@@ -147,13 +144,13 @@ func doProviderTest(A, B *testSession) {
 type testSession struct {
     ski.SessionTool 
 
-    encryptPubKey *ski.PubKey
+    encryptKey *ski.KeyRef
 }
 
 
 
 
-func (ts *testSession) doOp(inOpArgs ski.OpArgs) *plan.Block {
+func (ts *testSession) doOp(inOpArgs ski.CryptOpArgs) []byte {
 
     results, err := ts.DoOp(inOpArgs)
 
@@ -186,8 +183,12 @@ func newSession(skiProvider ski.Provider, inUserName string) *testSession {
         nil,
     }
 
+    userName := []byte(inUserName)
 
-    ts.encryptPubKey = ts.GenerateNewKey(ski.KeyType_ASYMMETRIC_KEY, ski.KeyDomain_PERSONAL)
+    ts.encryptKey, err = ts.GenerateNewKey(
+        ski.KeyType_ASYMMETRIC_KEY, 
+        append(gCommunityID[:], userName...),
+    )
 
     return ts
 }
