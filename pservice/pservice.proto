@@ -23,7 +23,7 @@ message SessionRequest {
                 bytes           community_id            = 2;
 
     // Identifies who is requesting the session (via pubkey)
-                ski.PubKey      client_id               = 3;
+                ski.KeyRef      client_id               = 3;
 
     // Submits an authentication challenge for the host (so that the host can be validated).
                 ski.SigBlock    challenge               = 4;
@@ -49,6 +49,92 @@ message Msg {
                 ski.SigBlock    sig_block               = 4;
 }
 
+
+
+
+service CommunityRepo {
+
+    // Starts a new client member session.
+    rpc         StartMemberSession(MemberSessionInfo)               returns (MemberSessionInfo);
+
+    // Requests a sequence of txns within a specified time window and other query criteria.
+    rpc         InvokeChannel(ChInvocation)                         returns (ChStatus);
+
+    // Sends and receives blocks to/from a channel (via the given channel session). 
+    rpc         ChSessionPipe(stream ChMsg)                         returns (stream ChMsg);
+
+    // Pins the FS item identified by a hashname to a local file system parent dir.
+    // When complete, a local pathname is returned containing the pinned FSItem/tree.
+    // This is why the graphical client and repo are on the same machine. 
+    // Maybe there could be such thing as a CFI node someday, but unlikely due to the pain
+    //    that the member session/repo has all of the security info.
+   // rpc         PinFSItem(FSItem)                               returns (stream PinStatus);
+
+}
+
+
+
+
+message MemberSessionInfo {
+
+    // Identifies a workstation/client installation (metaphorical to a "dumb" terminal in the 70's and 80's).
+    // Two different members could have member sessions with the same client ID into a given repo (but not at the same time).
+                bytes           client_id               = 1;
+
+    // Which community this session wants to access
+                bytes           community_id            = 2;
+
+    // The member's community-given ID
+                uint64          member_id               = 3;
+
+    // Optional -- used internally
+                string          repo_path               = 4;
+
+    //          bytes           prev_session_token      = 4;
+    //          bytes           next_session_token      = 5;
+
+    // This will evolve in time, but in general, the client authenticates by submitting a token, 
+    //    which is a hash of biometric-based input (e.g. pin, password, key-fob, eye scan) plus 
+    //    a secure token from the previous session.
+    // This is used to create a symmetric key to encrypt/decrypt the member's primary key hive
+    //    that resides on the host.
+                bytes           passhash                = 5;
+
+    // When the above symmetric key is created, it's placed it and other session info into a "secret box",
+    //    and is locked with a key only the host has has, and sent back as the "session token".
+    // This allows the client to present the session_token (until it expires) instead of the client 
+    //    having to perform full biometric authentication.
+                bytes           session_token           = 6;
+
+}
+
+
+
+
+
+message ChInvocation {
+
+                fixed64         ch_id              = 1;
+
+                string          ch_adapter_desc    = 2;
+
+}
+
+message ChStatus {
+
+                int32           ch_session_id           = 1;    
+
+    // Reports any error/state condition.
+                plan.Status     status                  = 2;
+}
+
+
+message ChMsg {
+
+                int32           ch_session_id           = 1;
+
+                plan.Block      content                 = 2;  
+}
 
 
 
