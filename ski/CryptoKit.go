@@ -154,25 +154,3 @@ func VerifySignature(
 
 	return err
 }
-
-
-// VerifySignatureFrom is a convenience that performs signature validation for any registered CryptoKit.
-func VerifySignatureFrom(
-	inSig    []byte,
-	inDigest []byte,
-	inFrom   *PubKey,
-) error {
-
-    if inFrom == nil {
-    	return plan.Errorf(nil, plan.MissingParam, "missing 'from' param")    
-    }
-
-    err := VerifySignature(
-        inSig,
-        inDigest,
-        inFrom.CryptoKitId,
-        inFrom.Bytes,
-    )
-
-	return err
-}
