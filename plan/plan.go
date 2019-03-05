@@ -14,6 +14,7 @@ package plan
 import (
 	"time"
     "os"
+    "encoding/base64"
 )
 
 // DataHandler is a deferred data handler function
@@ -34,14 +35,15 @@ const (
 	// It's "modest-sized" since a newly generated key must pass collision checks before it's put into use.
 	KeyIDSz = 16
 
-	// ChannelIDSz specifies the byte size of ChannelID
-	ChannelIDSz = 16
-
-	// MemberIDSz specifies the byte size of MemberID
-	MemberIDSz = 16
+	// ChannelIDSz specifies the byte size of a channel ID
+    ChannelIDSz = 16
 
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
 	MemberAliasMaxLen = 127
+
+    // Base64CharSet is the base 64 char set used in PLAN, chosen such that 0 maps to '0' and is monotonic increasing (which can be sorted).
+    Base64CharSet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~"
+
 )
 
 // CommunityID identifies a PLAN community and is randomly generated during its genesis.
@@ -51,7 +53,15 @@ type CommunityID [CommunityIDSz]byte
 //    a new "epoch" so their crypto can be regenerated.
 // Member IDs are considered collision-proof since inside a community, they must be cleared through
 //    the community's new member registration process (which will reject a collision).
-type MemberID [MemberIDSz]byte
+type MemberID uint64
+
+// StorageID identifies a storage instance within a given community.  
+//
+// When a storage network/provider is created to host a given community, it is identified from other (previous) 
+// instances by ensuring that the newly assigned StorageID is unique in community's history,
+// something trivially done by the person(s) leading the storage switchover.  In the lifetime of a community, there would
+// only need to be a new StorageID generated when the community moved to a new storage provider/network.  
+type StorageID uint16
 
 // MemberAlias is a self-given community member name and is how they are seen by humans in the community,
 //    making it a convenience tool for humans to easily refer to other members.
@@ -87,9 +97,9 @@ var (
 		0, 0, 0, 0,
 		0, 0, 0, 0,
 		0, 0, 0, 1,
-	}
-
-	// MemberRegistryChannel is the community's master (community-public) member registry.  Each entry specifies a
+	}	
+    
+    // MemberRegistryChannel is the community's master (community-public) member registry.  Each entry specifies a
 	//    each community member's member ID, latest public keys, and member info (e.g. home ChannelID).  This allows each of the
 	//    community's pnodes to verify member signatures and enable the passing of secrets to other members or groups
 	//    via asymmetric encryption. Naturally, this channel is controlled by an access channel that is controlled only
@@ -119,14 +129,18 @@ var (
 
     // DefaultFileMode is used to express the default mode of file creation.
     DefaultFileMode = os.FileMode(0775)
+
+    // Base64 encodes/decodes binary strings.
+    Base64 = base64.NewEncoding(Base64CharSet).WithPadding(base64.NoPadding)
+
 )
 
 // Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflipping
 //     won't occur until the year 292,471,210,648 CE.  I wonder for-profit orgs will still dominate the OS space.
 // Note: if a nanosecond precision is not available or n/a, then the best available precision should be used (or 0).
 type Time struct {
-	UnixSecs int64 `json:"unix"` // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
-	NanoSecs int32 `json:"nano"` // NanoSecs is the number of nanoseconds elapsed into .UnixSecs so the domain is [0,999999999]
+	UnixSecs int64  `json:"unix"` // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
+	FracSecs uint16 `json:"frac"` // FracSecs is 16 bit fraction from 0 to 0xFFFF
 }
 
 // Now returns PLAN's standard time struct set to the time index of the present moment.
@@ -135,7 +149,7 @@ func Now() Time {
 
 	return Time{
 		UnixSecs: t.Unix(),
-		NanoSecs: int32(t.Nanosecond()),
+		FracSecs: uint16((2199 * (uint32(t.Nanosecond()) >> 10)) >> 15),
 	}
 }
 
