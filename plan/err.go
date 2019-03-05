@@ -167,6 +167,9 @@ const (
 	// TxnNotConsistent means info in one or more txns is at odds, meaning malicious txn packaging may be in play
 	TxnNotConsistent
 
+    // StorageNotConsistent means the storae provider returned info that is suspect or inconsistent
+    StorageNotConsistent
+
 	// TxnDecodeFailed means the given txn failed to be decoded
 	TxnDecodeFailed
 
@@ -182,6 +185,12 @@ const (
 
 	// SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)
 	SecurityErrorFamily = 5200 + iota
+
+    // KeyringNotFound means the given key set was not found
+    KeyringNotFound
+
+	// KeyEntryNotFound means a key source did not contain the requested pub key (or pub key fragment)
+	KeyEntryNotFound
 
 	// InvocationNotAvailable means an SKI session was started with an unrecognized invocation string
 	InvocationNotAvailable
@@ -204,9 +213,6 @@ const (
 	// KeyringNotSpecified means no keyring scope name was given for the SKI operation
 	KeyringNotSpecified
 
-	// KeyringNotFound means the given keyring name was not found
-	KeyringNotFound
-
 	// KeyDomainNotFound means the KeyDomain given was not known (and out of range)
 	KeyDomainNotFound
 
@@ -221,9 +227,6 @@ const (
 
 	// InvalidSKISession means the given session is not currently open
 	InvalidSKISession
-
-	// KeyEntryNotFound means a key source did not contain the requested key ID
-	KeyEntryNotFound
 
 	// KeyIDCollision occurs when a key is placed in a keyring that already contains the key ID
 	KeyIDCollision
