@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"math/rand"
 	"testing"
+    "fmt"
 
 	"github.com/plan-systems/go-plan/pdi"
 	"github.com/plan-systems/go-plan/plan"
@@ -16,7 +17,7 @@ import (
 var gTestBuf = "May PLAN empower organizations and individuals, and may it be an instrument of productivity and self-organization."
 
 var gTesting *testing.T
-var gCommunityID = [4]byte{0, 1, 2, 3}
+var gCommunityID = []byte{0, 1, 2, 3, 4, 5, 5, 7, 99, 123}
 var gDefaultFileMode = os.FileMode(0775)
 
 func TestVarAppendBuf(t *testing.T) {
@@ -78,9 +79,9 @@ func TestTxnEncoding(t *testing.T) {
 	}
 
 	tool, err := ski.NewSessionTool(
-		hive.NewProvider(),
-		"Test-Encoding",
-		gCommunityID[:],
+		hive.NewCryptoProvider(),
+		"Charles",
+		gCommunityID,
 	)
 	if err != nil {
 		gTesting.Fatal(err)
@@ -110,6 +111,10 @@ func txnEncodingTest(A *testSession) {
 
     rand.Seed(seed)
 
+    totalBytes := 0
+    totalTxns  := 0
+    totalPayloads := 0
+
 	// Test agent encode/decode
 	{
         maxSegSize := uint32(10000)
@@ -119,25 +124,25 @@ func txnEncodingTest(A *testSession) {
 		encoder, _ := NewTxnEncoder(maxSegSize)
 
 		{
-			err := encoder.ResetSession(
-				A.Session,
-				gCommunityID[:],
-			)
-			if err != nil {
-				gTesting.Fatal(err)
-			}
+            authorKey := ski.KeyRef{
+                KeyringName: ski.FormKeyringNameForStorage(123, gCommunityID),
+            }
 
-			pubKey, err := encoder.GenerateNewAccount()
-			if err != nil {
-				gTesting.Fatal(err)
-			}
+            latest, err := A.Session.GetLatestKey(&authorKey)
+            if latest != nil {
+                authorKey = *latest
+            } else if plan.IsError(err, plan.KeyEntryNotFound, plan.KeyringNotFound) {
+                err = encoder.GenerateNewAccount(A.Session, &authorKey)
+            }
+            if err != nil {
+                gTesting.Fatal(err)
+            }
 
-			err = encoder.ResetAuthorID(*pubKey)
+			err = encoder.ResetSigner(A.Session, authorKey)
 			if err != nil {
 				gTesting.Fatal(err)
 			}
 		}
-
 
         txns := make([]*pdi.DecodedTxn, 10000)
 
@@ -150,6 +155,9 @@ func txnEncodingTest(A *testSession) {
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)
+
+            totalBytes += blobLen
+            totalPayloads++
 
 			txnsOut, err := encoder.EncodeToTxns(
 				payload,
@@ -171,6 +179,8 @@ func txnEncodingTest(A *testSession) {
 				decodedTxn := &pdi.DecodedTxn{
                     RawTxn: txnOut.RawTxn,
                 }
+
+                totalTxns++
 
                 gTesting.Logf("Decoding idx %d of %d", idx, len(txnsOut))
 
@@ -218,6 +228,8 @@ func txnEncodingTest(A *testSession) {
             }
 		}
 	}
+
+    fmt.Printf("payloads: %d    bytes: %d   txns: %d\n", totalPayloads, totalBytes, totalTxns)
 }
 
 type testSession struct {

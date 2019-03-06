@@ -3,6 +3,7 @@ package datastore
 
 import (
 	//"google.golang.org/grpc/encoding"
+    log "github.com/sirupsen/logrus"
 
 	"github.com/plan-systems/go-plan/pdi"
 	"github.com/plan-systems/go-plan/plan"
@@ -15,9 +16,9 @@ type dsEncoder struct {
 
 	SegmentMaxSz uint32
 
+    cryptoKitID  ski.CryptoKitID
 	hashKit      ski.HashKit
-	author       ski.PubKey
-	communityID  []byte
+	author       ski.KeyRef
 	skiSession   ski.Session
 }
 
@@ -38,6 +39,7 @@ func NewTxnEncoder(
 	enc := &dsEncoder{
 		hashKit:      defaultKit,
 		SegmentMaxSz: inSegmentMaxSz,
+        cryptoKitID:  txnCryptoKitID,
 	}
 
 	if enc.SegmentMaxSz <= 0 {
@@ -52,14 +54,14 @@ func NewTxnEncoder(
 	return enc, nil
 }
 
-// ResetSession --see TxnEncoder
-func (enc *dsEncoder) ResetSession(
+// ResetSigner --see TxnEncoder
+func (enc *dsEncoder) ResetSigner(
 	inSession ski.Session,
-	inCommunityID []byte,
+	inFrom    ski.KeyRef,
 ) error {
 
 	enc.skiSession = inSession
-	enc.communityID = inCommunityID
+	enc.author = inFrom
 
 	err := enc.checkReady()
 
@@ -72,47 +74,33 @@ func (enc *dsEncoder) checkReady() error {
 		return plan.Errorf(nil, plan.EncoderSessionNotReady, "SKI session missing")
 	}
 
-	if len(enc.communityID) < 4 {
-		return plan.Errorf(nil, plan.EncoderSessionNotReady, "community ID missing")
+	if len(enc.author.KeyringName) == 0 {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "author/from keyring name missing")
 	}
 
 	return nil
 }
 
 // GenerateNewAccount -- See TxnEncoder
-func (enc *dsEncoder) GenerateNewAccount() (*ski.PubKey, error) {
-
-	if err := enc.checkReady(); err != nil {
-		return nil, err
-	}
-
-	newKeys, err := ski.GenerateKeys(
-		enc.skiSession,
-		enc.communityID,
-		[]*ski.PubKey{
-			&ski.PubKey{
-				KeyType:     ski.KeyType_SIGNING_KEY,
-				CryptoKitId: ski.CryptoKitID_NaCl,
-				KeyDomain:   ski.KeyDomain_PERSONAL,
-			},
-		},
-    )
-
-    if err != nil {
-        return nil, err
-    }
-
-    newKey := newKeys[0].CopyToPubKey()
-	return newKey, nil
-}
-
-func (enc *dsEncoder) ResetAuthorID(
-	inFrom ski.PubKey,
+func (enc *dsEncoder) GenerateNewAccount(
+    inSession ski.Session,
+    ioKeyRef *ski.KeyRef,
 ) error {
 
-	enc.author = inFrom
+    newKey, err := ski.GenerateNewKey(
+        inSession,
+        ski.KeyType_SIGNING_KEY,
+        enc.cryptoKitID,
+        ioKeyRef.KeyringName,
+    )
+    if err != nil {
+        log.WithError(err).Infof("failed to gen key for %v", ioKeyRef.DebugDesc())
+        return err
+    }
 
-	return nil
+    *ioKeyRef = *newKey
+
+    return nil
 }
 
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
@@ -149,10 +137,9 @@ func (enc *dsEncoder) EncodeToTxns(
 
 		hashKit := enc.hashKit
 
-		signOp := ski.OpArgs{
-			OpName:      ski.OpSign,
-			OpKeySpec:   enc.author,
-			CommunityID: enc.communityID,
+		signOp := ski.CryptOpArgs{
+			CryptOp: ski.CryptOp_SIGN,
+			OpKey:   &enc.author,
 		}
 
         pos := uint32(0)
@@ -165,7 +152,7 @@ func (enc *dsEncoder) EncodeToTxns(
 			}
 
             seg.TxnHashname = nil
-    		seg.From = enc.author.Bytes
+    		seg.From = enc.author.PubKey
             seg.TimeSealed = timeSealed
             seg.HashKitId = hashKit.HashKitID
 
@@ -204,16 +191,16 @@ func (enc *dsEncoder) EncodeToTxns(
 				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
 			}
 
-			signOp.Msg = seg.TxnHashname
+			signOp.BufIn = seg.TxnHashname
 
-			sigResults, signErr := enc.skiSession.DoOp(signOp)
+			sigResults, signErr := enc.skiSession.DoCryptOp(&signOp)
             if signErr != nil {
                 return nil, signErr
             }
 
-            // Append the seg
+            // Append the signature
             {
-                sig := sigResults.Content
+                sig := sigResults.BufOut
                 sigLen := uint32(len(sig))
                 copy(buf[txnLen:], sig)
                 txnLen += sigLen

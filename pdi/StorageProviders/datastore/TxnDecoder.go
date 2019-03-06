@@ -10,6 +10,7 @@ import (
 
 const (
 	txnEncodingDesc1 = "/plan/pdi/encoding/datastore/1"
+    txnCryptoKitID = ski.CryptoKitID_NaCl
 )
 
 // dsDecoder implements pdi.TxnDecoder
@@ -19,6 +20,7 @@ type dsDecoder struct {
     theadsafe    bool
     mutex        sync.Mutex
 	encodingDesc string
+    cryptoKitID  ski.CryptoKitID
 	hashKits     map[ski.HashKitID]ski.HashKit
 }
 
@@ -31,6 +33,7 @@ func NewTxnDecoder(
         theadsafe:    inMakeThreadsafe,
 		hashKits:     map[ski.HashKitID]ski.HashKit{},
 		encodingDesc: txnEncodingDesc1,
+        cryptoKitID:  txnCryptoKitID,
 	}
 
 	return dec
@@ -109,11 +112,7 @@ func (dec *dsDecoder) DecodeRawTxn(
     }
 
 	// 6) Verify the sig
-	pubKey := &ski.PubKey{
-		KeyDomain: ski.KeyDomain_PERSONAL,
-		Bytes:     txnInfo.From,
-	}
-	if err := ski.VerifySignatureFrom(sig, txnInfo.TxnHashname, pubKey); err != nil {
+	if err := ski.VerifySignature(sig, txnInfo.TxnHashname, dec.cryptoKitID, txnInfo.From); err != nil {
 		return nil, err
 	}
 
@@ -123,3 +122,4 @@ func (dec *dsDecoder) DecodeRawTxn(
 
 	return payloadBuf, nil
 }
+

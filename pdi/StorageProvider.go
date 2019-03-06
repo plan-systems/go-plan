@@ -30,25 +30,21 @@ const TxnSegmentMaxSz = 10 * 1024 * 1024
 // TxnEncoder is NOT assumed to be threadsafe unless specified otherswise
 type TxnEncoder interface {
 
-	// ResetSession -- resets the currently set community ID used for EncodeToTxns()
-	// This must be called before other calls into TxnEncoder.
-	ResetSession(
-		inSession      ski.Session,
-		inCommunityID  []byte,
-	) error
+	// GenerateNewAccount gens the necessary key(s) in the given SKI session, in the keyring named ioKeyRef.KeyringName, 
+    //    returning the newly generated pub key (used as an address) in ioKeyRef.PubKey.
+	GenerateNewAccount(
+        inSession ski.Session,
+        ioKeyRef *ski.KeyRef,
+    ) error
 
-	// GenerateNewAccount creates the necessary key(s) in the pres-et SKI session and returns a new public
-	//    key (used as an address) able to originate StorageProvider txns via EncodeToTxns().
-	// Pre: ResetSession() must be successfully called.
-	GenerateNewAccount() (*ski.PubKey, error)
-
-	// ResetAuthorID -- resets the current set public key used to originate (i.e. sign) txns in EncodeToTxns()
-	ResetAuthorID(
-		inFrom ski.PubKey,
+	// ResetSigner -- resets how this TxnEncoder signs newly encoded txns in EncodeToTxns().
+	ResetSigner(
+		inSession ski.Session,
+		inFrom    ski.KeyRef,
 	) error
 
 	// EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
-	// Pre: ResetSession() *and* ResetAuthorID() must be successfully called.
+	// Pre: ResetSigner() must be successfully called.
 	EncodeToTxns(
 		inPayload      []byte,
 		inPayloadCodec PayloadCodec,
