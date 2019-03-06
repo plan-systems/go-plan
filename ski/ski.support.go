@@ -3,6 +3,7 @@ package ski
 import (
 	"bytes"
 	"hash"
+    "fmt"
 	"io"
 	"sort"
 	"sync"
@@ -734,6 +735,11 @@ func (entry *KeyEntry) ZeroOut() {
 	}
 }
 
+// DebugDesc returns a human readable desc string for this KeyRef
+func (kr *KeyRef) DebugDesc() string {
+    return fmt.Sprintf("key %s on keyring %s", BinDesc(kr.PubKey), BinDesc(kr.KeyringName)) 
+}
+
 // Zero zeros out a given slice
 func Zero(buf []byte) {
 	N := int32(len(buf))
@@ -954,7 +960,6 @@ func (st *SessionTool) GetLatestKey(
 }
 
 
-
 // EndSession ends the current session
 func (st *SessionTool) EndSession(inReason string) {
 
@@ -962,25 +967,50 @@ func (st *SessionTool) EndSession(inReason string) {
 
 }
 
-// FormKeyringForMember forms a keyring name (ski.Keyring.KeyringName) from a standard member ID
-func FormKeyringForMember(
+// FormKeyringNameForMember forms a keyring name (ski.Keyring.KeyringName) for the given member ID
+func FormKeyringNameForMember(
     memberID    plan.MemberID,
 	communityID []byte,
 ) []byte {
 
-    i := 0
-    name := make([]byte, len(communityID) + plan.MemberIDSz)
-    for ; i < plan.MemberIDSz; i++ {
-        name[i] = byte(memberID)
+    clen := len(communityID)
+    if clen < plan.MemberIDSz {
+        clen = plan.MemberIDSz
+    }
+    krName := make([]byte, clen)
+    copy(krName, communityID)
+
+    for i := 0 ; i < plan.MemberIDSz; i++ {
+        krName[i] ^= byte(memberID)
         memberID >>= 8
     }
-    copy(name[i:], communityID)
 
-    return name
+    return krName
 }
+
+// FormKeyringNameForStorage forms a keyring name for the given storage ID
+func FormKeyringNameForStorage(
+    storageID   plan.StorageID,
+	communityID []byte,
+) []byte {
+
+    krName := make([]byte, len(communityID))
+    copy(krName, communityID)
+
+    // Ensure that no collision is possible with FormKeyringNameForMember() for all possible values
+    krName[0] ^= byte(storageID)
+    krName[8] ^= byte(storageID >> 8)
+
+    return krName
+}
+
 
 // BinDesc returns a base64 encoding of a binary string, limiting it to a short number of character for debugging and logging.
 func BinDesc(inBinStr []byte) string {
+
+    if len(inBinStr) == 0 {
+        return "nil"
+    }
 
     binStr := inBinStr
 
@@ -996,7 +1026,7 @@ func BinDesc(inBinStr []byte) string {
     suffix := ""
     if len(binStr) > limit {
         binStr = binStr[:limit]
-        suffix = "…"
+        suffix = "[…]"
     }
 
     outStr := ""
