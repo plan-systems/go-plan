@@ -134,13 +134,6 @@ type Session struct {
 
 
 func (session *Session) dbPathname() string {
-    /*
-    fsNameEncoding := base64.RawURLEncoding
-
-    CS.channelDir = path.Join(
-        session.Params.BaseDir, 
-        "ski/Providers/fs", 
-        base64.RawURLEncoding.EncodeToString(session.Params.UserID[:])*/
 
     if len(session.Params.BaseDir) == 0 {
         return ""
@@ -276,49 +269,6 @@ func (session *Session) checkOpParamsAndPermissions(opArgs *ski.CryptOpArgs) err
 }
 
 
-/*
-func (session *Session) checkOpParamsAndPermissions(
-    inArgs *ski.OpArgs,
-    ) error {
-
-    if len(inArgs.CommunityID) < 4 {
-        return plan.Errorf(nil, plan.CommunityNotSpecified, "community ID must be specified for SKI op %v", inArgs.OpName)
-    }
-
-    for i, keySpec := inKeySpecs {
-        if keySpec.KeyDomain < 0 || keySpec.KeyDomain > ski.NumKeyDomains {
-            return plan.Errorf(nil, plan.KeyDomainNotFound, "key domain not found {KeyDomain: %v, PubKey: %v}", keySpec.KeyDomain, keySpec.PubKey)
-        }
-        
-        //allowedOpsForDomain := session.allowedOps[keySpec.KeyDomain]
-
-    }
-  
-
-    if ! session.allowedOps[inArgs.OpName] {
-        err := plan.Errorf(nil, plan.InsufficientSKIAccess, "insufficient SKI permissions for op %s", inArgs.OpName)
-        inOnCompletion(nil, err)
-        return
-    }
-    TODO: Implement me? 
-    for i, domain := range inPB.AccessScopes {
-        allowedOpsForDomain := session.allowedOps[i]
-        if allowedOpsForDomain[
-        for _, opName := range domain {
-            allowedOpsForDomain[opName] = true
-        }
-    }
-    
-
-    return nil
-}
-*/
-
-
-
-
-
-
 // DoCryptOp -- see ski.Session
 func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
 
@@ -369,7 +319,7 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
         if opArgs.OpKey == nil {
             err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
         } else {
-            opKey, err := session.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
+            opKey, err = session.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
             if err == nil {
                 opOut.OpPubKey = opKey.PubKey
                 cryptoKit, err = ski.GetCryptoKit(opKey.CryptoKitId)
@@ -455,9 +405,7 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
     return opOut, nil
 
 }
-
-
-
+ 
 func (session *Session) bumpAutoSave() {
 
     session.autoSaveMutex.Lock()
@@ -479,86 +427,3 @@ func (session *Session) bumpAutoSave() {
     session.autoSaveMutex.Unlock()
     
 }
-
-
-
-
-/*
-func exportKeysIntoMsg(
-    ioKeyringSet *ski.KeyringSet,
-    inKeySpecs []*ski.PubKey,
-) ([]byte, error) {
-
-    var keysBuf []byte
-    {
-        // Make a KeyList that will contain a list of all the keys we're exporting
-        keyBundle := ski.KeyBundle{}
-
-        // Perform thr export
-        keysNotFound := ioKeyringSet.FetchKeys(
-            inKeySpecs,
-            &keyBundle,
-        )
-
-        if len(keysNotFound) > 0 {
-            return nil, plan.Errorf(nil, plan.FailedToMarshalKeyExport, "failed to find %d keys during export", len(keysNotFound))
-        }
-
-        var err error
-        keysBuf, err = keyBundle.Marshal()
-        if err != nil {
-            return nil, plan.Error(err, plan.FailedToMarshalKeyExport, "failed to marshal exported keys")
-        }
-    }
-
-    block := plan.Block {
-        Codec: ski.KeyBundleProtobufCodec,
-        Content: keysBuf,
-    }
-
-    msg, err := block.Marshal()
-    if err != nil {
-        return nil, plan.Error(err, plan.FailedToMarshalKeyExport, "failed to marshal exported keys")
-    }
-
-    return msg, nil
-
-}
-
-
-func importKeysFromMsg(
-    ioKeyringSet *ski.KeyringSet,
-    inMsg []byte,
-) error {
-
-    block := plan.Block{}
-    err := block.Unmarshal(inMsg)
-	if err != nil {
-		return plan.Error(err, plan.FailedToProcessKeyImport, "key import body data failed to unmarshal")
-    }
-
-    keysBuf := block.GetContentWithCodec(ski.KeyBundleProtobufCodec, 0)
-    if keysBuf == nil {
-		return plan.Errorf(nil, plan.FailedToProcessKeyImport, "did not find valid '%s' attachment", ski.KeyBundleProtobufCodec)
-    }
-
-    keyBundle := ski.KeyBundle{}
-
-    err = keyBundle.Unmarshal(keysBuf)
-	if err != nil {
-		return plan.Error(err, plan.FailedToProcessKeyImport, "key import content failed to unmarshal")
-    }
-
-    keysFailed := ioKeyringSet.ImportKeys(keyBundle.Keys)
-    if len(keysFailed) > 0 {
-        log.WithFields(log.Fields{
-            "code": plan.KeyImportFailed,
-            "key_failed": keysFailed,
-        }).Warn("failed to import the given keys")
-    }
-
-    return nil
-}
-
-*/
-
