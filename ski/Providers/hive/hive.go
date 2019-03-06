@@ -137,7 +137,7 @@ func (session *Session) dbPathname() string {
         return ""
     }
     
-    return path.Join(session.Params.BaseDir, "hiveKeyTome.pb")
+    return path.Join(session.Params.BaseDir, "ski.CryptoProvider.hive.pb")
 }
 
 
@@ -163,7 +163,7 @@ func (session *Session) loadFromFile() error {
             if os.IsNotExist(err) {
                 err = nil
             } else {
-                err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "Failed to load key tome file '%v'", pathname)
+                err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key tome %v", pathname)
             }
         }
 
