@@ -76,7 +76,22 @@ func (e *Err) Error() string {
 	s = append(s, "}")
 
 	return strings.Join(s, "")
+}
 
+// IsError tests if the given error is a PLAN error code (below)
+func IsError(inErr error, inErrCodes ...int32) bool {
+    if inErr == nil {
+        return false
+    }
+    if perr, ok := inErr.(*Err); ok && perr != nil {
+        for _, errCode := range inErrCodes {
+            if perr.Code == errCode {
+                return true
+            }
+        }
+    }
+
+    return false
 }
 
 const (
@@ -86,7 +101,7 @@ const (
 	**/
 
 	// GenericErrorFamily errors generally relate to pnode
-	GenericErrorFamily = 5000 + iota
+	GenericErrorFamily int32 = 5000 + iota
 
 	// AssertFailed means an unreachable part of code was...reached.  :\
 	AssertFailed
@@ -212,9 +227,6 @@ const (
 
 	// KeyringNotSpecified means no keyring scope name was given for the SKI operation
 	KeyringNotSpecified
-
-	// KeyDomainNotFound means the KeyDomain given was not known (and out of range)
-	KeyDomainNotFound
 
 	// CommunityNotSpecified means inArgs.KeySpecs.CommunityID was not set (and so the op can't proceed)
 	CommunityNotSpecified
