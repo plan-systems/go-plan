@@ -6,7 +6,7 @@ package ski;
 
 
 enum KeyType {
-    NOT_SET             = 0;
+    NULL                = 0;
 
     SYMMETRIC_KEY       = 1;
     ASYMMETRIC_KEY      = 2;
@@ -52,11 +52,6 @@ enum CryptOp {
     EXPORT_TO_PEER       = 6;
 
 
-    // Generates a new KeyEntry for each entry in CryptOpArgs.TomeIn (based on the entry's KeyType and CryptoKitID) and merges it
-    //    with the host KeyTome. A copy of each newly generated entry (except for PrivKey) is placed into TomeOut.
-    // See "KeyGen mode" notes where KeyEntry is declared. 
-    GENERATE_KEYS        = 7;
-
 }
 
 /*
@@ -100,9 +95,6 @@ message CryptOpOut {
     // Returns the pub key used in the op (needed when CryptOpArgs.OpKey.PubKey wasn't specified)
                 bytes           op_pub_key              = 2;
 
-    // Used for select ops.
-                KeyTome         tome_out                = 6;
-
 }
 
 enum  CryptoKitID {
@@ -123,7 +115,7 @@ enum  HashKitID {
 
 message KeyRef {
 
-   // Specifies the Keyring that the key resides on (required when referencing a KeyEntry in a KeyTome)
+   // Specifies the Keyring that the key resides on (required when referencing a KeyEntry in a KeyTome).
                 bytes           keyring_name              = 1;
 
     // The pub key of the key being referenced (or len()==0 to imply the newest key in the cited keyring).
@@ -165,7 +157,7 @@ message KeyEntry {
 message Keyring {
 
     // Any binary name for this Keyring (except a zero-length name).
-    // In general, names are desired to be as pseudo-random as possible for efficient lookup and sorting.
+   // When choosing a keyring name, choose more unique and/or random bytes first.  This improves lookup efficiency and performance.
                 bytes           name                    = 1;
 
     // Ordered list of KeyEntry (potentially sorted by PubKey)

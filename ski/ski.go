@@ -10,10 +10,18 @@ import (
 ** ski.Session
 **/
 
-// Session provides lambda-lifted crypto services from an opaque service provider.
+// Session provides crypto services from an opaque service provider.
 //
 // TODO: make into gRPC service
 type Session interface {
+
+    // Generates a new KeyEntry for each entry in srcTome (based on the entry's KeyType and CryptoKitID, ignoring the rest) and merges it
+    //    with the host KeyTome. A copy of each newly generated entry (except for PrivKey) is placed into result KeyTome.
+    // See "KeyGen mode" notes where KeyEntry is declared. 
+    GenerateKeys(srcTome *KeyTome) (*KeyTome, error)
+    
+    // Returns a KeyRef for the newest KeyEntry on in.KeyringName (in.PubKey is ignored).
+    GetLatestKey(in *KeyRef) (*KeyRef, error)
 
     // Performs signing, encryption, and decryption.
     DoCryptOp(inArgs *CryptOpArgs) (*CryptOpOut, error)
@@ -24,21 +32,19 @@ type Session interface {
 }
 
 /*****************************************************
-** ski.Provider
+** ski.CryptoProvider
 **/
 
 // SessionParams is a convenience struct used for ski.Provider.StartSession()
 type SessionParams struct {
-	Invocation     plan.Block
-    UserID         []byte
-    Passhash       []byte
-    
-	//AccessScopes   [NumKeyDomains]AccessScopes
-	BaseDir        string
+	Invocation       plan.Block
+    UserID           []byte
+    Passhash         []byte
+	BaseDir          string
 }
 
-// Provider wraps how an SKI connection is implemented.  Perhaps it's locally implemented, or perhaps the it uses a network connection.
-type Provider interface {
+// CryptoProvider wraps how an SKI connection is implemented.  Perhaps it's locally implemented, or perhaps the it uses a network connection.
+type CryptoProvider interface {
 
 	// InvocationStr returns a string that identifies this provider type
 	InvocationStr() string

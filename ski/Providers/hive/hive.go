@@ -29,17 +29,17 @@ const (
 
 
 
-// Provider is a local implemention of ski.Provider
-type Provider struct {
-    ski.Provider
+// CryptoProvider is a local implemention of ski.Provider
+type CryptoProvider struct {
+    ski.CryptoProvider
 
     sessions            []*Session
 }
 
-// NewProvider creates a new hive Provider (a ski.Provider implemented via a file in the OS)
-func NewProvider() *Provider {
+// NewCryptoProvider creates a new hive Provider (a ski.Provider implemented via a file in the OS)
+func NewCryptoProvider() *CryptoProvider {
 
-    var provider = &Provider{
+    var provider = &CryptoProvider{
         sessions: nil,
     }
 
@@ -47,7 +47,7 @@ func NewProvider() *Provider {
 }
 
 // NewSession initializes the SKI's keyring.
-func (provider *Provider) NewSession(
+func (provider *CryptoProvider) NewSession(
     inPB ski.SessionParams,
 ) *Session {
 	session := &Session{
@@ -62,12 +62,12 @@ func (provider *Provider) NewSession(
 
     
 // InvocationStr -- see interface ski.Provider
-func (provider *Provider) InvocationStr() string {
+func (provider *CryptoProvider) InvocationStr() string {
     return providerInvocation
 }
 
 // StartSession starts a new SKI session
-func (provider *Provider) StartSession(
+func (provider *CryptoProvider) StartSession(
     inPB ski.SessionParams,
 ) (ski.Session, error) {
 
@@ -96,10 +96,8 @@ func (provider *Provider) StartSession(
     return session, nil
 }
 
-
-
 // EndSession ends to given session
-func (provider *Provider) EndSession(inSession *Session, inReason string) error {
+func (provider *CryptoProvider) EndSession(inSession *Session, inReason string) error {
     for i, session := range provider.sessions {
         if session == inSession {
             n := len(provider.sessions)-1
@@ -119,7 +117,7 @@ type Session struct {
     autoSaveMutex       sync.Mutex
 
     // TODO: put in mutex!?
-    parentProvider      *Provider
+    parentProvider      *CryptoProvider
     Params              ski.SessionParams
     nextAutoSave        time.Time
     //fsStatus            fsStatus
@@ -254,32 +252,44 @@ func (session *Session) EndSession(inReason string) {
 
 }
 
-func (session *Session) checkOpParamsAndPermissions(opArgs *ski.CryptOpArgs) error {
 
-    switch opArgs.CryptOp {
+// GenerateKeys -- see ski.Session
+func (session *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
 
-        case ski.CryptOp_GENERATE_KEYS, ski.CryptOp_EXPORT_TO_PEER:
-            if opArgs.TomeIn == nil {
-                return plan.Error(nil, plan.AssertFailed, "op requires TomeIn")
-            }
-            break;
+    newKeyTome, err := srcTome.GenerateFork(crypto_rand.Reader, 32)
+    if err != nil {
+        return nil, err
     }
+
+    session.keyTomeMgr.MergeTome(newKeyTome)
+    session.bumpAutoSave()
     
-    return nil
+    return srcTome, nil
 }
+
+
+// GetLatestKey -- see ski.Session
+func (session *Session) GetLatestKey(in *ski.KeyRef) (*ski.KeyRef, error) {
+
+    opKey, err := session.keyTomeMgr.FetchKey(in.KeyringName, nil)
+    if err != nil {
+        return nil, err
+    }
+
+    return &ski.KeyRef{
+        KeyringName: in.KeyringName,
+        PubKey:      opKey.PubKey,
+    }, nil
+
+}
+
 
 
 // DoCryptOp -- see ski.Session
 func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
 
-    err := session.checkOpParamsAndPermissions(opArgs)
-    if err != nil {
-        return nil, err
-    }
-
+    var err error
     opOut := &ski.CryptOpOut{}
-
-    usesKey := true
 
     /*****************************************************
     ** 0) PRE-OP
@@ -288,19 +298,10 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
         switch opArgs.CryptOp {
 
             case ski.CryptOp_EXPORT_TO_PEER: {
-                opArgs.BufIn, err = session.keyTomeMgr.ExportUsingGuide(opArgs.TomeIn, ski.ErrorOnKeyNotFound)
-            }
-
-            case ski.CryptOp_GENERATE_KEYS: {
-                usesKey = false
-                if opArgs.TomeIn != nil {
-                    newKeyTome, err := opArgs.TomeIn.GenerateFork(crypto_rand.Reader, 32)
-                    if err == nil {
-                        session.keyTomeMgr.MergeTome(newKeyTome)
-                        session.bumpAutoSave()
-                        opOut.TomeOut = opArgs.TomeIn
-                        opArgs.TomeIn = nil
-                    }
+                if opArgs.TomeIn == nil {
+                    err = plan.Error(nil, plan.AssertFailed, "op requires TomeIn")
+                } else {
+                    opArgs.BufIn, err = session.keyTomeMgr.ExportUsingGuide(opArgs.TomeIn, ski.ErrorOnKeyNotFound)
                 }
             }
         }
@@ -315,7 +316,7 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
         opKey *ski.KeyEntry
         cryptoKit *ski.CryptoKit
     )
-    if err == nil && usesKey {
+    if err == nil {
         if opArgs.OpKey == nil {
             err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
         } else {
@@ -362,9 +363,6 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
                     opArgs.BufIn, 
                     opArgs.PeerPubKey,
                     opKey.PrivKey)
-
-            case ski.CryptOp_GENERATE_KEYS:
-                // no-op
                 
             default:
                 err = plan.Errorf(nil, plan.UnknownSKIOpName, "unrecognized SKI operation %v", opArgs.CryptOp)
