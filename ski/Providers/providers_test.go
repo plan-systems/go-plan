@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
     "math/rand"
-    "fmt"
+    //"fmt"
     //"time"
     //"ioutil"
 
@@ -18,26 +18,23 @@ import (
 
 
 var gTesting *testing.T
-var gCommunityID = [8]byte{0, 1, 2, 3, 4, 5, 6, 7}
+var gCommunityID = []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 
 func TestFileSysSKI(t *testing.T) {
 
     gTesting = t
 
     // Register providers to test 
-    providersToTest := []func() ski.Provider{
-        func() ski.Provider {
-            return hive.NewProvider()
+    providersToTest := []func() ski.CryptoProvider{
+        func() ski.CryptoProvider {
+            return hive.NewCryptoProvider()
         },
     }
 
     for _, providerFactory := range providersToTest {
 
-        A := newSession(providerFactory(), "Test-Alice")
-        B := newSession(providerFactory(), "Test-Bob")
-
-        fmt.Printf("%s's encryptKey %v\n", A.UserName, A.encryptKey)
-        fmt.Printf("%s's encryptKey %v\n", B.UserName, B.encryptKey)
+        A := newSession(providerFactory(), "Alice")
+        B := newSession(providerFactory(), "Bob")
 
         doProviderTest(A, B)
 
@@ -52,7 +49,7 @@ func TestFileSysSKI(t *testing.T) {
 func doProviderTest(A, B *testSession) {
 
     // 1) Generate a new community key (on A)
-    communityKeyRef, err := A.GenerateNewKey(ski.KeyType_SYMMETRIC_KEY, A.CommunityKey.KeyringName)
+    err := A.GetLatestKey(&A.CommunityKey, ski.KeyType_SYMMETRIC_KEY)
     if err != nil {
         gTesting.Fatal(err)
     }
@@ -60,12 +57,12 @@ func doProviderTest(A, B *testSession) {
     // 2) export the community key from A
     opBuf := A.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_EXPORT_TO_PEER,
-        OpKey: A.encryptKey,
-        PeerPubKey: B.encryptKey.PubKey,
+        OpKey: &A.P2PKey,
+        PeerPubKey: B.P2PKey.PubKey,
         TomeIn: &ski.KeyTome{
             Keyrings: []*ski.Keyring{
                 &ski.Keyring{
-                    Name: communityKeyRef.KeyringName,
+                    Name: A.CommunityKey.KeyringName,
                 },
             },
         },
@@ -75,8 +72,8 @@ func doProviderTest(A, B *testSession) {
     opBuf = B.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_IMPORT_FROM_PEER,
         BufIn: opBuf,
-        OpKey: B.encryptKey,
-        PeerPubKey: A.encryptKey.PubKey,
+        OpKey: &B.P2PKey,
+        PeerPubKey: A.P2PKey.PubKey,
     })
 
 
@@ -86,7 +83,7 @@ func doProviderTest(A, B *testSession) {
 	opBuf = A.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_ENCRYPT_SYM,
         BufIn: clearMsg,
-        OpKey: communityKeyRef,
+        OpKey: &A.CommunityKey,
     })
 
     encryptedAtoB := opBuf
@@ -95,7 +92,7 @@ func doProviderTest(A, B *testSession) {
 	opBuf = B.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_DECRYPT_SYM,
         BufIn: encryptedAtoB,
-        OpKey: communityKeyRef,
+        OpKey: &B.CommunityKey,
     })
 
     decryptedMsg := opBuf
@@ -104,13 +101,13 @@ func doProviderTest(A, B *testSession) {
 	opBuf = B.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_ENCRYPT_SYM,
         BufIn: decryptedMsg,
-        OpKey: communityKeyRef,
+        OpKey: &B.CommunityKey,
     })
     encryptedBtoA := opBuf
 	opBuf = A.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_DECRYPT_SYM,
         BufIn: encryptedBtoA,
-        OpKey: communityKeyRef,
+        OpKey: &A.CommunityKey,
     })
 
     // 7) Did the round trip work?
@@ -132,7 +129,7 @@ func doProviderTest(A, B *testSession) {
         _, opErr := B.DoOp(ski.CryptOpArgs{
             CryptOp: ski.CryptOp_DECRYPT_SYM,
             BufIn: badMsg,
-            OpKey: communityKeyRef,
+            OpKey: &B.CommunityKey,
         })
         if opErr == nil {
             gTesting.Fatal("there should have been a decryption error!")
@@ -143,8 +140,6 @@ func doProviderTest(A, B *testSession) {
 
 type testSession struct {
     ski.SessionTool 
-
-    encryptKey *ski.KeyRef
 }
 
 
@@ -167,7 +162,7 @@ func (ts *testSession) doOp(inOpArgs ski.CryptOpArgs) []byte {
 
 
 // test setup helper
-func newSession(skiProvider ski.Provider, inUserName string) *testSession {
+func newSession(skiProvider ski.CryptoProvider, inUserName string) *testSession {
 
     tool, err := ski.NewSessionTool(
         skiProvider,
@@ -180,15 +175,7 @@ func newSession(skiProvider ski.Provider, inUserName string) *testSession {
 
     ts := &testSession{
         *tool,
-        nil,
     }
-
-    userName := []byte(inUserName)
-
-    ts.encryptKey, err = ts.GenerateNewKey(
-        ski.KeyType_ASYMMETRIC_KEY, 
-        append(gCommunityID[:], userName...),
-    )
 
     return ts
 }

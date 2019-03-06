@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	//"crypto/rand"
+    log "github.com/sirupsen/logrus"
 
 	"golang.org/x/crypto/sha3"
 
@@ -141,6 +142,8 @@ func (mgr *KeyTomeMgr) Clear() {
 
 // FetchKey returns the first KeyEntry in the specified key set with a matching pub key prefix.
 //
+// If len(inPubKeyPrefix) == 0, then the newest key on the specified is returned.
+//
 // THREADSAFE
 func (mgr *KeyTomeMgr) FetchKey(
 	inKeyringName  []byte,
@@ -157,7 +160,9 @@ func (mgr *KeyTomeMgr) FetchKey(
 	kr := mgr.keyTome.FetchKeyring(inKeyringName)
 	if kr == nil || len(kr.Keys) == 0 {
 		err = plan.Errorf(nil, plan.KeyringNotFound, "keyring %v not found", inKeyringName)
-	} else {
+	} else if len(inPubKeyPrefix) == 0 {
+		match = kr.FetchNewestKey()
+    } else {
 		match = kr.FetchKeyWithPrefix(inPubKeyPrefix)
 	}
 
@@ -493,8 +498,6 @@ func (kr *Keyring) FetchNewestKey() *KeyEntry {
 	return newest
 }
 
-//
-// if len(PubKeyPrefix) == 0, then Keyring.DefaultPubKey is used to lookup the key.
 
 // FetchKeyring returns the named Keyring (or nil if not found).
 //
@@ -819,81 +822,31 @@ func GenerateNewKeys(
 	return newKeys, nil
 }
 
-// SessionTool is a small set of util functions for creating a SKI session.
-type SessionTool struct {
-	UserName      string
-	Session       Session
-	CryptoKitID   CryptoKitID
-	CommunityKey  KeyRef
-	encryptPubKey KeyRef
-}
-
-// NewSessionTool creates a new tool for helping manage a SKI session.
-func NewSessionTool(
-	inProvider Provider,
-	inUserID string,
-	inCommunityID []byte,
-) (*SessionTool, error) {
-
-	st := &SessionTool{
-		UserName: inUserID,
-		CommunityKey: KeyRef{
-			KeyringName: inCommunityID,
-		},
-	}
-
-	path, err := plan.UseLocalDir(inUserID)
-	if err != nil {
-		return nil, err
-	}
-
-	st.Session, err = inProvider.StartSession(SessionParams{
-		Invocation: plan.Block{
-			Label: inProvider.InvocationStr(),
-		},
-		BaseDir: path,
-	})
-
-	return st, err
-}
-
-// DoOp performs the given op, blocking until completion
-func (st *SessionTool) DoOp(inArgs CryptOpArgs) ([]byte, error) {
-
-	out, err := st.Session.DoCryptOp(&inArgs)
-	if err != nil {
-		return nil, err
-	}
-
-	return out.BufOut, nil
-}
-
 // GenerateNewKey creates a new key, blocking until completion
-func (st *SessionTool) GenerateNewKey(
+func GenerateNewKey(
+    inSession Session,
 	inKeyType KeyType,
+    inCryptoKitID CryptoKitID,
 	inKeyringName []byte,
 ) (*KeyRef, error) {
 
-	out, err := st.Session.DoCryptOp(&CryptOpArgs{
-		CryptOp: CryptOp_GENERATE_KEYS,
-		TomeIn: &KeyTome{
-			Keyrings: []*Keyring{
-				&Keyring{
-					Name: inKeyringName,
-					Keys: []*KeyEntry{
-						&KeyEntry{
-							KeyType:     inKeyType,
-							CryptoKitId: st.CryptoKitID,
-						},
-					},
-				},
-			},
-		},
+	tomeOut, err := inSession.GenerateKeys(&KeyTome{
+        Keyrings: []*Keyring{
+            &Keyring{
+                Name: inKeyringName,
+                Keys: []*KeyEntry{
+                    &KeyEntry{
+                        KeyType:     inKeyType,
+                        CryptoKitId: inCryptoKitID,
+                    },
+                },
+            },
+        },
 	})
 
 	var kr *Keyring
-	if err == nil && out != nil && out.TomeOut != nil && out.TomeOut.Keyrings[0] != nil {
-		kr = out.TomeOut.Keyrings[0]
+	if err == nil && tomeOut != nil && tomeOut.Keyrings[0] != nil {
+		kr = tomeOut.Keyrings[0]
 	}
 
 	if kr == nil || kr.Keys[0] == nil {
@@ -910,9 +863,148 @@ func (st *SessionTool) GenerateNewKey(
 	}, nil
 }
 
+// SessionTool is a small set of util functions for creating a SKI session.
+type SessionTool struct {
+	UserID        string
+	Session       Session
+	CryptoKitID   CryptoKitID
+	CommunityKey  KeyRef
+	P2PKey        KeyRef
+}
+
+// NewSessionTool creates a new tool for helping manage a SKI session.
+func NewSessionTool(
+	inProvider    CryptoProvider,
+	inUserID      string,
+	inCommunityID []byte,
+) (*SessionTool, error) {
+
+	st := &SessionTool{
+		UserID: inUserID,
+		CommunityKey: KeyRef{
+			KeyringName: inCommunityID,
+		},
+        P2PKey: KeyRef{
+            KeyringName: append([]byte(inUserID), inCommunityID...),
+        },
+	}
+
+	path, err := plan.UseLocalDir(inUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	st.Session, err = inProvider.StartSession(SessionParams{
+		Invocation: plan.Block{
+			Label: inProvider.InvocationStr(),
+		},
+		BaseDir: path,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+    err = st.GetLatestKey(&st.P2PKey, KeyType_ASYMMETRIC_KEY)
+	if err != nil {
+		return nil, err
+	}
+
+	return st, nil
+}
+
+
+// DoOp performs the given op, blocking until completion
+func (st *SessionTool) DoOp(inArgs CryptOpArgs) ([]byte, error) {
+
+	out, err := st.Session.DoCryptOp(&inArgs)
+	if err != nil {
+		return nil, err
+	}
+
+	return out.BufOut, nil
+}
+
+
+// GetLatestKey updates the given KeyRef with the newest pub key on a given keyring (using ioKeyRef.KeyringName)
+func (st *SessionTool) GetLatestKey(
+    ioKeyRef    *KeyRef, 
+    inAutoCreate KeyType,
+) error {
+
+    latest, err := st.Session.GetLatestKey(ioKeyRef)
+    if plan.IsError(err, plan.KeyringNotFound, plan.KeyEntryNotFound) {
+        if inAutoCreate != KeyType_NULL {
+            latest, err = GenerateNewKey(
+                st.Session,
+                inAutoCreate,
+                st.CryptoKitID,
+                ioKeyRef.KeyringName,
+            )
+            if err == nil {
+                log.Infof("%10s: created %v %v", st.UserID, KeyType_name[int32(inAutoCreate)], BinDesc(latest.PubKey))
+            }
+        }
+    }
+	if err != nil {
+		return err
+	}
+    
+    *ioKeyRef = *latest
+    return nil
+}
+
+
+
 // EndSession ends the current session
 func (st *SessionTool) EndSession(inReason string) {
 
 	st.Session.EndSession(inReason)
 
+}
+
+// FormKeyringForMember forms a keyring name (ski.Keyring.KeyringName) from a standard member ID
+func FormKeyringForMember(
+    memberID    plan.MemberID,
+	communityID []byte,
+) []byte {
+
+    i := 0
+    name := make([]byte, len(communityID) + plan.MemberIDSz)
+    for ; i < plan.MemberIDSz; i++ {
+        name[i] = byte(memberID)
+        memberID >>= 8
+    }
+    copy(name[i:], communityID)
+
+    return name
+}
+
+// BinDesc returns a base64 encoding of a binary string, limiting it to a short number of character for debugging and logging.
+func BinDesc(inBinStr []byte) string {
+
+    binStr := inBinStr
+
+    const limit = 12
+    alreadyASCII := true
+    for _, b := range binStr {
+        if b < 32 || b > 126 {
+            alreadyASCII = false
+            break
+        }
+    }
+
+    suffix := ""
+    if len(binStr) > limit {
+        binStr = binStr[:limit]
+        suffix = "…"
+    }
+
+    outStr := ""
+    if alreadyASCII {
+        outStr = string(binStr)
+    } else {
+        outStr = plan.Base64.EncodeToString(binStr)
+    }
+
+    return outStr + suffix
 }
