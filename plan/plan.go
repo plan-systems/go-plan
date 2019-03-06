@@ -35,8 +35,11 @@ const (
 	// It's "modest-sized" since a newly generated key must pass collision checks before it's put into use.
 	KeyIDSz = 16
 
-	// ChannelIDSz specifies the byte size of a channel ID
+	// ChannelIDSz specifies the byte size of a ChannelID
     ChannelIDSz = 16
+
+    // MemberIDSz is the byte size of a MemberID
+    MemberIDSz = 8
 
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
 	MemberAliasMaxLen = 127
