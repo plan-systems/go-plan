@@ -81,27 +81,6 @@ func (enc *dsEncoder) checkReady() error {
 	return nil
 }
 
-// GenerateNewAccount -- See TxnEncoder
-func (enc *dsEncoder) GenerateNewAccount(
-    inSession ski.Session,
-    ioKeyRef *ski.KeyRef,
-) error {
-
-    newKey, err := ski.GenerateNewKey(
-        inSession,
-        ski.KeyType_SIGNING_KEY,
-        enc.cryptoKitID,
-        ioKeyRef.KeyringName,
-    )
-    if err != nil {
-        log.WithError(err).Infof("failed to gen key for %v", ioKeyRef.DebugDesc())
-        return err
-    }
-
-    *ioKeyRef = *newKey
-
-    return nil
-}
 
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
 func (enc *dsEncoder) EncodeToTxns(

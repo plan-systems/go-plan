@@ -8,10 +8,6 @@ import (
 	"github.com/plan-systems/go-plan/ski"
 )
 
-const (
-	txnEncodingDesc1 = "/plan/pdi/encoding/datastore/1"
-    txnCryptoKitID = ski.CryptoKitID_NaCl
-)
 
 // dsDecoder implements pdi.TxnDecoder
 type dsDecoder struct {
@@ -69,7 +65,7 @@ func (dec *dsDecoder) DecodeRawTxn(
 		return nil, plan.Error(err, plan.FailedToUnmarshal, "failed to unmarshal txnInfo")
 	}
 
-	// 2) Extract the payload buf
+	// 2) Isolate the payload buf
 	end := pos + txnInfo.SegSz
 	if end > txnLen {
 		return nil, plan.Errorf(nil, plan.FailedToUnmarshal, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
@@ -88,25 +84,28 @@ func (dec *dsDecoder) DecodeRawTxn(
         dec.mutex.Lock()
     }
 
-	// 4) Prep the hasher so we can generate a digest
-	hashKit, ok := dec.hashKits[txnInfo.HashKitId]
-	if ! ok {
-		var err error
-		hashKit, err = ski.NewHashKit(txnInfo.HashKitId)
-		if err != nil {
-			return nil, err
-		}
-		dec.hashKits[txnInfo.HashKitId] = hashKit
-	}
+    {
+        // 4) Prep the hasher so we can generate a digest
+        hashKit, ok := dec.hashKits[txnInfo.HashKitId]
+        if ! ok {
+            var err error
+            hashKit, err = ski.NewHashKit(txnInfo.HashKitId)
+            if err != nil {
+                return nil, err
+            }
+            dec.hashKits[txnInfo.HashKitId] = hashKit
+        }
 
-    miscBuf := make([]byte, 0, pdi.UTIDBinarySz + hashKit.HashSz)
+        // Use a single allocation for the UTID backing buf and the hash digest buf
+        miscBuf := make([]byte, 0, pdi.UTIDBinarySz + hashKit.HashSz)
 
-	// 5) Calculate the hash digest and thus UTID of the raw txn
-	hashKit.Hasher.Reset()
-	hashKit.Hasher.Write(rawTxn[:txnLen])
-	txnInfo.TxnHashname = hashKit.Hasher.Sum(miscBuf)
-    txnInfo.UTID = pdi.UTIDFromInfo(miscBuf[hashKit.HashSz:hashKit.HashSz], txnInfo.TimeSealed, txnInfo.TxnHashname)
-
+        // 5) Calculate the hash digest and thus UTID of the raw txn
+        hashKit.Hasher.Reset()
+        hashKit.Hasher.Write(rawTxn[:txnLen])
+        txnInfo.TxnHashname = hashKit.Hasher.Sum(miscBuf)
+        txnInfo.UTID = pdi.UTIDFromInfo(miscBuf[hashKit.HashSz:hashKit.HashSz], txnInfo.TimeSealed, txnInfo.TxnHashname)
+    }
+    
     if dec.theadsafe {
         dec.mutex.Unlock()
     }
