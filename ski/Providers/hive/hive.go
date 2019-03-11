@@ -136,8 +136,10 @@ func (session *Session) dbPathname() string {
     if len(session.Params.BaseDir) == 0 {
         return ""
     }
+
+    filename := session.Params.StoreName + ".CryptoProvider.hive.pb"
     
-    return path.Join(session.Params.BaseDir, "ski.CryptoProvider.hive.pb")
+    return path.Join(session.Params.BaseDir, filename)
 }
 
 
@@ -161,7 +163,7 @@ func (session *Session) loadFromFile() error {
 
             // If file doesn't exist, don't consider it an error
             if os.IsNotExist(err) {
-                err = nil
+                err = nil //os.MkdirAll(path.Dir(pathname), plan.DefaultFileMode)
             } else {
                 err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key tome %v", pathname)
             }
@@ -268,18 +270,15 @@ func (session *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error)
 }
 
 
-// GetLatestKey -- see ski.Session
-func (session *Session) GetLatestKey(in *ski.KeyRef) (*ski.KeyRef, error) {
+// FetchKeyInfo -- see ski.Session
+func (session *Session) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
 
-    opKey, err := session.keyTomeMgr.FetchKey(in.KeyringName, nil)
+    opKey, err := session.keyTomeMgr.FetchKey(inKeyRef.KeyringName, nil)
     if err != nil {
         return nil, err
     }
 
-    return &ski.KeyRef{
-        KeyringName: in.KeyringName,
-        PubKey:      opKey.PubKey,
-    }, nil
+    return opKey.KeyInfo, nil
 
 }
 
@@ -322,8 +321,8 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
         } else {
             opKey, err = session.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
             if err == nil {
-                opOut.OpPubKey = opKey.PubKey
-                cryptoKit, err = ski.GetCryptoKit(opKey.CryptoKitId)
+                opOut.OpPubKey = opKey.KeyInfo.PubKey
+                cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKit)
             }
         }
     }

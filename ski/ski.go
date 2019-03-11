@@ -12,7 +12,7 @@ import (
 
 // Session provides crypto services from an opaque service provider.
 //
-// TODO: make into gRPC service
+// FUTURE: this will become a gRPC service.
 type Session interface {
 
     // Generates a new KeyEntry for each entry in srcTome (based on the entry's KeyType and CryptoKitID, ignoring the rest) and merges it
@@ -20,8 +20,9 @@ type Session interface {
     // See "KeyGen mode" notes where KeyEntry is declared. 
     GenerateKeys(srcTome *KeyTome) (*KeyTome, error)
     
-    // Returns a KeyRef for the newest KeyEntry on in.KeyringName (in.PubKey is ignored).
-    GetLatestKey(in *KeyRef) (*KeyRef, error)
+    // Returns a info about a key for the referenced key
+    // If len(inKeyRef.PubKey) == 0, then the newest KeyEntry in the implied Keyring is returned.
+    FetchKeyInfo(inKeyRef *KeyRef) (*KeyInfo, error)
 
     // Performs signing, encryption, and decryption.
     DoCryptOp(inArgs *CryptOpArgs) (*CryptOpOut, error)
@@ -38,7 +39,7 @@ type Session interface {
 // SessionParams is a convenience struct used for ski.Provider.StartSession()
 type SessionParams struct {
 	Invocation       plan.Block
-    UserID           []byte
+    StoreName        string
     Passhash         []byte
 	BaseDir          string
 }

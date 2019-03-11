@@ -41,13 +41,14 @@ type ByNewestKey []*KeyEntry
 
 func (a ByNewestKey) Len() int           { return len(a) }
 func (a ByNewestKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByNewestKey) Less(i, j int) bool { return a[i].TimeCreated > a[j].TimeCreated }
+func (a ByNewestKey) Less(i, j int) bool { return a[i].KeyInfo.TimeCreated > a[j].KeyInfo.TimeCreated }
 
-// CompareEntries fully compares two KeyEntrys, sorting first by PubKey, then TimeCreated such that
+
+// CompareKeyInfo fully compares two KeyInfos, sorting first by PubKey, then TimeCreated such that
 //  ewer keys will appear first (descending TimeCreated)
 //
 // If 0 is returned, a and b are identical.
-func CompareEntries(a, b *KeyEntry) int {
+func CompareKeyInfo(a, b *KeyInfo) int {
 
 	diff := bytes.Compare(a.PubKey, b.PubKey)
 
@@ -57,13 +58,26 @@ func CompareEntries(a, b *KeyEntry) int {
 		if diff == 0 {
 			diff = int(a.KeyType - b.KeyType)
 			if diff == 0 {
-				diff = int(a.CryptoKitId - b.CryptoKitId)
-				if diff == 0 {
-					diff = bytes.Compare(a.PrivKey, b.PrivKey)
-				}
+				diff = int(a.CryptoKit - b.CryptoKit)
 			}
 		}
 	}
+
+	return diff
+}
+
+
+
+// CompareKeyEntry fully compares two KeyEntrys.
+//
+// If 0 is returned, a and b are identical.
+func CompareKeyEntry(a, b *KeyEntry) int {
+
+	diff := CompareKeyInfo(a.KeyInfo, b.KeyInfo)
+
+    if diff == 0 {
+        diff = bytes.Compare(a.PrivKey, b.PrivKey)
+    }
 
 	return diff
 }
@@ -75,40 +89,7 @@ type ByNewestPubKey []*KeyEntry
 
 func (a ByNewestPubKey) Len() int           { return len(a) }
 func (a ByNewestPubKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByNewestPubKey) Less(i, j int) bool { return CompareEntries(a[i], a[j]) < 0 }
-
-/*
-
-// InsertEntry inserts the given KeyEntry, inserting such that next entry has a smaller TimeCreated (preserving order).
-// If inEntry is an exact dupe, this function has no effect
-//
-// Pre: this Keyring is assumed to be sorted from newest to older keys (decreasing KeyEntry.TimeCreated)
-func (kr *Keyring) InsertEntry(inEntry *KeyEntry) {
-
-    i := int32(0)
-    N := int32(len(kr.Keys))
-
-    t := inEntry.TimeCreated
-
-    for ; i < N && t < kr.Keys[i].TimeCreated; i++ {
-    }
-
-    pos := i
-
-    // Don't insert if we detect a dupe
-    for ; i < N && t == kr.Keys[i].TimeCreated; i++ {
-        if kr.Keys[i].EqualTo(inEntry) {
-            return
-        }
-    }
-
-    kr.Keys = append(kr.Keys, nil)
-    N++
-    copy(kr.Keys[pos:N-1], kr.Keys[pos+1:N])
-    kr.Keys[pos] = inEntry
-
-}
-*/
+func (a ByNewestPubKey) Less(i, j int) bool { return CompareKeyEntry(a[i], a[j]) < 0 }
 
 // KeyTomeMgr wraps ski.KeyTome, offering threadsafe access and easy serialization.
 type KeyTomeMgr struct {
@@ -230,31 +211,6 @@ func (mgr *KeyTomeMgr) Unmarshal(dAtA []byte) error {
 	return err
 }
 
-// ZeroOut zeros out the private key field of each key in each key set
-func (tome *KeyTome) ZeroOut() {
-
-	for _, keySet := range tome.Keyrings {
-		keySet.ZeroOut()
-	}
-}
-
-/*
-func (tome *KeyTome) Op(
-    inKeyringName []byte,
-) *Keyring {
-
-
-    if !  tome.SortedByName {
-        sort.Sort(ByKeyringName(tome.Keyrings))
-        tome.SortedByName = true
-    }
-
-func (tome *KeyTome) ResortByKey(
-    inKeyringName []byte,
-) *Keyring {
-
-*/
-
 // ZeroOut zeros out the private key field of each contained key and resets the length of Entries.
 func (kr *Keyring) ZeroOut() {
 
@@ -286,17 +242,18 @@ func (kr *Keyring) MergeKeys(srcKeyring *Keyring) int {
 	N := len(srcKeyring.Keys)
 	for i := 0; i < N; i++ {
 		srcEntry := srcKeyring.Keys[i]
+        keyInfo := srcEntry.KeyInfo
 
 		// If we detect a dupe or a bad PubKey, skip it and act as if it's already added
-		match := kr.FetchKeyWithPrefix(srcEntry.PubKey)
-		if match != nil && (CompareEntries(match, srcEntry) == 0 || len(srcEntry.PubKey) < MinPubKeyPrefixSz) {
+		match := kr.FetchKeyWithPrefix(keyInfo.PubKey)
+		if match != nil && (CompareKeyEntry(match, srcEntry) == 0 || len(keyInfo.PubKey) < MinPubKeyPrefixSz) {
 			N--
 			srcKeyring.Keys[i] = srcKeyring.Keys[N]
 			i--
 		} else {
 			if newest == nil {
 				newest = srcEntry
-			} else if srcEntry.TimeCreated >= newest.TimeCreated {
+			} else if keyInfo.TimeCreated >= newest.KeyInfo.TimeCreated {
 				newest = srcEntry
 			}
 		}
@@ -304,7 +261,7 @@ func (kr *Keyring) MergeKeys(srcKeyring *Keyring) int {
 
 	// This maintains the latest pub key
 	if newest != nil {
-		kr.NewestPubKey = newest.PubKey
+		kr.NewestPubKey = newest.KeyInfo.PubKey
 	} else {
 		kr.NewestPubKey = nil
 	}
@@ -344,7 +301,7 @@ func (kr *Keyring) ExportKeyringUsingGuide(
                 for _, srcEntry := range kr.Keys {
                     entry := &KeyEntry{
                         KeyType:     srcEntry.KeyType,
-                        CryptoKitId: srcEntry.CryptoKitId,
+                        CryptoKit: srcEntry.CryptoKit,
                         TimeCreated: srcEntry.TimeCreated,
                         PubKey:      srcEntry.PubKey,
                     }
@@ -406,7 +363,7 @@ func (kr *Keyring) ExportWithGuide(
                 for srcEntry := range kr.Keys {
                     entry := &KeyEntry{
                         KeyType:     srcEntry.KeyType,
-                        CryptoKitId: srcEntry.CryptoKitId,
+                        CryptoKit: srcEntry.CryptoKit,
                         TimeCreated: srcEntry.TimeCreated,
                         PubKey:      srcEntry.PubKey,
                     }
@@ -452,7 +409,7 @@ func (kr *Keyring) ExportWithGuide(
 //
 // O(log n) if SortedByPubKey is set, O(n) otherwise.
 func (kr *Keyring) FetchKeyWithPrefix(
-	PubKeyPrefix []byte,
+	inPubKeyPrefix []byte,
 ) *KeyEntry {
 
 	N := len(kr.Keys)
@@ -461,14 +418,14 @@ func (kr *Keyring) FetchKeyWithPrefix(
 	if kr.SortedByPubKey && N > 3 {
 		pos = sort.Search(N,
 			func(i int) bool {
-				return bytes.Compare(kr.Keys[i].PubKey, PubKeyPrefix) >= 0
+				return bytes.Compare(kr.Keys[i].KeyInfo.PubKey, inPubKeyPrefix) >= 0
 			},
 		)
 	}
 
 	for ; pos < N; pos++ {
 		entry := kr.Keys[pos]
-		if bytes.HasPrefix(entry.PubKey, PubKeyPrefix) {
+		if bytes.HasPrefix(entry.KeyInfo.PubKey, inPubKeyPrefix) {
 			return entry
 		}
 	}
@@ -489,7 +446,7 @@ func (kr *Keyring) FetchNewestKey() *KeyEntry {
 			for _, key := range kr.Keys {
 				if newest == nil {
 					newest = key
-				} else if key.TimeCreated > newest.TimeCreated {
+				} else if key.KeyInfo.TimeCreated > newest.KeyInfo.TimeCreated {
 					newest = key
 				}
 			}
@@ -497,6 +454,23 @@ func (kr *Keyring) FetchNewestKey() *KeyEntry {
 	}
 
 	return newest
+}
+
+// ExportKeysOptions is used with ExportWithGuide()
+type ExportKeysOptions uint32
+const (
+
+	// ErrorOnKeyNotFound - if set, the export attempt will return an error if a given key was not found.   Otherwise, the entry is skipped/dropped.
+	ErrorOnKeyNotFound = 1 << iota
+)
+
+
+// ZeroOut zeros out the private key field of each key in each key set
+func (tome *KeyTome) ZeroOut() {
+
+	for _, keySet := range tome.Keyrings {
+		keySet.ZeroOut()
+	}
 }
 
 
@@ -528,13 +502,7 @@ func (tome *KeyTome) FetchKeyring(
 	return nil
 }
 
-// ExportKeysOptions is used with ExportWithGuide()
-type ExportKeysOptions uint32
-const (
 
-	// ErrorOnKeyNotFound - if set, the export attempt will return an error if a given key was not found.   Otherwise, the entry is skipped/dropped.
-	ErrorOnKeyNotFound = 1 << iota
-)
 
 // ExportUsingGuide walks through inGuide and for each Keyring.Name + KeyEntry.PubKey match, the KeyEntry fields
 //    are copied to a new KeyTome.  When complete, the new KeyTome is marshalled into an output buffer and returned.
@@ -572,11 +540,11 @@ func (tome *KeyTome) ExportUsingGuide(
 				outTome.Keyrings = append(outTome.Keyrings, newkr)
 
 				for _, entry := range krGuide.Keys {
-					match := krSrc.FetchKeyWithPrefix(entry.PubKey)
+					match := krSrc.FetchKeyWithPrefix(entry.KeyInfo.PubKey)
 
 					if match == nil {
 						if (inOpts & ErrorOnKeyNotFound) != 0 {
-							return nil, plan.Errorf(nil, plan.KeyEntryNotFound, "key %v not found to export", entry.PubKey)
+							return nil, plan.Errorf(nil, plan.KeyEntryNotFound, "key %v not found to export", entry.KeyInfo.PubKey)
 						}
 					} else {
 						newkr.Keys = append(newkr.Keys, match)
@@ -594,7 +562,7 @@ func (tome *KeyTome) ExportUsingGuide(
 // If there is a KeyEntry duplicate, the key is ignored and will remain in inSrc
 func (tome *KeyTome) MergeTome(
 	srcTome *KeyTome,
-) {
+) error {
 
 	tome.Rev++
 
@@ -613,6 +581,7 @@ func (tome *KeyTome) MergeTome(
 			continue
 		}
 
+        // TODO: handle generate keys pub_key collision (1:2^128 chance for SYM keys)
 		krDst.MergeKeys(krSrc)
 		keyringsToAdd--
 		srcTome.Keyrings[i] = srcTome.Keyrings[keyringsToAdd]
@@ -629,7 +598,7 @@ func (tome *KeyTome) MergeTome(
 			krSrc.NewestPubKey = nil
 			newest := krSrc.FetchNewestKey()
 			if newest != nil {
-				krSrc.NewestPubKey = newest.PubKey
+				krSrc.NewestPubKey = newest.KeyInfo.PubKey
 			}
 		}
 
@@ -674,18 +643,21 @@ func (tome *KeyTome) GenerateFork(
 		newTome.Keyrings = append(newTome.Keyrings, krDst)
 
 		for i, srcEntry := range krSrc.Keys {
+            srcInfo := srcEntry.KeyInfo
 
-			if kit == nil || kit.CryptoKitID != srcEntry.CryptoKitId {
-				kit, err = GetCryptoKit(srcEntry.CryptoKitId)
+			if kit == nil || kit.CryptoKitID != srcInfo.CryptoKit {
+				kit, err = GetCryptoKit(srcInfo.CryptoKit)
 				if err != nil {
 					return nil, err
 				}
 			}
 
 			newEntry := &KeyEntry{
-				KeyType:     srcEntry.KeyType,
-				CryptoKitId: kit.CryptoKitID,
-				TimeCreated: timeCreated,
+                KeyInfo: &KeyInfo{
+                    KeyType:     srcInfo.KeyType,
+                    CryptoKit:   kit.CryptoKitID,
+                    TimeCreated: timeCreated,
+                },
 			}
 
 			err = kit.GenerateNewKey(
@@ -696,16 +668,13 @@ func (tome *KeyTome) GenerateFork(
 			if err != nil {
 				return nil, err
 			}
-			if srcEntry.KeyType != newEntry.KeyType || kit.CryptoKitID != newEntry.CryptoKitId {
+			if srcInfo.KeyType != newEntry.KeyInfo.KeyType || kit.CryptoKitID != newEntry.KeyInfo.CryptoKit {
 				return nil, plan.Error(nil, plan.KeyGenerationFailed, "generate key altered key type")
 			}
 
 			krDst.Keys[i] = newEntry
 
-			srcEntry.CryptoKitId = newEntry.CryptoKitId
-			srcEntry.TimeCreated = newEntry.TimeCreated
-			srcEntry.PubKey      = newEntry.PubKey
-			srcEntry.PrivKey     = nil
+            *srcInfo = *newEntry.KeyInfo
 		}
 	}
 
@@ -714,17 +683,15 @@ func (tome *KeyTome) GenerateFork(
 
 // EqualTo compares if two key entries are identical/interchangable
 func (entry *KeyEntry) EqualTo(other *KeyEntry) bool {
-	return entry.KeyType != other.KeyType ||
-		entry.CryptoKitId != other.CryptoKitId ||
-		entry.TimeCreated != other.TimeCreated ||
-		bytes.Equal(entry.PrivKey, other.PrivKey) == false ||
-		bytes.Equal(entry.PubKey, other.PubKey) == false
+    a := entry.KeyInfo
+    b := entry.KeyInfo
 
-}
+	return a.KeyType != b.KeyType ||
+		a.CryptoKit != b.CryptoKit ||
+		a.TimeCreated != b.TimeCreated ||
+		bytes.Equal(a.PubKey, b.PubKey) == false ||
+		bytes.Equal(entry.PrivKey, other.PrivKey) == false
 
-// GetKeyID returns the KeyID for this KeyEntry
-func (entry *KeyEntry) GetKeyID() plan.KeyID {
-	return plan.GetKeyID(entry.PubKey)
 }
 
 // ZeroOut zeros out this entry's private key buffer
@@ -761,7 +728,7 @@ func NewHashKit(inID HashKitID) (HashKit, error) {
 
 	switch inID {
 
-	case 0, HashKitID_LegacyKeccak_256:
+	case HashKitID_LegacyKeccak_256:
 		kit.Hasher = sha3.NewLegacyKeccak256()
 
 	case HashKitID_LegacyKeccak_512:
@@ -782,6 +749,7 @@ func NewHashKit(inID HashKitID) (HashKit, error) {
 	return kit, nil
 }
 
+/*
 // GenerateNewKeys is a convenience bulk function for CryptoKit.GenerateNewKey()
 func GenerateNewKeys(
 	inRand io.Reader,
@@ -800,8 +768,8 @@ func GenerateNewKeys(
 
 	for i, keySpec := range inKeySpecs {
 
-		if kit == nil || kit.CryptoKitID != keySpec.CryptoKitId {
-			kit, err = GetCryptoKit(keySpec.CryptoKitId)
+		if kit == nil || kit.CryptoKit != keySpec.CryptoKit {
+			kit, err = GetCryptoKit(keySpec.CryptoKit)
 			if err != nil {
 				return nil, err
 			}
@@ -809,7 +777,7 @@ func GenerateNewKeys(
 
 		newKey := &KeyEntry{
 			KeyType:     keySpec.KeyType,
-			CryptoKitId: kit.CryptoKitID,
+			CryptoKit: kit.CryptoKit,
 			TimeCreated: timeCreated,
 		}
 
@@ -827,14 +795,14 @@ func GenerateNewKeys(
 
 	return newKeys, nil
 }
+*/
 
 // GenerateNewKey creates a new key, blocking until completion
 func GenerateNewKey(
     inSession Session,
-	inKeyType KeyType,
-    inCryptoKitID CryptoKitID,
 	inKeyringName []byte,
-) (*KeyRef, error) {
+    inKeyInfo KeyInfo,
+) (*KeyInfo, error) {
 
 	tomeOut, err := inSession.GenerateKeys(&KeyTome{
         Keyrings: []*Keyring{
@@ -842,8 +810,7 @@ func GenerateNewKey(
                 Name: inKeyringName,
                 Keys: []*KeyEntry{
                     &KeyEntry{
-                        KeyType:     inKeyType,
-                        CryptoKitId: inCryptoKitID,
+                        KeyInfo: &inKeyInfo,
                     },
                 },
             },
@@ -855,19 +822,32 @@ func GenerateNewKey(
 		kr = tomeOut.Keyrings[0]
 	}
 
-	if kr == nil || kr.Keys[0] == nil {
+	if kr == nil || kr.Keys[0] == nil || kr.Keys[0].KeyInfo == nil {
 		return nil, plan.Error(nil, plan.AssertFailed, "no keys returned")
 	}
 
-	if kr.Keys[0].KeyType != inKeyType {
+	if kr.Keys[0].KeyInfo.KeyType !=  inKeyInfo.KeyType {
 		return nil, plan.Error(nil, plan.AssertFailed, "unexpected key type")
 	}
 
-	return &KeyRef{
-		KeyringName: kr.Name,
-		PubKey:      kr.Keys[0].PubKey,
-	}, nil
+	if ! bytes.Equal(inKeyringName, kr.Name) {
+		return nil, plan.Error(nil, plan.AssertFailed, "generate returned different keyring name")
+	}
+
+    return kr.Keys[0].KeyInfo, nil
+
 }
+
+/*
+const (
+    TIDTimestampSz = 6
+    TID
+)
+
+func GenerateEpochID() []byte {
+
+}*/
+
 
 // SessionTool is a small set of util functions for creating a SKI session.
 type SessionTool struct {
@@ -895,16 +875,12 @@ func NewSessionTool(
         },
 	}
 
-	path, err := plan.UseLocalDir(inUserID)
-	if err != nil {
-		return nil, err
-	}
+    var err error
 
 	st.Session, err = inProvider.StartSession(SessionParams{
 		Invocation: plan.Block{
 			Label: inProvider.InvocationStr(),
 		},
-		BaseDir: path,
 	})
 	if err != nil {
 		return nil, err
@@ -937,17 +913,21 @@ func (st *SessionTool) GetLatestKey(
     inAutoCreate KeyType,
 ) error {
 
-    latest, err := st.Session.GetLatestKey(ioKeyRef)
+    ioKeyRef.PubKey = nil
+    
+    keyInfo, err := st.Session.FetchKeyInfo(ioKeyRef)
     if plan.IsError(err, plan.KeyringNotFound, plan.KeyEntryNotFound) {
-        if inAutoCreate != KeyType_NULL {
-            latest, err = GenerateNewKey(
+        if inAutoCreate != KeyType_Unspecified {
+            keyInfo, err = GenerateNewKey(
                 st.Session,
-                inAutoCreate,
-                st.CryptoKitID,
                 ioKeyRef.KeyringName,
+                KeyInfo{
+                    KeyType:inAutoCreate,
+                    CryptoKit: st.CryptoKitID,
+                },
             )
             if err == nil {
-                log.Infof("%10s: created %v %v", st.UserID, KeyType_name[int32(inAutoCreate)], BinDesc(latest.PubKey))
+                log.Infof("%10s: created %v %v", st.UserID, KeyType_name[int32(inAutoCreate)], BinDesc(keyInfo.PubKey))
             }
         }
     }
@@ -955,7 +935,8 @@ func (st *SessionTool) GetLatestKey(
 		return err
 	}
     
-    *ioKeyRef = *latest
+    ioKeyRef.PubKey = keyInfo.PubKey
+
     return nil
 }
 
@@ -984,22 +965,6 @@ func FormKeyringNameForMember(
         krName[i] ^= byte(memberID)
         memberID >>= 8
     }
-
-    return krName
-}
-
-// FormKeyringNameForStorage forms a keyring name for the given storage ID
-func FormKeyringNameForStorage(
-    storageID   plan.StorageID,
-	communityID []byte,
-) []byte {
-
-    krName := make([]byte, len(communityID))
-    copy(krName, communityID)
-
-    // Ensure that no collision is possible with FormKeyringNameForMember() for all possible values
-    krName[0] ^= byte(storageID)
-    krName[8] ^= byte(storageID >> 8)
 
     return krName
 }
@@ -1037,4 +1002,302 @@ func BinDesc(inBinStr []byte) string {
     }
 
     return outStr + suffix
+}
+
+
+/*
+// FormMemberID returns a pseudo-random hash from a given seed string and community ID.
+func FormMemberID(
+    inSeedStr   string,
+    inEpoch     *pdi.StorageEpoch,
+) uint64 {
+
+    kit, _ := NewHashKit(HashKitID_LegacyKeccak_256)
+    kit.Hasher.Reset()
+    kit.Hasher.Write(inEpoch.CommunityId)
+    kit.Hasher.Write(inEpoch.EpochId)
+    kit.Hasher.Write([]byte(inSeedStr))
+
+    var buf [64]byte
+    kit.Hasher.Sum(buf[:0])
+
+
+    var memID uint64
+    for i := 0; i < 8; i++ {
+        memID = (memID << 8) | uint64(buf[i])
+    }
+
+    return memID
+}*/
+
+
+
+// PayloadPacker signs and packs payload buffers IAW ski.SigHeader
+type PayloadPacker struct {
+    signSession Session
+	hashKit        HashKit
+    signingKeyRef *KeyRef
+    signingKey     KeyInfo
+    threadsafe     bool
+    mutex          sync.Mutex
+}
+
+
+// NewPacker creates a new PayloadSigner
+func NewPacker(
+    inMakeThreadsafe bool,
+) PayloadPacker {
+
+	return PayloadPacker{
+        threadsafe:    inMakeThreadsafe,
+        signingKeyRef: &KeyRef{},
+	}
+}
+
+
+// ResetSigner --see TxnEncoder
+func (P *PayloadPacker) ResetSigner(
+	inSession        Session,
+	inSigningKey     KeyRef,
+    inPayloadHashKit HashKitID,
+    outKeyInfo      *KeyInfo,
+) error {
+
+    P.signSession = nil
+    P.signingKeyRef.KeyringName = nil
+    P.signingKey.CryptoKit = 0
+
+    keyEntry, err := inSession.FetchKeyInfo(&inSigningKey)
+    if err != nil {
+        return err
+    }
+    if keyEntry.KeyType != KeyType_SIGNING_KEY {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "not a signing key")
+    }
+
+	P.hashKit, err = NewHashKit(inPayloadHashKit)
+	if err != nil {
+		return err
+	}
+
+    P.signSession = inSession
+
+    P.signingKeyRef.KeyringName = inSigningKey.KeyringName
+    P.signingKeyRef.PubKey      = keyEntry.PubKey
+
+    P.signingKey.KeyType   = keyEntry.KeyType
+    P.signingKey.CryptoKit = keyEntry.CryptoKit
+    P.signingKey.PubKey    = keyEntry.PubKey
+
+    if outKeyInfo != nil {
+        *outKeyInfo = P.signingKey
+    }
+
+    return P.checkReady()
+}
+
+// SignAndPack signs a hash digest and packages it along with the payload and encodinginto into a single composite buffer
+//    that is indented to be decoded via PayloadUnpacker.UnpackAndVerify()
+//
+// THREADSAFE
+func (P *PayloadPacker) SignAndPack(
+    inPayload     []byte,
+    inPayloadEnc  plan.Encoding,
+    inExtraAlloc  int,
+) ([]byte, []byte, error) {
+
+    err := P.checkReady()
+    if err != nil {
+        return nil, nil, err
+    }
+
+    hdr := SigHeader{
+        SignerCryptoKit: P.signingKey.CryptoKit,
+        SignerPubKey:    P.signingKey.PubKey,
+        PayloadHashKit:  P.hashKit.HashKitID,
+        PayloadEncoding: inPayloadEnc,
+        PayloadSz:       int64(len(inPayload)),
+    }
+
+    // Note that hdr doesn't yet have the sig in it, so add extra for that and for the hash digest size
+    extra := inExtraAlloc + P.hashKit.HashSz
+    bufSz := hdr.Size() + 300 + int(hdr.PayloadSz) + extra
+    buf := make([]byte, bufSz)
+
+    if P.threadsafe {
+        P.mutex.Lock()
+    }
+
+    P.hashKit.Hasher.Reset()
+    P.hashKit.Hasher.Write(inPayload)
+    extraPos := bufSz-extra
+    payloadHash := P.hashKit.Hasher.Sum(buf[extraPos:extraPos])
+
+    if len(payloadHash) != P.hashKit.HashSz {
+        return nil, nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
+    }
+    
+    if P.threadsafe {
+        P.mutex.Unlock()
+    }
+
+    out, err := P.signSession.DoCryptOp(&CryptOpArgs{
+        CryptOp: CryptOp_SIGN,
+        BufIn: payloadHash,
+        OpKey: P.signingKeyRef,
+    })
+    if err != nil {
+        return nil, nil, err
+    }
+      
+    hdr.Sig = out.BufOut
+
+
+    // 1) Append the marshalled SigHeader
+    var hdrSz int
+    hdrSz, err = hdr.MarshalTo(buf[2:])
+    if err != nil {
+        return nil, nil, plan.Error(err, plan.MarshalFailed, "failed to marshal SigHeader")
+    }
+    buf[0] = byte(hdrSz)
+    buf[1] = byte(hdrSz >> 8)
+    pos := int64(hdrSz) + 2
+
+    // 2) Append the payload buf
+    copy(buf[pos:pos + hdr.PayloadSz], inPayload)
+    pos += hdr.PayloadSz
+
+    return buf[:pos], payloadHash, nil
+}
+
+
+// checkReady checks if everything is in place to perform SignAndPack(). 
+//
+// THREADSAFE
+func (P *PayloadPacker) checkReady() error {
+
+	if P.hashKit.Hasher == nil {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "payload hasher not set")
+	}
+
+	if P.signSession == nil {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "SKI signing session missing")
+	}
+
+	if len(P.signingKeyRef.KeyringName) == 0 {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "signer keyring name missing")
+	}
+
+    if P.signingKey.CryptoKit == 0 {
+		return plan.Errorf(nil, plan.EncoderSessionNotReady, "signing key CryptoKit not set")
+    }
+
+	return nil
+}
+
+
+// SignedPayload are the params associated with signing a payload buffer.
+type SignedPayload struct {
+    Payload         []byte        // Client payload
+    PayloadEncoding plan.Encoding // Encoding of .Payload
+    HashKit         HashKitID     // The ID of the hash kit that generated .Hash 
+    Hash            []byte        // A hash digest generated from .Payload
+    Sig             []byte        // Signature of .Hash by .Signer
+    Signer          KeyInfo       // The pub key that orginated .Sig
+}
+
+// PayloadUnpacker unpacks and decodes signed buffers IAW ski.SigHeader
+type PayloadUnpacker struct {
+    threadsafe   bool
+    mutex        sync.Mutex
+	hashKits     map[HashKitID]HashKit
+}
+
+// NewUnpacker creates a new 
+func NewUnpacker(
+    inMakeThreadsafe bool,
+) PayloadUnpacker {
+    return PayloadUnpacker{
+        threadsafe: inMakeThreadsafe,
+		hashKits:   map[HashKitID]HashKit{},
+    }
+}
+
+
+// UnpackAndVerify decodes the given buffer into its payload and signature components, and verifies the signature.
+// This procedures assumes the signed buf was produced via Signer.SignAndPack()
+// Note: they returned payload buffer is a slice of inSignedBuf.
+func (U* PayloadUnpacker) UnpackAndVerify(
+    inSignedBuf []byte,
+    out *SignedPayload,
+) error {
+
+    var (
+        err error
+        hdr SigHeader
+    )
+
+    pos := uint32(0)
+
+    bufLen := uint32(len(inSignedBuf))
+    if bufLen < 30 {
+		err = plan.Errorf(nil, plan.UnmarshalFailed, "signed buf is too small (len=%v)", bufLen)
+    } 
+
+	// 1) Unmarshal the txn info
+    if err == nil {
+        pos = 2 + uint32(inSignedBuf[0]) | ( uint32(inSignedBuf[1]) << 8 )
+        if pos > bufLen {
+            err = plan.Error(nil, plan.UnmarshalFailed, "payload pos exceeds buf size")
+        }
+    }
+
+    if err == nil {
+        err = hdr.Unmarshal(inSignedBuf[2:pos])
+        if err != nil {
+            err = plan.Error(err, plan.UnmarshalFailed, "failed to unmarshal ski.SigHeader")
+        }
+    }
+
+    if err == nil {
+        if U.threadsafe {
+            U.mutex.Lock()
+        }
+
+        // 4) Prep the hasher so we can generate a digest
+        hashKit, ok := U.hashKits[hdr.PayloadHashKit]
+        if ! ok {
+            var err error
+            hashKit, err = NewHashKit(hdr.PayloadHashKit)
+            if err == nil {
+                U.hashKits[hdr.PayloadHashKit] = hashKit
+            }
+        }
+
+        // 5) Calculate the hash digest and thus UTID of the raw txn
+        if err == nil {
+            hashKit.Hasher.Reset()
+            hashKit.Hasher.Write(inSignedBuf[pos:])
+            out.Hash = hashKit.Hasher.Sum(out.Hash[:0])
+        }
+        
+        if U.threadsafe {
+            U.mutex.Unlock()
+        }
+    }
+
+	// 6) Verify the sig
+    if err == nil {
+	    err = VerifySignature(hdr.Sig, out.Hash, hdr.SignerCryptoKit, hdr.SignerPubKey)
+	}
+
+    out.Payload          = inSignedBuf[pos:]
+    out.PayloadEncoding  = hdr.PayloadEncoding
+    out.HashKit          = hdr.PayloadHashKit
+    out.Sig              = hdr.Sig
+    out.Signer.PubKey    = hdr.SignerPubKey
+    out.Signer.KeyType   = KeyType_SIGNING_KEY
+    out.Signer.CryptoKit = hdr.SignerCryptoKit
+
+    return err
 }

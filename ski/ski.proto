@@ -4,9 +4,10 @@ syntax = "proto3";
 
 package ski;
 
+import "github.com/plan-systems/go-plan/plan/plan.proto";
 
 enum KeyType {
-    NULL                = 0;
+    Unspecified         = 0;
 
     SYMMETRIC_KEY       = 1;
     ASYMMETRIC_KEY      = 2;
@@ -50,20 +51,8 @@ enum CryptOp {
     // If a Keyring or KeyEntry from TomeIn isn't found, an error is returned.
     // On completion, the temp KeyTome is serialized, assigned to CryptOpArgs.BufIn, and ENCRYPT_TO_PEER is executed.
     EXPORT_TO_PEER       = 6;
-
-
 }
 
-/*
-message KeyGenRequest {
-
-                KeyType         key_type                = 1;
-
-                CryptoKitID     crypto_kit_id           = 2;
-
-                bytes           keyring_name            = 3;
-}
-*/
 
 
 message CryptOpArgs {
@@ -113,14 +102,38 @@ enum  HashKitID {
     SHA3_512            = 4;
 }
 
+// KeyInfo specifies info an existing KeyEntry or and KeyEntry this is to be created.
+//
+// KeyInfo exists in two modes/uses:
+//    1) Generated/copied from an existing KeyEntry
+//    2) Key gen mode: used as a guide to generate a new key
+//         a) Fields used: KeyType and CryptoKitID (other fields ignored)
+message KeyInfo {
+
+    // Specifies the type of key this is (optional)
+                KeyType         key_type                = 1;
+
+    // Specifies which crypto suite to invoke.
+                CryptoKitID     crypto_kit              = 2;
+
+   // Unix timestamp when this key was created (or 0 if not set)
+                int64           time_created            = 3;
+
+    // Public part of the key; how this key is also referenced publicly (in base-256 form)
+                bytes           pub_key                 = 4;
+
+
+}
+
+
 message KeyRef {
 
    // Specifies the Keyring that the key resides on (required when referencing a KeyEntry in a KeyTome).
-                bytes           keyring_name              = 1;
+                bytes           keyring_name            = 1;
 
     // The pub key of the key being referenced (or len()==0 to imply the newest key in the cited keyring).
     // Note that the complete pub key isn't required, just a sufficiently long matching prefix (typically 16-64 bytes).
-                bytes           pub_key                   = 2;
+                bytes           pub_key                 = 2;
 
 }
 
@@ -130,21 +143,13 @@ message KeyRef {
 //         a) KeyEntry.PrivKey != nil
 //    2) Ref/Spec mode: used to reference an existing key somewhere else 
 //         a) KeyEntry.PrivKey == nil
-//         b) Fields used: PubKey (other fields ignored)
+//         b) Fields used: KeyInfo.PubKey (other fields ignored)
 //    3) KeyGen mode: used as a guide to generate a new key
-//         a) Fields used: KeyType and CryptoKitID (other fields ignored)
+//         a) Fields used: KeyInfo.KeyType and KeyInfo.CryptoKitID (other fields ignored)
 message KeyEntry {
     
-    // See fields for PubKey
-                KeyType         key_type                = 1;
-                CryptoKitID     crypto_kit_id           = 2;
-
-    // Unix timestamp when this key was created (or 0 if not set)
-                int64           time_created            = 4;
-
-    // Public part of the key; how this key is also referenced publicly (in base-8 form)
-    // When a KeyEntry is being used to specify the generation of a new key, this field is ignored.
-                bytes           pub_key                 = 5;
+    // Info about this key
+                KeyInfo         key_info                = 1;
 
     // Private part of the key -- should be used and copied carefully.
     // When a KeyEntry is used to reference/specify an existing key, this field is not set and/or is ignored.
@@ -160,10 +165,10 @@ message Keyring {
    // When choosing a keyring name, choose more unique and/or random bytes first.  This improves lookup efficiency and performance.
                 bytes           name                    = 1;
 
-    // Ordered list of KeyEntry (potentially sorted by PubKey)
+    // Ordered list of KeyEntry (potentially sorted by KeyInfo.PubKey)
     repeated    KeyEntry        keys                    = 2;
 
-    // If set, []Keys is sorted by KeyEntry.PubKey via ski.CompareEntries() 
+    // If set, []Keys is sorted by KeyInfo.PubKey via ski.CompareEntries() 
                 bool            sorted_by_pub_key       = 3;
 
     // PubKey of the KeyEntry in this keyring that has the largest TimeCreated (or nil if not known/determined)
@@ -187,19 +192,27 @@ message KeyTome {
 
 
 
+message SigHeader {
 
-message SigBlock {
+    // Specifies which crypto kit to invoke for sig verification
+                CryptoKitID     signer_crypto_kit       = 1; 
+                bytes           signer_pub_key          = 2;
 
-    // Used to specify an explicit key to sign the given digest.
-    // Can be under-specified indicating that the signer knows which key to use.
-                KeyRef              signee              = 1;
+    // Non-nil if the payload is also encrypted
+                CryptoKitID     sender_crypto_kit       = 3; 
+                bytes           sender_pub_key          = 4;
 
-    // Digest to be signed
-                bytes               digest              = 2;
+    // Signature of the hash digest of the payload, produced by the given crupt
+                bytes           sig                     = 5;
 
-    // Signature corresponding to the digest stored in this SigBlock
-                bytes               sig                 = 3;
-                
+    // Specifies which hash kit to use to perform body hashing
+                HashKitID       payload_hash_kit        = 6;
+
+    // Client-provided value to ease decoding
+                plan.Encoding   payload_encoding        = 7;
+
+    // Byte length of the body/payload.
+                int64           payload_sz              = 8;
 }
 
 

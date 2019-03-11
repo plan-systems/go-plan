@@ -49,7 +49,9 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 	}
 
 	entry := ski.KeyEntry{
-        CryptoKitId: kit.CryptoKitID,
+        KeyInfo: &ski.KeyInfo{
+            CryptoKit: kit.CryptoKitID,
+        },
     }
 
 	var crypt []byte
@@ -60,7 +62,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyType = ski.KeyType_SYMMETRIC_KEY
+		entry.KeyInfo.KeyType = ski.KeyType_SYMMETRIC_KEY
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
@@ -101,19 +103,23 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyType = ski.KeyType_ASYMMETRIC_KEY
+		entry.KeyInfo.KeyType = ski.KeyType_ASYMMETRIC_KEY
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
-		recipient := entry
+		recipient := ski.KeyEntry{
+            KeyInfo: &ski.KeyInfo{},
+        }
+        *recipient.KeyInfo = *entry.KeyInfo
+
 		err = kit.GenerateNewKey(reader, inKeyLen, &recipient)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
 
-		crypt, err = kit.EncryptFor(reader, msgOrig, recipient.PubKey, entry.PrivKey)
+		crypt, err = kit.EncryptFor(reader, msgOrig, recipient.KeyInfo.PubKey, entry.PrivKey)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
@@ -122,7 +128,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 			badMsg = make([]byte, len(crypt))
 		}
 
-		msg, err = kit.DecryptFrom(crypt, entry.PubKey, recipient.PrivKey)
+		msg, err = kit.DecryptFrom(crypt, entry.KeyInfo.PubKey, recipient.PrivKey)
 		if bytes.Compare(msg, msgOrig) != 0 {
 			gTesting.Fatal("asymmetric decrypt failed check")
 		}
@@ -135,7 +141,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 			copy(badMsg, crypt)
 			badMsg[rndPos] += rndAdj
 
-			msg, err = kit.DecryptFrom(badMsg, entry.PubKey, recipient.PrivKey)
+			msg, err = kit.DecryptFrom(badMsg, entry.KeyInfo.PubKey, recipient.PrivKey)
 			if err == nil {
 				gTesting.Fatal("there should have been a decryption error!")
 			}
@@ -149,7 +155,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyType = ski.KeyType_SIGNING_KEY
+		entry.KeyInfo.KeyType = ski.KeyType_SIGNING_KEY
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
@@ -164,7 +170,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 			badMsg = make([]byte, len(crypt))
 		}
 
-		err = kit.VerifySignature(crypt, msgOrig, entry.PubKey)
+		err = kit.VerifySignature(crypt, msgOrig, entry.KeyInfo.PubKey)
 		if err != nil {
 			gTesting.Fatal(err)
 		}
@@ -177,7 +183,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 			copy(badMsg, crypt)
 			badMsg[rndPos] += rndAdj
 
-			err = kit.VerifySignature(badMsg, msgOrig, entry.PubKey)
+			err = kit.VerifySignature(badMsg, msgOrig, entry.KeyInfo.PubKey)
 			if err == nil {
 				gTesting.Fatal("there should have been a sig failed error!")
 			}

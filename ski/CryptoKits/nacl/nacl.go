@@ -59,11 +59,16 @@ var CryptoKit = ski.CryptoKit{
 
         var err error
 
-        switch ioEntry.KeyType {
+        keyInfo := ioEntry.KeyInfo
+        if keyInfo == nil {
+            return plan.Errorf(nil, plan.KeyGenerationFailed, "KeyInfo not set")
+        }
+
+        switch keyInfo.KeyType {
 
             case ski.KeyType_SYMMETRIC_KEY: {
-                ioEntry.PubKey = make([]byte, inRequestedKeyLen)
-                _, err = inRand.Read(ioEntry.PubKey)
+                keyInfo.PubKey = make([]byte, plan.SymmetricPubKeySz)
+                _, err = inRand.Read(keyInfo.PubKey)
                 if err == nil {
                     ioEntry.PrivKey = make([]byte, 32)
                     _, err = inRand.Read(ioEntry.PrivKey)
@@ -73,7 +78,7 @@ var CryptoKit = ski.CryptoKit{
             case ski.KeyType_ASYMMETRIC_KEY: {
                 pubKey, privKey, err := box.GenerateKey(inRand)
                 if err == nil {
-                    ioEntry.PubKey = pubKey[:]
+                    keyInfo.PubKey = pubKey[:]
                     ioEntry.PrivKey = privKey[:]
                 }
             }
@@ -81,17 +86,17 @@ var CryptoKit = ski.CryptoKit{
             case ski.KeyType_SIGNING_KEY: {
                 pubKey, privKey, err := sign.GenerateKey(inRand)
                 if err == nil {
-                    ioEntry.PubKey = pubKey[:]
+                    keyInfo.PubKey = pubKey[:]
                     ioEntry.PrivKey = privKey[:]
                 }
             }
 
             default:
-                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %v}", ioEntry.KeyType)
+                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %v}", keyInfo.KeyType)
         }
 
         if err != nil {
-            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %v}", ioEntry.KeyType)
+            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %v}", keyInfo.KeyType)
         }
 
         return nil
