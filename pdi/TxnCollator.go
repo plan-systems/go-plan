@@ -16,26 +16,27 @@ type DecodedTxn struct {
 }
 
 // DecodeRawTxn is a convenience function for TxnDecoder.DecodeRawTxn()
-func (txn *DecodedTxn) DecodeRawTxn(
+func (seg *DecodedTxn) DecodeRawTxn(
 	inDecoder TxnDecoder,
 ) error {
 
     // Don't even try to decode the txn if it's suspiciously large
-    if len(txn.RawTxn) > TxnSegmentMaxSz + 10000 {
+    if len(seg.RawTxn) > TxnSegmentMaxSz + 10000 {
         return plan.Errorf(nil, plan.TxnFailedToDecode, "txn exceeds safe max segment limit")
     }
 
 	var err error
-	txn.PayloadSeg, err = inDecoder.DecodeRawTxn(txn.RawTxn, &txn.Info)
+	seg.PayloadSeg, err = inDecoder.DecodeRawTxn(seg.RawTxn, &seg.Info)
 	if err != nil {
 		return err
 	}
 
-	txn.UTID = UTID(txn.Info.UTID).String()
-    if len(txn.UTID) < UTIDTimestampStrLen {
+    if len(seg.Info.UTID) < UTIDBinarySz {
         return plan.Errorf(nil, plan.TxnFailedToDecode, "invalid txn UTID") 
     }
     
+	seg.UTID = UTID(seg.Info.UTID).String()
+
 	return nil
 }
 
@@ -97,7 +98,7 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 	// First verify all segments present and calc size
 	for _, seg := range group.Segs {
 
-        if seg.Info.SegTotal != group.Info.SegTotal || seg.Info.PayloadCodec != group.Info.PayloadCodec {
+        if seg.Info.SegTotal != group.Info.SegTotal || seg.Info.PayloadEncoding != group.Info.PayloadEncoding {
             return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed group consistency check", seg.UTID)
         } else if bytes.Compare(seg.Info.PrevUTID, prevUTID) != 0 {
 			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg UTID %v, got %v", seg.UTID, seg.Info.PrevUTID, prevUTID)

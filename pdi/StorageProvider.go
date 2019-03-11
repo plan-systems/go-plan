@@ -6,6 +6,7 @@ import (
 
 	//"google.golang.org/grpc/encoding"
 
+	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
 )
 
@@ -30,14 +31,8 @@ const TxnSegmentMaxSz = 10 * 1024 * 1024
 // TxnEncoder is NOT assumed to be threadsafe unless specified otherswise
 type TxnEncoder interface {
 
-	// GenerateNewAccount gens the necessary key(s) in the given SKI session, in the keyring named ioKeyRef.KeyringName, 
-    //    returning the newly generated pub key (used as an address) in ioKeyRef.PubKey.
-	GenerateNewAccount(
-        inSession ski.Session,
-        ioKeyRef *ski.KeyRef,
-    ) error
-
 	// ResetSigner -- resets how this TxnEncoder signs newly encoded txns in EncodeToTxns().
+    // inFrom is a key created via StorageEpoch.GenerateNewAddr()
 	ResetSigner(
 		inSession ski.Session,
 		inFrom    ski.KeyRef,
@@ -46,11 +41,11 @@ type TxnEncoder interface {
 	// EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
 	// Pre: ResetSigner() must be successfully called.
 	EncodeToTxns(
-		inPayload      []byte,
-		inPayloadCodec PayloadCodec,
-		inTransfers    []*Transfer,
-		inTimeSealed   int64, // If non-zero, this is used in place of the current time
-	) ([]Txn, error)
+		inPayloadData     []byte,
+		inPayloadEncoding plan.Encoding,
+		inTransfers       []*Transfer,
+		inTimeSealed      int64, // If non-zero, this is used in place of the current time
+	) ([]RawTxn, error)
 
 	// Generates a txn that destroys the given address from committing any further txns.
 	//EncodeDestruct(from ski.PubKey) (*Txn, error)
@@ -59,9 +54,6 @@ type TxnEncoder interface {
 // TxnDecoder decodes storage txns native to a specific remote StorageProvider into the original payloads.
 // TxnDecoder is NOT assumed to be threadsafes unless specified otherswise
 type TxnDecoder interface {
-
-	// EncodingDesc returns a string for use about this decoder
-	EncodingDesc() string
 
 	// Decodes a raw txn from a StorageProvider (from a corresponding TxnEncoder)
 	// Also performs signature validation on the given txn, meaning that if no err is returned,
@@ -72,3 +64,58 @@ type TxnDecoder interface {
 		outInfo  *TxnInfo, // If non-nil, populated w/ info extracted from inTxn
 	) ([]byte, error)
 }
+
+
+
+
+
+// StorageKeyringSz is the byte size of the name used to identify a Keyring used for StorageProvider keys
+const StorageKeyringSz = 18
+
+
+// KeyringName returns the binary name for this StorageEpoch, formed from its origin key.
+//
+// Collisions are generally not possible since a StorageEpoch is scoped to a given community ID.
+// Hence, a community ID carries the "heavy lifting" of uniqueness.
+func (epoch *StorageEpoch) KeyringName() []byte {
+
+    keyInfo := epoch.OriginKey
+    if keyInfo == nil || len(keyInfo.PubKey) == 0 || keyInfo.CryptoKit == 0 || keyInfo.KeyType != ski.KeyType_SIGNING_KEY {
+        return nil
+    }
+
+    sz := uint32(len(keyInfo.PubKey))
+    if sz > StorageKeyringSz {
+        sz = StorageKeyringSz
+    }
+
+    return keyInfo.PubKey[:sz]
+}
+
+
+// GenerateNewAddr generates a new signing key on the given SKI session for this StorageEpoch,
+//    returning the newly info about the newly generated pub key (used as an address). 
+func (epoch *StorageEpoch) GenerateNewAddr(
+    inSession ski.Session,
+) (*ski.KeyInfo, error) {
+
+    krName := epoch.KeyringName()
+
+    if len(krName) == 0 {
+        return nil, plan.Error(nil, plan.ParamMissing, "invalid StorageEpoch")
+    }
+
+    keyInfo, err := ski.GenerateNewKey(
+        inSession,
+        epoch.KeyringName(),
+        ski.KeyInfo{
+            KeyType:   epoch.OriginKey.KeyType,
+            CryptoKit: epoch.OriginKey.CryptoKit,
+        },
+    )
+
+    return keyInfo, err
+}
+
+
+

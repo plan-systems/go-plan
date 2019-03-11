@@ -73,7 +73,7 @@ func TestTxnEncoding(t *testing.T) {
 	encodersToTest := []func() (pdi.TxnEncoder, pdi.TxnDecoder){
 		func() (pdi.TxnEncoder, pdi.TxnDecoder) {
 			decoder := NewTxnDecoder(true)
-			encoder, _ := NewTxnEncoder(1000)
+			encoder := NewTxnEncoder(false, 1000)
 			return encoder, decoder
 		},
 	}
@@ -115,25 +115,22 @@ func txnEncodingTest(A *testSession) {
     totalTxns  := 0
     totalPayloads := 0
 
+    
+    
 	// Test agent encode/decode
 	{
         maxSegSize := uint32(10000)
         
 		blobBuf := make([]byte, 500000)
 		decoder := NewTxnDecoder(true)
-		encoder, _ := NewTxnEncoder(maxSegSize)
+		encoder := NewTxnEncoder(false, maxSegSize)
 
 		{
             authorKey := ski.KeyRef{
-                KeyringName: ski.FormKeyringNameForStorage(123, gCommunityID),
+                KeyringName: []byte("encoding test keyring"),
             }
 
-            latest, err := A.Session.GetLatestKey(&authorKey)
-            if latest != nil {
-                authorKey = *latest
-            } else if plan.IsError(err, plan.KeyEntryNotFound, plan.KeyringNotFound) {
-                err = encoder.GenerateNewAccount(A.Session, &authorKey)
-            }
+            err := A.SessionTool.GetLatestKey(&authorKey, ski.KeyType_SIGNING_KEY)
             if err != nil {
                 gTesting.Fatal(err)
             }
@@ -161,7 +158,7 @@ func txnEncodingTest(A *testSession) {
 
 			txnsOut, err := encoder.EncodeToTxns(
 				payload,
-				pdi.PayloadCodec_Unspecified,
+				plan.Encoding_Unspecified,
 				nil,
                 testTime + int64(i),
 			)
@@ -177,7 +174,7 @@ func txnEncodingTest(A *testSession) {
 
 			for idx, txnOut := range txnsOut {
 				decodedTxn := &pdi.DecodedTxn{
-                    RawTxn: txnOut.RawTxn,
+                    RawTxn: txnOut.Bytes,
                 }
 
                 totalTxns++

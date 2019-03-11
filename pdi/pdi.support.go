@@ -11,33 +11,14 @@ import (
 
     "golang.org/x/crypto/sha3"
 
-    "github.com/ethereum/go-ethereum/common/hexutil"
+    //"github.com/ethereum/go-ethereum/common/hexutil"
 
     "encoding/base64"
 )
 
 
-
-// AccountAlloc specifies an deposit values for a given public key (used during storage genesis).
-type AccountAlloc struct {
-    PubKey                  hexutil.Bytes           `json:"pub_key"`
-    Gas                     int64                   `json:"gas"`  
-    Fiat                    int64                   `json:"fiat"`  
-}
-
 // GenesisEpochFilename is the default file name used to store the latest CommunityEpoch
 const GenesisEpochFilename = "genesis.json"
-
-// StorageEpoch contains core params req'd for a community (and StorageProviders for that community) 
-type StorageEpoch struct {
-    CommunityName           string                  `json:"community_name"`
-    CommunityID             hexutil.Bytes           `json:"community_id"`
-    GenesisID               hexutil.Bytes           `json:"genesis_id"`
-    Salt                    hexutil.Bytes           `json:"salt"`
-    StartTime               int64                   `json:"start_time"` 
-    FuelPerKb               int64                   `json:"fuel_per_kb"`         
-    FuelPerTxn              int64                   `json:"fuel_per_txn"`       // Txn fuel cost := FuelPerTxn + FuelPerKb * (len(rawTxn) >> 10)
-}
 
 // EntryVersionMask is a bit mask on EntryCrypt.CryptInfo to extract pdi.EntryVersion
 const EntryVersionMask = 0xFF
@@ -58,7 +39,7 @@ func (entry *EntryCrypt) ComputeDigest() []byte {
 	pos = encodeVarintPdi(scrap[:], pos, entry.CryptInfo)
 
 	hw.Write(scrap[:pos])
-	hw.Write(entry.CommunityKeyId)
+	hw.Write(entry.CommunityPubKey)
 	hw.Write(entry.InfoCrypt)
 	hw.Write(entry.BodyCrypt)
 
@@ -320,15 +301,14 @@ func NewStorageAlert(
 
 
 
-
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
-	inData           []byte,
-    inPayloadCodec   PayloadCodec, 
+	inPayload []byte,
+    inPayloadEncoding plan.Encoding, 
 	inMaxSegmentSize uint32,
 ) ([]*TxnInfo, error) {
 
-    payloadSz := uint32(len(inData))
+    payloadSz := uint32(len(inPayload))
 	bytesRemain := uint32(payloadSz)
 
 	N := (payloadSz + inMaxSegmentSize - 1) / inMaxSegmentSize
@@ -343,7 +323,7 @@ func SegmentIntoTxns(
 		}
 
 		segs = append(segs, &TxnInfo{
-            PayloadCodec: inPayloadCodec,
+            PayloadEncoding: inPayloadEncoding,
             SegSz: segSz,
 		})
 
@@ -366,10 +346,9 @@ func SegmentIntoTxns(
 
 
 
-
 // Base64 is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
 // See comments for TxnInfo.UTID in pdi.proto
-var Base64 = base64.NewEncoding("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~").WithPadding(base64.NoPadding)
+var Base64 = base64.NewEncoding(plan.Base64CharSet).WithPadding(base64.NoPadding)
 
 
 const (
@@ -445,9 +424,9 @@ func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
     var raw []byte
     {
         sz := len(in)
-        newSz := sz + utidLen
-        if cap(in) >= newSz {
-            raw = in[sz:newSz]
+        needed := sz + utidLen
+        if cap(in) >= needed {
+            raw = in[sz:needed]
         } else {
             raw = make([]byte, utidLen)
         }
@@ -481,8 +460,8 @@ func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
 // Deposit deposits the given transfer into this account
 func (acct *StorageAccount) Deposit(xfer *Transfer) error {
 
-    acct.FuelBalance += xfer.Fuel
-    acct.ManaBalance += xfer.Mana
+    acct.KbBalance += xfer.Kb
+    acct.TxBalance += xfer.Tx
 
     return nil
 }
@@ -491,22 +470,23 @@ func (acct *StorageAccount) Deposit(xfer *Transfer) error {
 // Withdraw subtracts the given transfer amount from this account
 func (acct *StorageAccount) Withdraw(xfer *Transfer) error {
 
-    if xfer.Fuel < 0 {
+    if xfer.Kb < 0 {
         return plan.Errorf(nil, plan.TransferFailed, "fuel transfer amount can't be negative")
     }
-    if xfer.Mana < 0 {
+    if xfer.Tx < 0 {
         return plan.Errorf(nil, plan.TransferFailed, "mana transfer amount can't be negative")
     }
 
-    if acct.FuelBalance < xfer.Fuel {
+    if acct.KbBalance < xfer.Kb {
         return plan.Error(nil, plan.TransferFailed, "insufficient fuel for transfer")
     }
-    acct.FuelBalance -= xfer.Fuel
+    acct.KbBalance -= xfer.Kb
 
-    if acct.ManaBalance < xfer.Mana {
+    if acct.TxBalance < xfer.Tx {
         return plan.Error(nil, plan.TransferFailed, "insufficient mana for transfer")
     }
-    acct.ManaBalance -= xfer.Mana
+    acct.TxBalance -= xfer.Tx
 
     return nil
 }
+
