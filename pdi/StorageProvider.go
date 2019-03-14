@@ -73,14 +73,14 @@ type TxnDecoder interface {
 const StorageKeyringSz = 18
 
 
-// KeyringName returns the binary name for this StorageEpoch, formed from its origin key.
+// StorageKeyringName returns the binary name for this StorageEpoch, formed from its origin key.
 //
 // Collisions are generally not possible since a StorageEpoch is scoped to a given community ID.
 // Hence, a community ID carries the "heavy lifting" of uniqueness.
-func (epoch *StorageEpoch) KeyringName() []byte {
+func (epoch *StorageEpoch) StorageKeyringName() []byte {
 
     keyInfo := epoch.OriginKey
-    if keyInfo == nil || len(keyInfo.PubKey) == 0 || keyInfo.CryptoKit == 0 || keyInfo.KeyType != ski.KeyType_SIGNING_KEY {
+    if keyInfo == nil || len(keyInfo.PubKey) == 0 || keyInfo.CryptoKit == 0 || keyInfo.KeyType != ski.KeyType_SigningKey {
         return nil
     }
 
@@ -92,14 +92,13 @@ func (epoch *StorageEpoch) KeyringName() []byte {
     return keyInfo.PubKey[:sz]
 }
 
-
 // GenerateNewAddr generates a new signing key on the given SKI session for this StorageEpoch,
-//    returning the newly info about the newly generated pub key (used as an address). 
+//    returning the newly generated pub key (used as an address on a StorageProvider network). 
 func (epoch *StorageEpoch) GenerateNewAddr(
     inSession ski.Session,
-) (*ski.KeyInfo, error) {
+) ([]byte, error) {
 
-    krName := epoch.KeyringName()
+    krName := epoch.StorageKeyringName()
 
     if len(krName) == 0 {
         return nil, plan.Error(nil, plan.ParamMissing, "invalid StorageEpoch")
@@ -107,15 +106,17 @@ func (epoch *StorageEpoch) GenerateNewAddr(
 
     keyInfo, err := ski.GenerateNewKey(
         inSession,
-        epoch.KeyringName(),
+        krName,
         ski.KeyInfo{
             KeyType:   epoch.OriginKey.KeyType,
             CryptoKit: epoch.OriginKey.CryptoKit,
         },
     )
+    if err != nil {
+        return nil, err
+    }
 
-    return keyInfo, err
+    return keyInfo.PubKey, nil
 }
-
 
 

@@ -1,7 +1,7 @@
 package datastore
 
 import (
-	"os"
+	//"os"
 	"bytes"
 	"math/rand"
 	"testing"
@@ -18,7 +18,6 @@ var gTestBuf = "May PLAN empower organizations and individuals, and may it be an
 
 var gTesting *testing.T
 var gCommunityID = []byte{0, 1, 2, 3, 4, 5, 5, 7, 99, 123}
-var gDefaultFileMode = os.FileMode(0775)
 
 func TestVarAppendBuf(t *testing.T) {
 
@@ -68,18 +67,15 @@ func TestVarAppendBuf(t *testing.T) {
 func TestTxnEncoding(t *testing.T) {
 
 	gTesting = t
+ 
+    session, err := hive.StartSession("", "test", nil)
+    if err != nil {
+        gTesting.Fatal(err)
+    }
 
-	// Register providers to test
-	encodersToTest := []func() (pdi.TxnEncoder, pdi.TxnDecoder){
-		func() (pdi.TxnEncoder, pdi.TxnDecoder) {
-			decoder := NewTxnDecoder(true)
-			encoder := NewTxnEncoder(false, 1000)
-			return encoder, decoder
-		},
-	}
 
 	tool, err := ski.NewSessionTool(
-		hive.NewCryptoProvider(),
+		session,
 		"Charles",
 		gCommunityID,
 	)
@@ -87,23 +83,39 @@ func TestTxnEncoding(t *testing.T) {
 		gTesting.Fatal(err)
 	}
 
+    stEpoch, err := NewStorageEpoch(tool.Session, gCommunityID, "encoding-test-epoch", []byte{1, 2, 3, 4})
+	if err != nil {
+		gTesting.Fatal(err)
+	}
+    stEpoch.TxnMaxSize = 10000
+
 	A := &testSession{
 		*tool,
 		nil,
 		nil,
 	}
 
+	// Register providers to test
+	encodersToTest := []func() (pdi.TxnEncoder, pdi.TxnDecoder){
+		func() (pdi.TxnEncoder, pdi.TxnDecoder) {
+			decoder := NewTxnDecoder(true)
+			encoder := NewTxnEncoder(false, *stEpoch)
+			return encoder, decoder
+		},
+	}
+
+
 	for _, createCoders := range encodersToTest {
 
 		A.encoder, A.decoder = createCoders()
 
-		txnEncodingTest(A)
+		txnEncodingTest(A, stEpoch)
 
 		A.EndSession("done A")
 	}
 }
 
-func txnEncodingTest(A *testSession) {
+func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 
     seed := plan.Now().UnixSecs
     //seed = int64(1550730342)
@@ -119,18 +131,17 @@ func txnEncodingTest(A *testSession) {
     
 	// Test agent encode/decode
 	{
-        maxSegSize := uint32(10000)
         
 		blobBuf := make([]byte, 500000)
-		decoder := NewTxnDecoder(true)
-		encoder := NewTxnEncoder(false, maxSegSize)
+		decoder := A.decoder
+		encoder := A.encoder
 
 		{
             authorKey := ski.KeyRef{
                 KeyringName: []byte("encoding test keyring"),
             }
 
-            err := A.SessionTool.GetLatestKey(&authorKey, ski.KeyType_SIGNING_KEY)
+            err := A.SessionTool.GetLatestKey(&authorKey, ski.KeyType_SigningKey)
             if err != nil {
                 gTesting.Fatal(err)
             }
@@ -148,7 +159,7 @@ func txnEncodingTest(A *testSession) {
 		for i := 0; i < 1000; i++ {
             testTime := plan.Now().UnixSecs
 
-			blobLen := int(1 + rand.Int31n(int32(maxSegSize) * 25))
+			blobLen := int(1 + rand.Int31n(int32(stEpoch.TxnMaxSize) * 25))
 
 			payload := blobBuf[:blobLen]
 			rand.Read(payload)

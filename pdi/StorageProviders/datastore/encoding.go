@@ -20,22 +20,58 @@ const (
     // ProtocolDesc appears in StorageEpochs originating from this impl
     ProtocolDesc = "plan/storage/pdi-datastore/1"
 
-    defaultCryptoKit = ski.CryptoKitID_NaCl
-    defaultHashKit   = ski.HashKitID_LegacyKeccak_256
 )
+
+
+// NewStorageEpoch generates a new StorageEpoch, needed when creating a new community.
+func NewStorageEpoch(
+    skiSession       ski.Session,
+    inCommunityID    []byte,
+    inEpochName      string,
+    inGenesisKeyring []byte,
+) (*pdi.StorageEpoch, error) {
+
+    epoch := &pdi.StorageEpoch{
+        StorageProtocol: ProtocolDesc,
+        CommunityID: inCommunityID,
+        TxnHashKit: ski.HashKitID_LegacyKeccak_256,
+        Name: inEpochName,
+        TxnMaxSize: 1000,
+    }
+
+    var err error
+    epoch.OriginKey, err = ski.GenerateNewKey(
+        skiSession,
+        inGenesisKeyring,
+        ski.KeyInfo{
+            KeyType: ski.KeyType_SigningKey,
+            CryptoKit: ski.CryptoKitID_NaCl,
+        },
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    return epoch, err
+}
+
+
+
 
 
 // dsEncoder implements pdi.TxnEncoder
 type dsEncoder struct {
 	pdi.TxnEncoder
 
-    threadsafe   bool
-    mutex        sync.Mutex
+    StorageEpoch  pdi.StorageEpoch
+    threadsafe    bool
+    mutex         sync.Mutex
 
-    scrap        []byte
-    packer       ski.PayloadPacker
-    from         ski.KeyInfo
-	SegmentMaxSz uint32
+    packer        ski.PayloadPacker
+    from          ski.KeyInfo
+
+    // Used to marshal TxnInfo
+    scrap         []byte
 }
 
 
@@ -43,30 +79,14 @@ type dsEncoder struct {
 // If inSegmentMaxSz == 0, then a default size is chosen
 func NewTxnEncoder(
     inMakeThreadsafe bool,
-	inSegmentMaxSz uint32,
+	inStorageEpoch pdi.StorageEpoch,
 ) pdi.TxnEncoder {
 
-	if inSegmentMaxSz <= 0 {
-		inSegmentMaxSz = 100 * 1024
-	}
-
-    maxSz := uint32(pdi.TxnSegmentMaxSz) - 20000
-    if inSegmentMaxSz > maxSz {
-        inSegmentMaxSz = maxSz
-    }
-
 	enc := &dsEncoder{
+        StorageEpoch: inStorageEpoch,
         threadsafe:   inMakeThreadsafe,
         packer:       ski.NewPacker(false),
-		SegmentMaxSz: inSegmentMaxSz,
 	}
-
-    const maxScrapSz = 80000
-    scrapSz := enc.SegmentMaxSz + 2000
-    if enc.SegmentMaxSz > maxScrapSz {
-        scrapSz = maxScrapSz
-    }
-    enc.scrap = make([]byte, scrapSz)
 
 	return enc
 }
@@ -78,10 +98,10 @@ func (enc *dsEncoder) ResetSigner(
 	inFrom    ski.KeyRef,
 ) error {
 
-	return enc.packer.ResetSigner(
+	return enc.packer.ResetSession(
         inSession, 
         inFrom, 
-        defaultHashKit,
+        enc.StorageEpoch.TxnHashKit,
         &enc.from)
 
 }
@@ -90,6 +110,7 @@ func (enc *dsEncoder) ResetSigner(
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
 func (enc *dsEncoder) EncodeToTxns(
 	inPayload         []byte,
+//    inPayloadName     []byte,
 	inPayloadEnc      plan.Encoding,
 	inTransfers       []*pdi.Transfer,
     timeSealed        int64,
@@ -98,7 +119,7 @@ func (enc *dsEncoder) EncodeToTxns(
 	segs, err := pdi.SegmentIntoTxns(
 		inPayload,
 		inPayloadEnc,
-		enc.SegmentMaxSz,
+		enc.StorageEpoch.TxnMaxSize,
 	)
 	if err != nil {
 		return nil, err
@@ -117,13 +138,12 @@ func (enc *dsEncoder) EncodeToTxns(
     {
         pos := uint32(0)
 
-
         // We have a mutex b/c of the shared scrap
         if enc.threadsafe {
             enc.mutex.Lock()
         }
 
-        segBuf := enc.scrap
+        scrap := enc.scrap
 
 		for i, seg := range segs {
             
@@ -133,31 +153,30 @@ func (enc *dsEncoder) EncodeToTxns(
                 seg.PrevUTID = txns[i-1].UTID
             }
 
-            totalSz := 2 + seg.Size() + int(seg.SegSz)
-            if totalSz > len(segBuf) {
-                segBuf = make([]byte, totalSz)
+            headerSz := seg.Size()
+            if headerSz > len(scrap) {
+                enc.scrap = make([]byte, headerSz + 200)
+                scrap = enc.scrap
             }
-            totalSz, err = seg.MarshalTo(segBuf[2:])
+            headerSz, err = seg.MarshalTo(scrap)
             if err != nil {
-                return nil, plan.Error(nil, plan.MarshalFailed, "failed to marshal txn")
+                return nil, plan.Error(nil, plan.MarshalFailed, "failed to marshal txn info")
             }
-            segBuf[0] = byte(totalSz)
-            segBuf[1] = byte(totalSz >> 8)
-            totalSz += 2
-            copy(segBuf[totalSz:], inPayload[pos : pos + seg.SegSz])
-            totalSz += int(seg.SegSz)
 
-            var hash []byte
-            txns[i].Bytes, hash, err = enc.packer.SignAndPack(
-                segBuf[:totalSz],
+            packingInfo := ski.PackingInfo{}
+            err = enc.packer.PackAndSign(
                 plan.Encoding_TxnPayloadSegment,
+                scrap[:headerSz],
+                inPayload[pos:pos+seg.SegSz],
                 pdi.UTIDBinarySz,
+                &packingInfo,
             )
             if err != nil {
                 return nil, err
             }
 
-            txns[i].UTID = pdi.UTIDFromInfo(hash, seg.TimeSealed, hash)
+            txns[i].Bytes = packingInfo.SignedBuf
+            txns[i].UTID = pdi.UTIDFromInfo(packingInfo.Extra, seg.TimeSealed, packingInfo.Hash)
 
             pos += seg.SegSz
         }
@@ -173,7 +192,6 @@ func (enc *dsEncoder) EncodeToTxns(
 
 	return txns, nil
 }
-
 
 
 
@@ -209,19 +227,8 @@ func (dec *dsDecoder) DecodeRawTxn(
         return nil, err
     }
 
-    txnLen := uint32(len(out.Payload))
-	if txnLen < 20 {
-		return nil, plan.Errorf(nil, plan.UnmarshalFailed, "txn is too small (txnLen=%v)", txnLen)
-	}
-
-	// 1) Unmarshal the txn info
 	var txnInfo pdi.TxnInfo
-	pos := 2 + uint32(out.Payload[0]) | (uint32(out.Payload[1]) << 8)
-    if pos > txnLen {
-		return nil, plan.Error(nil, plan.UnmarshalFailed, "txnInfo len exceeds txn buf size")
-    }
-
-	if err := txnInfo.Unmarshal(out.Payload[2:pos]); err != nil {
+	if err := txnInfo.Unmarshal(out.Header); err != nil {
 		return nil, plan.Error(err, plan.UnmarshalFailed, "failed to unmarshal TxnInfo")
 	}
 
@@ -230,15 +237,13 @@ func (dec *dsDecoder) DecodeRawTxn(
     txnInfo.UTID = pdi.UTIDFromInfo(out.Hash[len(out.Hash):], txnInfo.TimeSealed, out.Hash)
 
 	// 2) Isolate the payload buf
-	end := pos + txnInfo.SegSz
-	if end > txnLen {
-		return nil, plan.Errorf(nil, plan.UnmarshalFailed, "payload buffer EOS (txnLen=%v, pos=%v, end=%v)", txnLen, pos, end)
+	if txnInfo.SegSz != uint32(len(out.Body)) {
+		return nil, plan.Errorf(nil, plan.UnmarshalFailed, "txn payload buf length doesn't match")
 	}
-	txnPayload := out.Payload[pos:end]
 
 	if outInfo != nil {
 		*outInfo = txnInfo
 	}
 
-	return txnPayload, nil
+	return out.Body, nil
 }
