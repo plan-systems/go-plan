@@ -62,7 +62,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo.KeyType = ski.KeyType_SYMMETRIC_KEY
+		entry.KeyInfo.KeyType = ski.KeyType_SymmetricKey
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
@@ -103,7 +103,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo.KeyType = ski.KeyType_ASYMMETRIC_KEY
+		entry.KeyInfo.KeyType = ski.KeyType_AsymmetricKey
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)
@@ -155,7 +155,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 
 	{
 
-		entry.KeyInfo.KeyType = ski.KeyType_SIGNING_KEY
+		entry.KeyInfo.KeyType = ski.KeyType_SigningKey
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {
 			gTesting.Fatal(err)

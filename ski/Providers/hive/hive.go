@@ -26,9 +26,12 @@ const (
     providerInvocation = "/plan/ski/Provider/hive/1"
 )
 
+// GetSharedKeyDir returns the local dir of where keys are commonly stored
+func GetSharedKeyDir() (string, error) {
+    return plan.UseLocalDir("ski.hive")
+}
 
-
-
+/*
 // CryptoProvider is a local implemention of ski.Provider
 type CryptoProvider struct {
     ski.CryptoProvider
@@ -46,9 +49,12 @@ func NewCryptoProvider() *CryptoProvider {
     return provider
 }
 
-// NewSession initializes the SKI's keyring.
-func (provider *CryptoProvider) NewSession(
-    inPB ski.SessionParams,
+// NewSession starts a new hive SKI session locally, using a locally encrypted file.
+// If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
+func NewSession(
+	BaseDir   string,
+    StoreName string,
+    Passhash  []byte,
 ) *Session {
 	session := &Session{
         parentProvider: provider,
@@ -64,19 +70,23 @@ func (provider *CryptoProvider) NewSession(
 // InvocationStr -- see interface ski.Provider
 func (provider *CryptoProvider) InvocationStr() string {
     return providerInvocation
-}
+} 
+*/
 
-// StartSession starts a new SKI session
-func (provider *CryptoProvider) StartSession(
-    inPB ski.SessionParams,
+// StartSession starts a new hive SKI session locally, using a locally encrypted file.
+// If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
+func StartSession(
+	inBaseDir   string,
+    inStoreName string,
+    Passhash  []byte,
 ) (ski.Session, error) {
 
-    if inPB.Invocation.Label != provider.InvocationStr() {
-        return nil, plan.Errorf(nil, plan.InvocationNotAvailable,  "ski invocation does not match (%s != %s)", inPB.Invocation.Label, provider.InvocationStr())
+	session := &Session{
+        nextAutoSave: time.Now(),
+        BaseDir: inBaseDir,
+        StoreName: inStoreName,
+        keyTomeMgr: ski.NewKeyTomeMgr(),
     }
-
-    session := provider.NewSession(inPB)
-    session.parentProvider = provider
 
     // Bind the request op scope -- TODO
     /*
@@ -91,36 +101,20 @@ func (provider *CryptoProvider) StartSession(
         return nil, err
     }
 
-    provider.sessions = append(provider.sessions, session)
-
     return session, nil
 }
 
-// EndSession ends to given session
-func (provider *CryptoProvider) EndSession(inSession *Session, inReason string) error {
-    for i, session := range provider.sessions {
-        if session == inSession {
-            n := len(provider.sessions)-1
-            provider.sessions[i] = provider.sessions[n]
-            provider.sessions = provider.sessions[:n]
-            return nil
-        }
-    }
-
-    return plan.Error(nil, plan.InvalidSKISession, "ski session not found")
-}
 
 // Session represents a local implementation of the SKI
 type Session struct {
     ski.Session
 
     autoSaveMutex       sync.Mutex
-
-    // TODO: put in mutex!?
-    parentProvider      *CryptoProvider
-    Params              ski.SessionParams
     nextAutoSave        time.Time
     //fsStatus            fsStatus
+
+    StoreName           string
+	BaseDir             string
 
     //allowedOps          [ski.NumKeyDomains]map[string]bool
 
@@ -133,13 +127,13 @@ type Session struct {
 
 func (session *Session) dbPathname() string {
 
-    if len(session.Params.BaseDir) == 0 {
+    if len(session.BaseDir) == 0 || len(session.StoreName) == 0 {
         return ""
     }
 
-    filename := session.Params.StoreName + ".CryptoProvider.hive.pb"
+    filename := session.StoreName + ".CryptoProvider.hive.pb"
     
-    return path.Join(session.Params.BaseDir, filename)
+    return path.Join(session.BaseDir, filename)
 }
 
 
@@ -211,9 +205,9 @@ func (session *Session) saveToFile() error {
             }
 
             if err == nil {
-                err = ioutil.WriteFile(pathname, buf, os.FileMode(0775))
+                err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
                 if err != nil {
-                    err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write key hive %v", pathname)
+                    err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write hive")
                 }
             }
 
@@ -248,7 +242,6 @@ func (session *Session) resetAutoSave() {
 
 // EndSession -- see ski.Session
 func (session *Session) EndSession(inReason string) {
-   session.parentProvider.EndSession(session, inReason)
 
     session.saveToFile()
 
@@ -258,12 +251,28 @@ func (session *Session) EndSession(inReason string) {
 // GenerateKeys -- see ski.Session
 func (session *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
 
-    newKeyTome, err := srcTome.GenerateFork(crypto_rand.Reader, 32)
-    if err != nil {
-        return nil, err
+    // The ONLY reason we'd need to keep trying is natural key collisions. 
+    // If this ever happened, congratulations, you've beaten the odds of a meteor hitting your house.
+    tries := 5
+    
+    for ; tries > 0; tries-- {
+        newKeys, err := srcTome.GenerateFork(crypto_rand.Reader, 32)
+        if err != nil {
+            return nil, err
+        }
+
+        session.keyTomeMgr.MergeTome(newKeys)
+        if len(newKeys.Keyrings) == 0 {
+            break
+        }
+
+        log.WithField("Keyrings", newKeys.Keyrings).Warn("generated keys failed to merge") 
     }
 
-    session.keyTomeMgr.MergeTome(newKeyTome)
+    if tries == 0 {
+        return nil, plan.Error(nil, plan.AssertFailed, "generated keys failed to merge")
+    }
+
     session.bumpAutoSave()
     
     return srcTome, nil

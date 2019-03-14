@@ -66,7 +66,7 @@ var CryptoKit = ski.CryptoKit{
 
         switch keyInfo.KeyType {
 
-            case ski.KeyType_SYMMETRIC_KEY: {
+            case ski.KeyType_SymmetricKey: {
                 keyInfo.PubKey = make([]byte, plan.SymmetricPubKeySz)
                 _, err = inRand.Read(keyInfo.PubKey)
                 if err == nil {
@@ -75,7 +75,7 @@ var CryptoKit = ski.CryptoKit{
                 }
             }
         
-            case ski.KeyType_ASYMMETRIC_KEY: {
+            case ski.KeyType_AsymmetricKey: {
                 pubKey, privKey, err := box.GenerateKey(inRand)
                 if err == nil {
                     keyInfo.PubKey = pubKey[:]
@@ -83,7 +83,7 @@ var CryptoKit = ski.CryptoKit{
                 }
             }
 
-            case ski.KeyType_SIGNING_KEY: {
+            case ski.KeyType_SigningKey: {
                 pubKey, privKey, err := sign.GenerateKey(inRand)
                 if err == nil {
                     keyInfo.PubKey = pubKey[:]

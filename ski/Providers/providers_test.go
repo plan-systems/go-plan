@@ -24,17 +24,10 @@ func TestFileSysSKI(t *testing.T) {
 
     gTesting = t
 
-    // Register providers to test 
-    providersToTest := []func() ski.CryptoProvider{
-        func() ski.CryptoProvider {
-            return hive.NewCryptoProvider()
-        },
-    }
+   {
 
-    for _, providerFactory := range providersToTest {
-
-        A := newSession(providerFactory(), "Alice")
-        B := newSession(providerFactory(), "Bob")
+        A := newSession("Alice")
+        B := newSession("Bob")
 
         doProviderTest(A, B)
 
@@ -49,7 +42,7 @@ func TestFileSysSKI(t *testing.T) {
 func doProviderTest(A, B *testSession) {
 
     // 1) Generate a new community key (on A)
-    err := A.GetLatestKey(&A.CommunityKey, ski.KeyType_SYMMETRIC_KEY)
+    err := A.GetLatestKey(&A.CommunityKey, ski.KeyType_SymmetricKey)
     if err != nil {
         gTesting.Fatal(err)
     }
@@ -162,10 +155,15 @@ func (ts *testSession) doOp(inOpArgs ski.CryptOpArgs) []byte {
 
 
 // test setup helper
-func newSession(skiProvider ski.CryptoProvider, inUserName string) *testSession {
+func newSession(inUserName string) *testSession {
+
+    session, err := hive.StartSession("", "test", nil)
+    if err != nil {
+        gTesting.Fatal(err)
+    }
 
     tool, err := ski.NewSessionTool(
-        skiProvider,
+        session,
         inUserName,
         gCommunityID[:],
     )

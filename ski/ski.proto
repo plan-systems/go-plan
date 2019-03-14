@@ -9,9 +9,9 @@ import "github.com/plan-systems/go-plan/plan/plan.proto";
 enum KeyType {
     Unspecified         = 0;
 
-    SYMMETRIC_KEY       = 1;
-    ASYMMETRIC_KEY      = 2;
-    SIGNING_KEY         = 3;
+    SymmetricKey        = 1;
+    AsymmetricKey       = 2;
+    SigningKey          = 3;
 }
 
 
@@ -194,25 +194,24 @@ message KeyTome {
 
 message SigHeader {
 
-    // Specifies which crypto kit to invoke for sig verification
+    // References a signing key -- who and what crypto kit signed the payload header.
                 CryptoKitID     signer_crypto_kit       = 1; 
                 bytes           signer_pub_key          = 2;
 
-    // Non-nil if the payload is also encrypted
-                CryptoKitID     sender_crypto_kit       = 3; 
-                bytes           sender_pub_key          = 4;
+    // If set, a symmetric key reference used to encrypt the payload header
+    //            CryptoKitID     payload_crypto_info     = 3; 
+    //            bytes           payload_pub_key         = 4;
 
-    // Signature of the hash digest of the payload, produced by the given crupt
-                bytes           sig                     = 5;
+    // Specifies which hash kit to use to perform payload hashing
+                HashKitID       hash_kit                = 6;
 
-    // Specifies which hash kit to use to perform body hashing
-                HashKitID       payload_hash_kit        = 6;
+    // Size of the "header" payload (i.e. the payload that is also hashed and signed)
+                uint32          header_sz       = 7;
+                plan.Encoding   header_encoding  = 8;
 
-    // Client-provided value to ease decoding
-                plan.Encoding   payload_encoding        = 7;
+    // Size of the "body" payload (i.e. the payload that is NOT hashed signed)
+                uint64          body_sz          = 9;
 
-    // Byte length of the body/payload.
-                int64           payload_sz              = 8;
 }
 
 
