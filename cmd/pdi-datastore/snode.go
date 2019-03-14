@@ -7,7 +7,7 @@ import (
     "os"
     "path"
     "io/ioutil"
-    //"strings"
+    "fmt"
     "sync"
     //"time"
     "net"
@@ -34,6 +34,14 @@ import (
 )
 
 
+// GenesisParams is entered by humans
+type GenesisParams struct {
+    CommunityName           string                  `json:"community_name"`
+    CommunityID             hexutil.Bytes           `json:"community_id"`
+    //GenesisAddr             hexutil.Bytes           `json:"genesis_addr"`
+}
+
+
 
 
 
@@ -49,7 +57,7 @@ const (
     CurrentSnodeVersion         = "0.1"
 
     // ConfigFilename is the file name the root stage config resides in
-    ConfigFilename              = "storage-config.json"
+    ConfigFilename              = "config.json"
 
 )
 
@@ -59,11 +67,11 @@ const (
 //     can be instantiated and offer service in parallel, this is not typical operation. Rather,
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
+    flow                        plan.Flow
+
     Stores                      map[plan.CommunityID]*ds.Store
     
     ActiveSessions              pservice.SessionGroup
-
-    ctx                         context.Context
 
     BasePath                    string
     Config                      Config
@@ -135,30 +143,36 @@ func (config *Config) WriteToFile(inPathname string) error {
 
 // NewSnode creates and initializes a new Snode instance
 func NewSnode(
-    inCtx context.Context,
     inBasePath *string,
+    inDoInit bool,
 ) (*Snode, error) {
 
+
     sn := &Snode{
-        ctx: inCtx,
-        grpcDone: make(chan struct{}),
         Stores: make(map[plan.CommunityID]*ds.Store),
     }
-
+    
     sn.ActiveSessions.Init()
 
     var err error
 
-    if inBasePath != nil && len(*inBasePath) > 0 {
-        sn.BasePath = *inBasePath
-    } else {
+    if inBasePath == nil || len(*inBasePath) == 0 {
         sn.BasePath, err = plan.UseLocalDir("Stores")
+    } else {
+        sn.BasePath = *inBasePath
     }
 
     if err == nil {
         err = os.MkdirAll(sn.BasePath, plan.DefaultFileMode)
         if err != nil {
             err = plan.Errorf(err, plan.FailedToAccessPath, "failed to setup Snode.BasePath %v", sn.BasePath)
+        }
+    }
+
+    if err == nil {
+        err = sn.ReadConfig(inDoInit)
+        if err != nil {
+            log.WithError(err).Fatalf("sn.ReadConfig failed")
         }
     }
 
@@ -169,15 +183,96 @@ func NewSnode(
     return sn, nil
 }
 
-// ReadConfig uses sn.BasePath to read in the node config file
-func (sn *Snode) ReadConfig(inInit bool) error {
+// Startup -- see plan.Flow.Startup()
+func (sn *Snode) Startup(inCtx context.Context) (context.Context, error) {
+
+    err := sn.flow.Startup(
+        inCtx,
+        fmt.Sprintf("StorageProvider %x", sn.Config.NodeID[:2]),
+        sn.onInternalStartup,
+        sn.onInternalShutdown,
+    )
+
+    return sn.flow.Ctx, err
+}
+
+// Shutdown -- see plan.Flow.Shutdown()
+func (sn *Snode) Shutdown(
+    inReason string,
+) {
+
+    sn.flow.Shutdown(inReason)
+}
+
+
+
+func (sn *Snode) onInternalStartup() error {
+
+    var err error
+
+
+    for i := range sn.Config.StorageConfigs {
+        info := &sn.Config.StorageConfigs[i]
+        
+        St := ds.NewStore(info, sn.BasePath)
+
+        sn.registerStore(St)
+    }
+
+    for _, St := range sn.Stores {
+        err := St.Startup(sn.flow.Ctx, false)
+        if err != nil {
+            return err
+        }
+    }
+
+    if err == nil {
+        err = sn.startServer()
+    }
+
+    return err
+}
+
+
+
+func (sn *Snode) onInternalShutdown() {
+
+    // Shutdown the Stores FIRST so that all we have to do is wait on the server to stop.
+    storesRunning := &sync.WaitGroup{}
+
+    storesRunning.Add(len(sn.Stores))
+    
+    for _, v := range sn.Stores {
+        St := v
+        go func() {
+            St.Shutdown(sn.flow.ShutdownReason)
+            storesRunning.Done()
+        }()
+    }
+
+    if sn.grpcServer != nil {
+        log.Info("initiating grpc graceful stop")
+        sn.grpcServer.GracefulStop()
+
+        _, _ = <- sn.grpcDone
+        log.Info("grpc server done")
+    }
+
+    storesRunning.Wait()
+
+}
+
+
+
+// ReadConfig uses sn.BasePath to read in the node's config file
+func (sn *Snode) ReadConfig(inFirstTome bool) error {
 
     pathname := path.Join(sn.BasePath, ConfigFilename)
  
     err := sn.Config.ReadFromFile(pathname)
     if err != nil {
         if os.IsNotExist(err) {
-            if inInit {
+            if inFirstTome {
                 sn.Config.ApplyDefaults()
                 sn.Config.NodeID = make([]byte, plan.CommunityIDSz)
                 rand.Read(sn.Config.NodeID)
@@ -212,9 +307,14 @@ func (sn *Snode) CreateNewStore(
     inEpoch pdi.StorageEpoch,
 ) error {
     
+    if sn.flow.IsRunning() {
+        return plan.Error(nil, plan.AssertFailed, "can't create store while running")
+    }
+
     stConfig := &ds.StorageConfig{
-        HomePath: path.Join("datastore", plan.MakeFSFriendly(inEpoch.CommunityName, inEpoch.CommunityID[:2])),
+        HomePath: path.Join("datastore", plan.MakeFSFriendly(inEpoch.Name, inEpoch.CommunityID[:2])),
         ImplName: inImplName,
+        StorageEpoch: inEpoch,
     }
 
     var err error
@@ -237,7 +337,7 @@ func (sn *Snode) CreateNewStore(
         if err != nil {
             return plan.Errorf(err, plan.FailedToAccessPath, "failed to create storage path %s", stPathname)
         }
-
+/*
         // Write out the community genesis file
         {
             buf, jerr := json.MarshalIndent(&inEpoch, "", "\t")
@@ -245,15 +345,18 @@ func (sn *Snode) CreateNewStore(
                 return jerr
             }
 
-            epPathname := path.Join(stPathname, pdi.GenesisEpochFilename)
+            epPathname := path.Join(stPathname, pdi.StorageEpochFilename)
             if err = ioutil.WriteFile(epPathname, buf, sn.Config.DefaultFileMode); err != nil {
                 return plan.Errorf(err, plan.FailedToAccessPath, "could not create %s", epPathname)
             }
-        }
+        }*/
     }
 
-    St := ds.NewStore(stConfig, sn.BasePath)
-    if err = St.Startup(sn.ctx, true); err != nil {
+    St := ds.NewStore(
+        stConfig, 
+        sn.BasePath,
+    )
+    if err = St.Startup(context.Background(), true); err != nil {
         return err
     }
 
@@ -267,29 +370,7 @@ func (sn *Snode) CreateNewStore(
         return err
     }
 
-    // Register the new store so it will be shutdown properly
-    sn.registerStore(St)
-
-    return nil
-}
-
-// Startup should be called after ReadConfig() and any desired calls to CreateStore()
-func (sn *Snode) Startup() error {
-
-    for i := range sn.Config.StorageConfigs {
-        info := &sn.Config.StorageConfigs[i]
-        
-        St := ds.NewStore(info, sn.BasePath)
-
-        sn.registerStore(St)
-    }
-
-    for _, St := range sn.Stores {
-        err := St.Startup(sn.ctx, false)
-        if err != nil {
-            return err
-        }
-    }
+    St.Shutdown("new store creation complete")
 
     return nil
 }
@@ -297,7 +378,7 @@ func (sn *Snode) Startup() error {
 
 func (sn *Snode) registerStore(St *ds.Store) {
 
-    communityID := plan.GetCommunityID(St.Epoch.CommunityID)
+    communityID := plan.GetCommunityID(St.Config.StorageEpoch.CommunityID)
     //var communityID plan.CommunityID
     //copy(communityID[:], CS.Info.CommunityID)
 
@@ -306,12 +387,13 @@ func (sn *Snode) registerStore(St *ds.Store) {
 
 }
 
-// StartServer is used like main()
-func (sn *Snode) StartServer() error {
-    var err error
 
-    log.Infof("Starting StorageProvider service on %v, %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
-    sn.listener, err = net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+func (sn *Snode) startServer() error {
+
+    sn.grpcDone = make(chan struct{})
+
+    log.Infof("starting StorageProvider service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+    listener, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     if err != nil {
         return plan.Error(err, plan.NetworkNotReady, "failed to start StorageProvider")
     }
@@ -324,12 +406,11 @@ func (sn *Snode) StartServer() error {
     reflection.Register(sn.grpcServer)
     go func() {
 
-        if err := sn.grpcServer.Serve(sn.listener); err != nil {
+        if err := sn.grpcServer.Serve(listener); err != nil {
             log.WithError(err).Warn("grpcServer.Serve()")
         }
         
-        sn.listener.Close()
-        sn.listener = nil
+        listener.Close()
 
         close(sn.grpcDone)
     }()
@@ -337,37 +418,17 @@ func (sn *Snode) StartServer() error {
     return nil
 }
 
-// Shutdown performs a shutdown and cleanup
-func (sn *Snode) Shutdown() {
-
-    // Shutdown the Stores FIRST so that all we have to do is wait on the server to stop.
-    group := sync.WaitGroup{}
-
-    log.Info("Shutting down stores...")
-    for _, St := range sn.Stores {
-        group.Add(1)
-        go St.Shutdown(&group)
-    }
-
-    if sn.grpcServer != nil {
-        log.Info("initiating grpc graceful stop")
-        sn.grpcServer.GracefulStop()
-
-        <- sn.grpcDone
-        log.Info("grpc server done")
-    }
-
-    group.Wait()
-
-}
-
 // StartSession -- see service StorageProvider in pdi.proto
-func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) (*pdi.StorageInfo, error) {
-    cID := plan.GetCommunityID(in.CommunityId)
+func (sn *Snode) StartSession(ctx context.Context, in *pdi.SessionReq) (*pdi.StorageInfo, error) {
+    if in.StorageEpoch == nil {
+        return nil, plan.Errorf(nil, plan.ParamMissing, "missing StorageEpoch")
+    }
+
+    cID := plan.GetCommunityID(in.StorageEpoch.CommunityID)
 
     St := sn.Stores[cID]
     if St == nil {
-        return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found {ID:%v}", in.CommunityId)
+        return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found {ID:%v}", in.StorageEpoch.CommunityID)
     }
 
     /******* gRPC Server Notes **********
@@ -379,8 +440,8 @@ func (sn *Snode) StartSession(ctx context.Context, in *pservice.SessionRequest) 
     session.Cookie = St
 
     msg := &pdi.StorageInfo{
-        EncodingDesc: St.TxnDecoder.EncodingDesc(),
     }
+
 	return msg, nil
 }
 
@@ -396,7 +457,7 @@ func (sn *Snode) FetchSessionStore(ctx context.Context) (*ds.Store, error) {
         return nil, plan.Errorf(nil, plan.AssertFailed, "internal type assertion err")
     }
 
-    err = St.CheckState()
+    err = St.CheckStatus()
     if err != nil {
         return nil, err
     }
@@ -443,7 +504,7 @@ func (sn *Snode) SendTxns(inTxnList *pdi.TxnList, inOutlet pdi.StorageProvider_S
 }
 
 // CommitTxn -- see service StorageProvider in pdi.proto
-func (sn *Snode) CommitTxn(ctx context.Context, inTxn *pdi.RawTxn) (*plan.Status, error) {
+func (sn *Snode) CommitTxn(ctx context.Context, inRawTxn *pdi.RawTxn) (*plan.Status, error) {
     St, err := sn.FetchSessionStore(ctx)
     if err != nil {
         return nil, err
@@ -451,7 +512,7 @@ func (sn *Snode) CommitTxn(ctx context.Context, inTxn *pdi.RawTxn) (*plan.Status
 
     err = St.DoCommitJob(ds.CommitJob{
         Txn: pdi.DecodedTxn{
-            RawTxn: inTxn.Bytes,
+            RawTxn: inRawTxn.Bytes,
         },
     })
 

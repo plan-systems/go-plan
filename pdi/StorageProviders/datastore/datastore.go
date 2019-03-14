@@ -2,16 +2,15 @@ package datastore
 
 import (
 
-    //"fmt"
+    "fmt"
     "sync/atomic"
     "os"
     "path"
-    "encoding/base64"
-    "io/ioutil"
+    //"io/ioutil"
     //"strings"
     "sync"
     "bytes"
-    "encoding/json"
+    //"encoding/json"
     "time"
     "context"
     //"hash"
@@ -37,20 +36,18 @@ import (
 type StorageConfig struct {
     HomePath                string                  `json:"home_path"`
     ImplName                string                  `json:"impl_name"`
+    StorageEpoch            pdi.StorageEpoch        `json:"storage_epoch"`
 }
 
 
 // Store wraps a PLAN community UUID and a datastore
 type Store struct {
-    CommunityID                 plan.CommunityID
+    flow                        plan.Flow
+
     AgentDesc                   string    
     Config                      *StorageConfig
-    Epoch                       pdi.StorageEpoch
-
-    OpState                     OpState
 
     AbsPath                     string
-    keyEncoding                 base64.Encoding
 
     txnDB                       *badger.DB
     acctDB                      *badger.DB
@@ -70,19 +67,7 @@ type Store struct {
     numSendJobs                 int32
     numCommitJobs               int32
  
-    TxnDecoder                  pdi.TxnDecoder
-
-    // close when shutting down (polite shutdown)
-    //shuttingDown                chan *sync.WaitGroup
-
-    // When OpState == Stopping, shutdown.Wait() is used to block until all queued work is complete.
-    resources                   sync.WaitGroup
-
-    // When OpState == Stopping, this context is in a ca
-    ctx                         context.Context
-    ctxCancel                   context.CancelFunc
-
-    log                         *log.Logger
+    txnDecoder                  pdi.TxnDecoder
 
     DefaultFileMode             os.FileMode
 
@@ -93,23 +78,6 @@ type txnUpdate struct {
     UTID            pdi.UTID
     TxnStatus       pdi.TxnStatus
 }
-
-
-// OpState specifices this Store's current operational state. 
-type OpState int32
-const (
-
-    // Shutdown means this Store is fully shutdown and idle and it is safe to exit this process
-    Shutdown OpState = 0
-
-    // Running means this service is running normally
-    Running
-
-    // Stopping means this service is currently shutting down
-    Stopping
-)
-
-
 
 
 // DefaultImplName should be used when a datastore impl is not specified
@@ -124,8 +92,7 @@ func NewStore(
     St := &Store{
         Config: inConfig,
         DefaultFileMode: plan.DefaultFileMode,
-        log: log.StandardLogger(),
-        TxnDecoder: NewTxnDecoder(true),
+        txnDecoder: NewTxnDecoder(true),
     }
 
     if path.IsAbs(St.Config.HomePath) {
@@ -143,29 +110,42 @@ func (St *Store) Startup(
     inFirstTime bool,
 ) error {
 
-    if St.OpState != Shutdown {
-        return plan.Errorf(nil, plan.AssertFailed, "Store.Startup() cannot start in state %v",  St.OpState)
-    }
+    storeDesc := fmt.Sprintf("Store %v", St.Config.StorageEpoch.Name)
 
     logE := log.WithFields(log.Fields{ 
         "impl": St.Config.ImplName,
         "path": St.AbsPath,
     })
-    logE.Info( "Startup()" )
+    logE.Infof( "starting %v", storeDesc )
 
+    err := St.flow.Startup(
+        inCtx,
+        storeDesc,
+        St.internalStartup,
+        St.internalShutdown,
+    )
+
+    return err
+}
+
+
+
+func (St *Store) internalStartup() error {
+
+    /*
     // Load community info
     {
-        pathname := path.Join(St.AbsPath, pdi.GenesisEpochFilename)
+        pathname := path.Join(St.AbsPath, pdi.StorageEpochFilename)
         buf, err := ioutil.ReadFile(pathname)
         if err != nil {
             return plan.Errorf(err, plan.ConfigFailure, "missing %s", pathname)
         }
 
-        err = json.Unmarshal(buf, &St.Epoch)
+        err = json.Unmarshal(buf, &St.StorageEpoch)
         if err != nil {
             return plan.Errorf(err, plan.ConfigFailure, "error unmarshalling %s", pathname)
         }
-    }
+    }*/
 
     var err error
 
@@ -196,13 +176,13 @@ func (St *Store) Startup(
         return err
     }
 
-    St.resources.Add(1)
-    St.ctx, St.ctxCancel = context.WithCancel(inCtx)
+
     //
     //
     //
     //
     // Small buffer needed for the txn notifications to ensure that the txn writer doesn't get blocked
+    St.flow.ShutdownComplete.Add(1)
     St.txnUpdates = make(chan txnUpdate, 8)
     go func() {
         for update := range St.txnUpdates {
@@ -212,7 +192,7 @@ func (St *Store) Startup(
             }
             St.subsMutex.Unlock()
         }
-        St.log.Info("1) commit notification exited")
+        St.flow.Log.Info("1) commit notification exited")
 
         // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
         for {
@@ -228,12 +208,7 @@ func (St *Store) Startup(
         St.acctDB.Close()
         St.acctDB = nil
 
-        St.log.Info("0) resources released")
-
-        St.OpState = Shutdown
-        St.ctx = nil
-
-        St.resources.Done()
+        St.flow.ShutdownComplete.Done()
     }()
     //
     //
@@ -249,7 +224,7 @@ func (St *Store) Startup(
 
             atomic.AddInt32(&St.numCommitJobs, -1)
         }
-        St.log.Info("2) commit pipeline closed")
+        St.flow.Log.Info("2) commit pipeline closed")
 
         // Cause all subs to fire, causing them to exit when they see St.OpState == Stopping
         St.txnUpdates <- txnUpdate{}
@@ -257,52 +232,44 @@ func (St *Store) Startup(
     }()
 
 
-    St.OpState = Running
-
-    go func() {
-
-        select {
-            case <- St.ctx.Done():
-        }
-
-        St.OpState = Stopping
-
-        // Wait until we're sure a commit didn't sneak in b/c 
-        for {
-            time.Sleep(100 * time.Millisecond)
-            if atomic.LoadInt32(&St.numCommitJobs) == 0 {
-                break
-            }
-        }
-
-        St.log.Info("2) pending commits complete")
-
-        // This will initiate a close-cascade causing St.resources to be released
-        close(St.DecodedCommits)
-  
-    }()
-
-
     return nil
 }
 
 
+func (St *Store) internalShutdown() {
 
-// Shutdown closes this datastore, if open, blocking until completion.  No-op if this Store is already shutdown.
-//
-// THREADSAFE
-func (St *Store) Shutdown(onComplete *sync.WaitGroup) {
-
-    if St.OpState == Running {
-        St.ctxCancel()
+    // Wait until we're sure a commit didn't sneak in
+    for {
+        time.Sleep(100 * time.Millisecond)
+        if atomic.LoadInt32(&St.numCommitJobs) == 0 {
+            break
+        }
     }
 
-    if St.OpState >= Running {
-        St.resources.Wait()
-        St.log.Print("shutdown complete")
-    }
+    St.flow.Log.Info("3) pending commits complete")
 
-    onComplete.Done()
+    // This will initiate a close-cascade causing St.resources to be released
+    close(St.DecodedCommits)
+
+}
+
+
+// Shutdown -- see plan.Flow.Shutdown
+func (St *Store) Shutdown(
+    inReason string,
+) {
+
+    St.flow.Shutdown(inReason)
+
+}
+
+
+
+// CheckStatus -- see plan.Flow.CheckStatus
+func (St *Store) CheckStatus() error {
+
+    return St.flow.CheckStatus()
+
 }
 
 
@@ -329,7 +296,6 @@ type CommitJob struct {
     //Stream     pdi.StorageProvider_CommitTxnsServer
     //OnComplete chan error
 }
-
 
 
 
@@ -376,7 +342,7 @@ func (St *Store) updateAccount(
 
         if err == nil {
             if creatingNew {
-                St.log.Infof("Creating account %v to receive deposit", pdi.Encode64(inAcctAddr))
+                St.flow.Log.Infof("creating account %v to receive deposit", pdi.Encode64(inAcctAddr))
             }
             err = dbTxn.Set(inAcctAddr, scrap[:acctSz]) 
             if err != nil {
@@ -387,7 +353,7 @@ func (St *Store) updateAccount(
 
     // If we get a deposit err, log it and proceed normally (i.e. the funds are lost forever)
     if err != nil {
-        St.log.WithField( 
+        St.flow.Log.WithField( 
             "acct", inAcctAddr,
         ).Warning(err)
     }
@@ -436,7 +402,6 @@ func (St *Store) doCommitJob(job CommitJob) error {
         err error
     ) 
 
-
     if err == nil {
         
         batch := NewTxnHelper(St.acctDB)
@@ -444,19 +409,24 @@ func (St *Store) doCommitJob(job CommitJob) error {
 
             // Debit the senders account (from Fuel and any transfers ordered)
             {
-                fuelForTxn := St.Epoch.FuelPerTxn + int64(St.Epoch.FuelPerKb) * int64( len(job.Txn.RawTxn) >> 10 )
+                kbSize := int64( len(job.Txn.RawTxn) >> 10 )
 
                 err = St.updateAccount(
                     batch.Txn,
                     job.Txn.Info.From,
                     func (ioAcct *pdi.StorageAccount) error {
 
-                        // Debit Fuel needed for txn
-                        if ioAcct.FuelBalance < fuelForTxn {
-                            return plan.Errorf(nil, plan.InsufficientFuel, "insufficient Fuel for txn cost of %v", fuelForTxn)
+                        if ioAcct.OpBalance <= 0 {
+                            return plan.Error(nil, plan.InsufficientPostage, "insufficient tx balance")
                         }
 
-                        ioAcct.FuelBalance -= fuelForTxn
+                        // Debit kb quota needed for txn
+                        if ioAcct.KbBalance < kbSize {
+                            return plan.Errorf(nil, plan.InsufficientPostage, "insufficient kb balance for txn size %dk", kbSize)
+                        }
+
+                        ioAcct.OpBalance--
+                        ioAcct.KbBalance -= kbSize
 
                         // Debit explicit transfers
                         for _, xfer := range job.Txn.Info.Transfers {
@@ -520,7 +490,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
                 perr = plan.Error(err, plan.FailedToCommitTxn, "txn commit failed")
             }
 
-            St.log.WithFields(log.Fields{
+            St.flow.Log.WithFields(log.Fields{
                 "UTID": job.Txn.UTID,
             }).WithError(err).Warn("CommitJob error")
         
@@ -572,7 +542,7 @@ func (St *Store) DoScanJob(job ScanJob) {
 
     atomic.AddInt32(&St.numScanJobs, 1)
 
-    err := St.CheckState()
+    err := St.flow.CheckStatus()
     if err != nil {
         job.OnComplete <- err
         atomic.AddInt32(&St.numScanJobs, -1)
@@ -584,7 +554,7 @@ func (St *Store) DoScanJob(job ScanJob) {
         err := St.doScanJob(job)
 
         if err != nil {
-            St.log.WithError(err).Warn("doQueryJob() returned error")   
+            St.flow.Log.WithError(err).Warn("doQueryJob() returned error")   
         }
 
         // This releases the GRPC handler
@@ -599,7 +569,7 @@ func (St *Store) DoScanJob(job ScanJob) {
 func (St *Store) DoSendJob(job SendJob) {
     atomic.AddInt32(&St.numSendJobs, 1)
 
-    err := St.CheckState()
+    err := St.flow.CheckStatus()
     if err != nil {
         job.OnComplete <- err
         atomic.AddInt32(&St.numSendJobs, -1)
@@ -610,7 +580,7 @@ func (St *Store) DoSendJob(job SendJob) {
         err := St.doSendJob(job)
 
         if err != nil {
-            St.log.WithError(err).Warn("doSendJob() returned error")   
+            St.flow.Log.WithError(err).Warn("doSendJob() returned error")   
         }
 
         // This releases the GRPC handler
@@ -626,9 +596,9 @@ func (St *Store) DoSendJob(job SendJob) {
 func (St *Store) DoCommitJob(job CommitJob) error {
     atomic.AddInt32(&St.numCommitJobs, 1)
 
-    err := St.CheckState()
+    err := St.flow.CheckStatus()
     if err == nil {
-        err = job.Txn.DecodeRawTxn(St.TxnDecoder)
+        err = job.Txn.DecodeRawTxn(St.txnDecoder)
     }
 
     if err != nil {
@@ -646,17 +616,6 @@ func (St *Store) DoCommitJob(job CommitJob) error {
     return nil
 }
 
-// CheckState returns an error if this Store is shutting down (or otherwise not in a state to continue service)
-func (St *Store) CheckState() error {
-
-    if St.OpState < Running {
-        return plan.Errorf(nil, plan.ServiceShutdown, "service is shutdown")
-    } else if St.OpState > Running  {
-        return plan.Errorf(nil, plan.ServiceShutdown, "service shutting down")
-    }
-
-    return nil
-}
 
 
 
@@ -666,14 +625,14 @@ func (St *Store) doSendJob(job SendJob) error {
 
     dbTxn := St.txnDB.NewTransaction(false)
     {
-        txn := pdi.Txn{
+        txn := pdi.RawTxn{
             TxnMetaInfo: &pdi.TxnMetaInfo{
                 TxnStatus: pdi.TxnStatus_FINALIZED,
             },
         }
 
         for _, UTID := range job.UTIDs {
-            var txnOut *pdi.Txn
+            var txnOut *pdi.RawTxn
 
             if err == nil {
                 item, dbErr := dbTxn.Get(UTID)
@@ -681,7 +640,7 @@ func (St *Store) doSendJob(job SendJob) error {
                     txnOut = &txn
 
                     err = item.Value(func(inVal []byte) error{
-                        txnOut.RawTxn = inVal
+                        txnOut.Bytes = inVal
                         return nil
                     })
                 } else if dbErr == badger.ErrKeyNotFound  {
@@ -692,12 +651,12 @@ func (St *Store) doSendJob(job SendJob) error {
 
                 if err != nil {
                     err = plan.Errorf(err, plan.TxnDBNotReady, "failed to read txn")
-                    St.log.WithError(err).Warn("txnDB error")
+                    St.flow.Log.WithError(err).Warn("txnDB error")
                     continue
                 }
             }
 
-            err = St.CheckState()
+            err = St.flow.CheckStatus()
             if err != nil && txnOut != nil {
                 err = job.Outlet.Send(txnOut)
             }
@@ -763,11 +722,7 @@ func (St *Store) doScanJob(job ScanJob) error {
         for dir != 0 && err == nil {
             batchCount := int32(0)
             
-            for  ; itr.Valid(); itr.Next() {
-                err = St.CheckState()
-                if err != nil {
-                    break
-                }
+            for  ; itr.Valid() && St.flow.IsRunning(); itr.Next() {
 
                 item := itr.Item()
                 itemKey := item.Key()
@@ -777,7 +732,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                 }
 
                 if len(itemKey) != pdi.UTIDBinarySz {
-                    St.log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.UTIDBinarySz)
+                    St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.UTIDBinarySz)
                     continue
                 }
 
@@ -814,7 +769,7 @@ func (St *Store) doScanJob(job ScanJob) error {
         batchCount := int32(0)
         wakeTimer := heartbeat.C
 
-        for err == nil && St.CheckState() != nil {
+        for err == nil && St.flow.IsRunning() {
 
             select {
 
