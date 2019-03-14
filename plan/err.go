@@ -106,14 +106,14 @@ const (
 	// AssertFailed means an unreachable part of code was...reached.  :\
 	AssertFailed
 
-	// MissingParam one or more params was missing, nil, or not otherwise given
-	MissingParam
+	// ParamMissing one or more params was missing, nil, or not otherwise given
+	ParamMissing
 
-	// FailedToMarshal means Marshal() returned an error
-	FailedToMarshal
+	// MarshalFailed means Marshal() returned an error
+	MarshalFailed
 
-	// FailedToUnmarshal means Unmarshal() returned an error
-	FailedToUnmarshal
+	// UnmarshalFailed means Unmarshal() returned an error
+	UnmarshalFailed
 
 	// Unimplemented means flow hit a point requiring deeper implementation
 	Unimplemented
@@ -307,8 +307,8 @@ const (
 	// AccountNotAvailable means the StorageProvider failed to find the account associated w/ the txn's "from" public key (or is damaged)
 	AccountNotAvailable
 
-	// InsufficientFuel means the sender does not have a balance with sufficient gas to commit the txn
-	InsufficientFuel
+	// InsufficientPostage means the sender does not have a balance to commit their txn
+	InsufficientPostage
 
 	// TransferFailed means the gas/fiat transfer failed (e.g. insufficient funds)
 	TransferFailed
