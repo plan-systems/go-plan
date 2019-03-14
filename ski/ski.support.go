@@ -797,17 +797,6 @@ func GenerateNewKey(
 
 }
 
-/*
-const (
-    TIDTimestampSz = 6
-    TID
-)
-
-func GenerateEpochID() []byte {
-
-}*/
-
-
 // SessionTool is a small set of util functions for creating a SKI session.
 type SessionTool struct {
 	UserID        string
@@ -1284,14 +1273,3 @@ func (U* PayloadUnpacker) UnpackAndVerify(
 
     return err
 }
-
-/*
-    Encoding        plan.Encoding // Client-specified encoding
-    Header          []byte        // Client payload (hashed into .HeaderSig)
-    HeaderHash      []byte        // A hash digest generated from .Payload
-    HeaderHashKit   HashKitID     // The ID of the hash kit that generated .Hash 
-    HeaderSig       []byte        // Signature of .Hash by .Signer
-    Body            []byte        // Client body (NOT hashed into sig)
-    Signer          KeyInfo       // The pub key that orginated .Sig
-
-    */
