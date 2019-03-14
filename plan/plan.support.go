@@ -2,15 +2,181 @@ package plan
 
 
 import (
+    "context"
     "os"
 	"os/user"
     "path"
     "strings"
     "encoding/hex"
+    "sync"
     //"math/big"
+
+    log "github.com/sirupsen/logrus"
 
     //"github.com/ethereum/go-ethereum/common/math"
 )
+
+// Flow is a service helper.
+type Flow struct {
+
+    Ctx              context.Context
+    ctxCancel        context.CancelFunc
+
+    Desc             string
+
+    ShutdownComplete sync.WaitGroup
+    ShutdownReason   string
+    shutdownMutex    sync.Mutex
+
+    FaultLog         []error
+    FaultLimit       int
+    Log              *log.Logger 
+    logMutex         sync.Mutex
+
+}
+
+// Startup blocks until this Context is started up or stopped (if an err is returned).
+func (F *Flow) Startup(
+    inCtx              context.Context,
+    inDesc             string,
+    onInternalStartup  func() error,
+    onInternalShutdown func(),
+) error {
+
+    F.ShutdownComplete.Wait()
+    F.ShutdownComplete.Add(1)
+
+    F.FaultLimit = 3
+    F.Log = log.StandardLogger()
+    F.Desc = inDesc
+    F.Ctx, F.ctxCancel = context.WithCancel(inCtx)
+
+    err := onInternalStartup()
+    if err != nil {
+        F.Shutdown(inDesc + " internal startup failed")
+    }
+
+    go func() {
+
+        select {
+            case <- F.Ctx.Done():
+        }
+
+        onInternalShutdown()
+  
+        F.shutdownMutex.Lock()
+        F.ctxCancel = nil
+        F.shutdownMutex.Unlock()
+
+        F.ShutdownComplete.Done()
+    }()
+
+
+    if err != nil {
+        F.ShutdownComplete.Wait()
+    }
+
+    return err
+}
+
+// CheckStatus returns an error if this Service is shut down or shutting down.
+//
+// THREADSAFE
+func (F *Flow) CheckStatus() error {
+
+    if F.Ctx == nil {
+        return Error(nil, ServiceShutdown, "context not running") 
+    }
+
+    select {
+        case <-F.Ctx.Done():
+            return F.Ctx.Err()
+        default:
+            // still running baby!
+    }
+
+    return nil
+}
+
+
+// IsRunning returns true if this Context has not shutdown or shutting down.
+//
+// THREADSAFE
+func (F *Flow) IsRunning() bool {
+
+    if F.Ctx == nil {
+        return false 
+    }
+
+    select {
+        case <-F.Ctx.Done():
+            return false
+        default:
+    }
+
+    return true
+}
+
+// Shutdown initiates a polite shutdown of this Context and blocks until complete.
+//
+// if inBlocker != nil, it is released when shutdown is complete
+//
+// If Shutdown() has already been called, behavior is consistent but inReason will be dropped.
+//
+// THREADSAFE
+func (F *Flow) Shutdown(
+    inReason string,
+) {
+
+    F.shutdownMutex.Lock()
+    if F.IsRunning() && F.ctxCancel != nil {
+        F.ShutdownReason = inReason
+        F.Log.Infof("stopping %s: %s", F.Desc, F.ShutdownReason)
+        F.ctxCancel()
+        F.ctxCancel = nil
+    }
+    F.shutdownMutex.Unlock()
+
+    F.ShutdownComplete.Wait()
+}
+
+
+
+// FilterFault is called when the given error has occurred an represents an unexpected fault that alone doesn't
+// justify an emergency condition. (e.g. a db error while accessing a record).  Call this on unexpected errors.
+//
+// if inErr == nil, this is equivalent to calling CheckStatus()
+//
+// Returns non-nil if the caller should abort whatever it's doing and anticipate a shutdown.
+//
+// THREADSAFE
+func (F *Flow) FilterFault(inErr error) error {
+
+    if inErr == nil {
+        return F.CheckStatus()
+    }
+
+    F.logMutex.Lock()
+    F.Log.WithError(inErr).Warn("fault occurred")
+    F.FaultLog = append(F.FaultLog, inErr)
+    faultCount := len(F.FaultLog)
+    F.logMutex.Unlock()
+
+    if faultCount < F.FaultLimit {
+        return nil
+    }
+
+    if F.IsRunning() {
+        go F.Shutdown("fault limit exceeded")
+    }
+
+    return inErr
+}
+
+
+
+
+
 
 /*****************************************************
 ** Utility & Conversion Helpers
@@ -31,6 +197,8 @@ func GetCommunityID(in []byte) CommunityID {
 	return out
 }
 
+/*
+
 // GetKeyID returns the KeyID for the given buffer
 func GetKeyID(in []byte) KeyID {
 
@@ -45,21 +213,7 @@ func GetKeyID(in []byte) KeyID {
 	copy(out[overhang:], in)
 	return out
 }
-
-// GetChannelID returns the KeyID for the given buffer
-func GetChannelID(in []byte) ChannelID {
-
-	var out ChannelID
-
-	overhang := ChannelIDSz - len(in)
-	if overhang < 0 {
-		in = in[-overhang:]
-		overhang = 0
-	}
-
-	copy(out[overhang:], in)
-	return out
-}
+*/
 
 // UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
 // inSubDir can be any relative pathname
@@ -118,6 +272,3 @@ func MakeFSFriendly(inName string, inSuffix []byte) string {
 
     return name
 }
-
-
-
