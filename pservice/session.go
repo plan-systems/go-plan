@@ -49,7 +49,7 @@ type ClientSession struct {
     OnEndSession            func(session *ClientSession, reason string)
 
     // Used to store an impl specific info
-    Cookie                 interface{}
+    Cookie                  interface{}
 }
 
 
@@ -101,13 +101,12 @@ type SessionGroup struct {
 
 }
 
-
-// Init resets and internally sets up this SessionGroup for use
-func (group *SessionGroup) Init() {
-
-    group.table = map[string]*ClientSession{}
+// NewSessionGroup sets up a new SessionGroup for use
+func NewSessionGroup() SessionGroup {
+    return SessionGroup{
+        table: map[string]*ClientSession{},
+    }
 }
-
 
 /*
 func (group *SessionGroup) Len() int { 

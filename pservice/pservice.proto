@@ -14,6 +14,7 @@ import "github.com/plan-systems/go-plan/ski/ski.proto";
 
 
 
+
 message SessionRequest {
 
     // Normally the empty string, this is used when an existing token is req'd
@@ -24,9 +25,6 @@ message SessionRequest {
 
     // Identifies who is requesting the session (via pubkey)
                 ski.KeyRef      client_id               = 3;
-
-    // Submits an authentication challenge for the host (so that the host can be validated).
-                ski.SigBlock    challenge               = 4;
 
     // Additional keys, tokens, info, params
                 plan.Block      params                  = 5;
@@ -44,18 +42,15 @@ message Msg {
 
     // Holds arbitrary information/data
                 plan.Block      body                    = 3;
-
-    // A signature request/response from the host/server (typically a request to the client to sign something)
-                ski.SigBlock    sig_block               = 4;
 }
 
 
 
 
-service CommunityRepo {
+service Repo {
 
     // Starts a new client member session.
-    rpc         StartMemberSession(MemberSessionInfo)               returns (MemberSessionInfo);
+    rpc         StartMemberSession(SessionReq)                      returns (RepoInfo);
 
     // Requests a sequence of txns within a specified time window and other query criteria.
     rpc         InvokeChannel(ChInvocation)                         returns (ChStatus);
@@ -75,20 +70,20 @@ service CommunityRepo {
 
 
 
-message MemberSessionInfo {
+message SessionReq {
 
     // Identifies a workstation/client installation (metaphorical to a "dumb" terminal in the 70's and 80's).
     // Two different members could have member sessions with the same client ID into a given repo (but not at the same time).
-                bytes           client_id               = 1;
+                bytes           clientID                = 1;
 
     // Which community this session wants to access
-                bytes           community_id            = 2;
+                bytes           communityID             = 2;
 
     // The member's community-given ID
-                uint64          member_id               = 3;
+                uint64          memberID                = 3;
 
     // Optional -- used internally
-                string          repo_path               = 4;
+     //           string          repo_path               = 4;
 
     //          bytes           prev_session_token      = 4;
     //          bytes           next_session_token      = 5;
@@ -108,6 +103,10 @@ message MemberSessionInfo {
 
 }
 
+
+message RepoInfo {
+
+}
 
 
 
@@ -135,6 +134,8 @@ message ChMsg {
 
                 plan.Block      content                 = 2;  
 }
+
+
 
 
 
