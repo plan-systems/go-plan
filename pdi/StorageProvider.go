@@ -32,10 +32,11 @@ const TxnSegmentMaxSz = 10 * 1024 * 1024
 type TxnEncoder interface {
 
 	// ResetSigner -- resets how this TxnEncoder signs newly encoded txns in EncodeToTxns().
-    // inFrom is a key created via StorageEpoch.GenerateNewAddr()
+    // inFrom is the pub key created via StorageEpoch.GenerateNewAddr().  
+    // If len(inFrom) == 0, the latest key on the StorageEpoch's keyring name is used. 
 	ResetSigner(
 		inSession ski.Session,
-		inFrom    ski.KeyRef,
+		inFrom    []byte,
 	) error
 
 	// EncodeToTxns encodes the payload and payload codec into one or more native and signed StorageProvider txns.
@@ -119,4 +120,8 @@ func (epoch *StorageEpoch) GenerateNewAddr(
     return keyInfo.PubKey, nil
 }
 
+// CommunityKeyringName returns the name of the community keyring name
+func (epoch *StorageEpoch) CommunityKeyringName() []byte {
+    return epoch.CommunityID
+}
 

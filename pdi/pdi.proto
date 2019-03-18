@@ -53,17 +53,13 @@ service StorageProvider {
 
 message SessionReq {
 
-    // Normally the empty string, this is used when an existing token is req'd
-                bytes           session_token           = 1;
+    // The requested storage epoch to be accessed.
+                StorageEpoch    storage_epoch           = 1;
 
-    // Which community this session wants to access
-                bytes           community_id            = 2;
+    // An empty but normally signed txn used to demonstrate to the host StorageProvider that the client
+    //    has an active account with this storage provider.
+                RawTxn          proof_of_access         = 2;     
 
-    // Identifies who is requesting the session (via pubkey)
-                ski.KeyInfo     client_key_info         = 3;
-
-    // Additional keys, tokens, info, params
-                plan.Block      params                  = 5;
 }
 
 
@@ -71,8 +67,6 @@ message SessionReq {
 
 message StorageInfo {
 
-    // Specifies which TxnEncoder and TxnDecoder should be used with this StorageProvider
-                string          encoding_desc           = 1;
 
 
 }
@@ -145,9 +139,9 @@ message Transfer {
     // Each txn "costs" Kb for each kb size of the txn.
                 int64           kb                      = 2;
 
-    // Tx refers to the energy and processing cost for each transaction committed to a StorageProvider.
-    // Each transaction "costs" 1 Tx.
-                int64           tx                      = 3;
+    // Ops refers to the energy and processing cost for operations requested of a StorageProvider (typically a txn commit)
+    // Each txn committed "costs" 1 op for example.
+                int64           ops                     = 3;
 }
 
 
@@ -226,8 +220,8 @@ message StorageAccount {
     // Kilobytes able to be used for txns
                 int64           kb_balance              = 1;
 
-    // Number of transactions able to be posted to a StorageProvider network.
-                int64           tx_balance              = 2;
+    // Number of "operations" able to be posted to a StorageProvider network.
+                int64           op_balance             = 2;
 
     // Set if this account is permitted to transfer to other accounts.
                 bool            can_transfer            = 3;
@@ -423,35 +417,38 @@ message ChannelEpoch {
                 string          protocol                    = 5;
 
     // Specifies the channel that is serving as this channel's access control channel (and has entries that conform to that spec)
-                bytes           access_channel_id           = 6;
+                bytes           channel_id                  = 6;
+
+    // Specifies the channel that is serving as this channel's access control channel (and has entries that conform to that spec)
+                bytes           access_channel_id           = 7;
 
     // If set, channel entries are not allowed to be removed/superceded.
-                bool            entries_are_locked          = 7;
+                bool            entries_are_locked          = 8;
 
     // If set, entries_are_locked must/will always be true.
-                bool            entries_are_locked_forever  = 8;
+                bool            entries_are_locked_forever  = 9;
 
     // If set, nodes with web services running will attempt to share this channel to outside the community
-                bool            is_externally_shared        = 9;
+                bool            is_externally_shared        = 10;
                         
     /*  If set, this channel can be used to validate EntryOps applied to other channels (including other access channels).
         Entries in an access channel conform to a specific protocol and serve to:
             (a) allow one or more other channels to cite this channel as their access control (access_channel_id)
             (a) transport private channel keys and grants to community members that have been given access to this channel (by encrypting a channel's key using a member's public key)
             (b) publish and transfer write-access and ownership permissions to others (only permitted by owners)  */
-                bool            is_access_channel           = 10;
+                bool            is_access_channel           = 11;
 
     // If set, entries in this channel are "private", meaning that each entry body is encrypted using the key
     //   identified by this pub key (stored in the keyring with a name formed by the community ID and channel ID).
     // Key distribution occurs when the new channel epoch was posted (and when new members are given private channel access).
-                bytes           body_pub_key                = 11;
+                bytes           body_pub_key                = 12;
 
     // Contains all the access grants published via EDIT_ACCESS_GRANTS sent to this channel (during this epoch).
     // If this channel is NOT an access channel (is_access_channel == false), then this field == nil
-    repeated    AccessGrant     access_grants               = 12;
+    repeated    AccessGrant     access_grants               = 13;
 
     // Future-proofing
-                plan.Block      extensions                  = 13;
+                plan.Block      extensions                  = 14;
 
 }
 
@@ -489,16 +486,8 @@ enum EntryVersion {
     is what's sent to/from community data store replicators, such as NEM, DFINITY, and Ethereum.
 */
 message EntryCrypt {
-                uint64          crypt_info              = 1;        // Allows accessors to apply correct hash and crypto functions to this EntryCrypt 
-                bytes           community_pub_key       = 3;        // Needed to access header_crypt
-                bytes           info_crypt              = 5;        // := Encrypt(<EntryInfo>.Marshal(), <EntryCrypt>.community_key_id)
-
-                // By default, the entry body is encrypted with the same community key that encrypted EntryInfo.
-                // If a channel is private, it means the body is encrypted IAW the cited channel epoch.
-                bytes           body_crypt              = 6;        // := Encrypt(<Body>.Marshal(), body_key)
-                
-                // := ComputeSig(<EntryCrypt>, GetKey(author_member_id,author_member_epoch))
-                bytes           sig                     = 7;      
+                bytes           community_pub_key       = 1;        // Needed to access header_crypt
+                bytes           packed_entry            = 2;        // Wrapped w/ ski.SigHeader
 }
 
 
@@ -514,11 +503,12 @@ message EntryInfo {
                 int64           time_authored           = 1;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
                 uint32          time_authored_frac      = 2;        // [0,0xFFFF] -- fraction of a second when authored 
                 EntryOp         entry_op                = 4;
-                fixed64         channel_id              = 5;        // Channel that this entry is posted to.
-                int32           channel_epoch           = 6;        // Epoch of the channel in effect when this entry was sealed
-                fixed64         author_member_id        = 7;        // Creator of this entry (and signer of .Sig)
+                bytes           channel_id              = 5;        // Channel that this entry is posted to.
+                fixed64         channel_epoch           = 6;        // Epoch of the channel in effect when this entry was sealed
+                fixed64         author_member_id        = 7;        // Creator (and signer) of this entry 
                 int32           author_member_epoch     = 8;        // Epoch of the author's identity when this entry was sealed
                 plan.Encoding   body_encoding           = 9;
+
                 plan.Block      extensions              = 11;       // Available for unrestricted client use.
 
     // Similar in construction to UTID.
@@ -548,35 +538,43 @@ message StorageEpoch {
 
     // Identifies a txn encoding schema and storage behavior.
     // Multicodec-style construction, e.g. "plan/storage/pdi-eth/1"
-                string          protocol_desc           = 2;
+                string          storage_protocol        = 2;
 
     // Which community this storage provider hosts.
-                bytes           community_id            = 3;
+                bytes           communityID             = 3;
 
-    // Human-readable name of this storage epoch.
+    // Human-readable name of this storage epoch (not necessarily the community's name)
                 string          name                    = 4;
 
-    // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
-                int64           time_started            = 5;
+   // Hash kit used to hash PDI txns
+                ski.HashKitID   txn_hash_kit            = 6;
 
-
+    // Max byte size of txns allowed to be posted to StorageProviders with this epoch.
+                uint32          txn_max_size            = 7;
 }
 
 
 
 message CommunityEpoch {
 
-                string          community_name          = 1;
+   // Immutable -- the community ID and community keyring name.
+                bytes           communityID            = 1;
+
+    // Official community name
+                string          community_name          = 2;
 
     // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
-                int64           time_started            = 2;
+                int64           time_started            = 3;
 
     // The community key associated with this epoch, identifying this epoch.
-    // This is always a symmetric type key.
-                ski.KeyInfo     key_info                = 3;
+    // KeyInfo.KeyType_SymmetricKey
+                ski.KeyInfo     key_info                = 4;
 
     // Identifies which epoch this epoch succeeds
                 bytes           epoch_prev              = 5;
+
+    // Hash kit used to hash PDI entries
+                ski.HashKitID   entry_hash_kit          = 7;
 
 }
 
@@ -585,14 +583,11 @@ message CommunityEpoch {
 
 message MemberEpoch {
 
-    // Immutable -- generated during member genesis       
-                fixed64         member_id               = 2;    
+    // Immutable -- generated during member genesis
+                fixed64        memberID                 = 2;    
 
-    // Random "name" for this member epoch -- must be unique for a member's epoch history (and not 0).  
-                fixed64         epoch_id                = 3;
-
-    // Names the previous epoch.  Set to 0 if there was no previous epoch.
-                fixed64         prev_epoch_id           = 4;
+    // Increments for each member epoch (0 meaning the creation, 1, 2, ...)
+                int32          epoch_num                = 3;
 
     // Unix timestamp when this epoch entered into effect
                 int64           time_started            = 5;
@@ -602,7 +597,7 @@ message MemberEpoch {
 
     // Public keys associated with this member epoch
                 bytes           pub_signing_key         = 7;
-                bytes           pub_crypto_key          = 8;
+                bytes           pub_encrypt_key         = 8;
 
     // The ChannelID of this member's "about" channel
                 bytes           about_channel_id        = 9;
@@ -621,34 +616,32 @@ message MemberEpoch {
 
 // ServiceInfo contains descriptions, network addresses, ports, and connection info for remote services.
 message ServiceInfo {
-
+                string          addr                    = 1;
+                string          network                 = 2;
 }
 
 
 
-message GenesisInfo {
-
+message RepoSeed {
                 StorageEpoch    storage_epoch           = 1;
                 CommunityEpoch  community_epoch         = 2;
-                ski.KeyTome     key_tome                = 3;    // Contains community Keyring
-                fixed64         member_id               = 4;
+    repeated    ServiceInfo     services                = 5;
 }
+
 
 // GuestInvite -- STEP 1
 // A community issues this to a person they want to invite into their community.  A copy of this record is written to member registry channel.
 // This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
-message MemberInvite {
-                StorageEpoch    storage_epoch           = 1;
-                CommunityEpoch  community_epoch         = 2;
-    repeated    ServiceInfo     services                = 5;
+message MemberSeed {
+                RepoSeed        repo_seed               = 1;
 
                 ski.KeyTome     key_tome                = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
 
-                fixed64         new_member_id     = 6;
+                MemberEpoch     member_epoch            = 6;
 
     // WHO sent this invitation (note: the member's signing key is used to create this invite)
-                fixed64         origin_member_id     = 7;
-                ski.KeyInfo     origin_signing_key     = 8;
+                fixed64         origin_member_id        = 7;
+                ski.KeyInfo     origin_signing_key      = 8;
 
     // A asym key used to encrypt an InvitationResponse
                 ski.KeyInfo     reply_to                = 9;
@@ -658,7 +651,7 @@ message MemberInvite {
 
 /*
 New member steps:
-1) Alice is community member of C has member invite privs
+1) Alice is community member of C and has member invite privs
 2) Alice generates a new MemberInvite ("MI") and writes it to the member registry channel (Alice locks the MI with a password)
 3) Alice gives the MI to Bob (and the password)
 4) Bob installs PLAN

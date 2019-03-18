@@ -1,4 +1,4 @@
-package pservice
+package pcore
 
 
 import (
