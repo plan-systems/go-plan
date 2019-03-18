@@ -106,9 +106,9 @@ message TxnInfo {
                 uint32          seg_index               = 9;
                 uint32          seg_total               = 10;
 
-    // Txn UTID of the segment preceding this one (or nil if this is the first segment)
-    // This allows an entire segment chain to be implicitly specified via the UTID of the last segment.
-                bytes           prevUTID                = 11;
+    // Txn URID of the segment preceding this one (or nil if this is the first segment)
+    // This allows an entire segment chain to be implicitly specified via the URID of the last segment.
+                bytes           prevURID                = 11;
 
     // Unix timestamp of when this txn was encoded and signed for storage.
                 int64           time_sealed             = 12;
@@ -124,8 +124,8 @@ message TxnInfo {
     // This is nil in packaged txns since its hash digest isn't knowable until after the txn is packaged.
                 bytes           txn_hashname            = 21;
 
-    // Binary UTID of this txn, derived from time_sealed and txn_hashname.
-                bytes           UTID                    = 22;
+    // Binary URID of this txn, derived from time_sealed and txn_hashname.
+                bytes           URID                    = 22;
 
 }
 
@@ -150,7 +150,7 @@ message Transfer {
 message RawTxn {
 
     // Always generate (or confirm) locally for security (set to nil for transport)
-                bytes           UTID                    = 1;
+                bytes           URID                    = 1;
 
     // Info about the status this txn.  
     // Set to nil if n/a or if txn is not yet committed.
@@ -166,7 +166,7 @@ message RawTxn {
 message TxnMetaInfo {
 
     // Txn ID
-                bytes           UTID                    = 1;
+                bytes           URID                    = 1;
 
    // Status information about the associated txn
                 TxnStatus       txn_status              = 2;
@@ -198,18 +198,18 @@ message TxnScan {
     // This is a how client is notified about newly committed txns and status changes in previously committed txns.
                 bool            send_txn_updates        = 5;    
 
-    // If > 0, this limits the the number of txn UTIDs returned until the request is considered complete.
+    // If > 0, this limits the the number of txn URIDs returned until the request is considered complete.
                 int32           max_txns                = 7;
 
 }
 
 message TxnList {
 
-    // Batch of txn UTIDs (binary form)
+    // Batch of txn URIDs (binary form)
     // Entries that are zero-length should be considered valid "no-ops".
-    repeated    bytes           UTIDs                   = 2;
+    repeated    bytes           URIDs                   = 2;
 
-    // len(statuses) == len(UTIDs): the ith byte of is the TxnStatus of UTIDs[i].
+    // len(statuses) == len(URIDs): the ith byte of is the TxnStatus of URIDs[i].
     // Note: this field is ignored for SendTxns() 
                 bytes           statuses                = 3;
 }
@@ -511,7 +511,7 @@ message EntryInfo {
 
                 plan.Block      extensions              = 11;       // Available for unrestricted client use.
 
-    // Similar in construction to UTID.
+    // Similar in construction to URID.
     // Time authored followed by right-most part of hashname (available only after an existing entry is decoded) 
                 bytes           EID                     = 20;
 

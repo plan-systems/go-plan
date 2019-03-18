@@ -151,7 +151,7 @@ func (enc *dsEncoder) EncodeToTxns(
             // Set the rest of the txn fields
             seg.TimeSealed = timeSealed
             if i > 0 {
-                seg.PrevUTID = txns[i-1].UTID
+                seg.PrevURID = txns[i-1].URID
             }
 
             headerSz := seg.Size()
@@ -169,7 +169,7 @@ func (enc *dsEncoder) EncodeToTxns(
                 plan.Encoding_TxnPayloadSegment,
                 scrap[:headerSz],
                 inPayload[pos:pos+seg.SegSz],
-                pdi.UTIDBinarySz,
+                pdi.URIDBinarySz,
                 &packingInfo,
             )
             if err != nil {
@@ -177,7 +177,7 @@ func (enc *dsEncoder) EncodeToTxns(
             }
 
             txns[i].Bytes = packingInfo.SignedBuf
-            txns[i].UTID = pdi.UTIDFromInfo(packingInfo.Extra, seg.TimeSealed, packingInfo.Hash)
+            txns[i].URID = pdi.URIDFromInfo(packingInfo.Extra, seg.TimeSealed, packingInfo.Hash)
 
             pos += seg.SegSz
         }
@@ -235,7 +235,7 @@ func (dec *dsDecoder) DecodeRawTxn(
 
     txnInfo.From = out.Signer.PubKey
     txnInfo.TxnHashname = out.Hash
-    txnInfo.UTID = pdi.UTIDFromInfo(out.Hash[len(out.Hash):], txnInfo.TimeSealed, out.Hash)
+    txnInfo.URID = pdi.URIDFromInfo(out.Hash[len(out.Hash):], txnInfo.TimeSealed, out.Hash)
 
 	// 2) Isolate the payload buf
 	if txnInfo.SegSz != uint32(len(out.Body)) {

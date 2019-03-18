@@ -191,7 +191,7 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             if i == 266 {
                 err = nil
             }
-            var prevUTID []byte
+            var prevURID []byte
 
 			for idx, txnOut := range txnsOut {
 				decodedTxn := &pdi.DecodedTxn{
@@ -206,15 +206,15 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 				if err != nil {
 					gTesting.Fatal(err)
                 }
-                if bytes.Compare(txnOut.UTID, decodedTxn.Info.UTID) != 0 {
-                    gTesting.Fatal("decoded UTID doesn't match")
+                if bytes.Compare(txnOut.URID, decodedTxn.Info.URID) != 0 {
+                    gTesting.Fatal("decoded URID doesn't match")
                 }
-                if bytes.Compare(prevUTID, decodedTxn.Info.PrevUTID) != 0 {
-                    gTesting.Fatal("prev seg UTID not set properly")
+                if bytes.Compare(prevURID, decodedTxn.Info.PrevURID) != 0 {
+                    gTesting.Fatal("prev seg URID not set properly")
                 }
 
                 txns[idx] = decodedTxn
-                prevUTID = decodedTxn.Info.UTID
+                prevURID = decodedTxn.Info.URID
             }
             N := len(txnsOut)
 
@@ -241,8 +241,8 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
                 gTesting.Fatal("payload failed")
             }
 
-            if pdi.UTID(prevUTID).String() != final.UTID {
-                gTesting.Fatal("last UTID chk failed")
+            if pdi.URID(prevURID).String() != final.URID {
+                gTesting.Fatal("last URID chk failed")
             }
 		}
 	}

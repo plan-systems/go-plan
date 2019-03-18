@@ -293,7 +293,7 @@ func (ms *MemberSession) onInternalStartup() error {
             }
 
             for _, txn := range txns {
-                ms.Flow.Log.Infof("encoded    txn %v", ski.BinDesc(txn.UTID))
+                ms.Flow.Log.Infof("encoded    txn %v", ski.BinDesc(txn.URID))
 
                 ms.HostRepo.txnsToCommit <- txn
                 ms.HostRepo.txnsToWrite  <- txn

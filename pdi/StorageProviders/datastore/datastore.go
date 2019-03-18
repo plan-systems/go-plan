@@ -75,7 +75,7 @@ type Store struct {
 
 
 type txnUpdate struct {
-    UTID            pdi.UTID
+    URID            pdi.URID
     TxnStatus       pdi.TxnStatus
 }
 
@@ -285,7 +285,7 @@ type ScanJob struct {
 
 // SendJob represents a pending SendTxns) calls to a StorageProvider
 type SendJob struct {
-    UTIDs      [][]byte
+    URIDs      [][]byte
     Outlet     pdi.StorageProvider_SendTxnsServer
     OnComplete chan error
 }
@@ -469,11 +469,11 @@ func (St *Store) doCommitJob(job CommitJob) error {
         batch := NewTxnHelper(St.txnDB)
         for batch.NextAttempt() {
 
-            err := batch.Txn.Set(job.Txn.Info.UTID, job.Txn.RawTxn)
+            err := batch.Txn.Set(job.Txn.Info.URID, job.Txn.RawTxn)
             if err != nil {
                 err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
             } else {
-                St.flow.Log.Infof("committed txn %v", job.Txn.UTID)
+                St.flow.Log.Infof("committed txn %v", job.Txn.URID)
             }
 
             batch.Finish(err)
@@ -493,14 +493,14 @@ func (St *Store) doCommitJob(job CommitJob) error {
             }
 
             St.flow.Log.WithFields(log.Fields{
-                "UTID": job.Txn.UTID,
+                "URID": job.Txn.URID,
             }).WithError(err).Warn("CommitJob error")
         
             err = perr
         }
 
         St.txnUpdates <- txnUpdate{
-            job.Txn.Info.UTID, 
+            job.Txn.Info.URID, 
             txnStatus,
         }
     }
@@ -605,7 +605,7 @@ func (St *Store) DoCommitJob(job CommitJob) error {
     }
 
     St.txnUpdates <- txnUpdate{
-        job.Txn.Info.UTID, 
+        job.Txn.Info.URID, 
         pdi.TxnStatus_COMMITTING,
     }
 
@@ -629,12 +629,12 @@ func (St *Store) doSendJob(job SendJob) error {
             },
         }
 
-        for _, UTID := range job.UTIDs {
+        for _, URID := range job.URIDs {
             var (
                 txnOut *pdi.RawTxn
             )
 
-            item, dbErr := dbTxn.Get(UTID)
+            item, dbErr := dbTxn.Get(URID)
             if dbErr == nil {
                 txnOut = &txn
 
@@ -643,7 +643,7 @@ func (St *Store) doSendJob(job SendJob) error {
                     return nil
                 })
             } else if dbErr == badger.ErrKeyNotFound {
-                // TODO: send alert that UTID not found?
+                // TODO: send alert that URID not found?
             } else {
                 err = dbErr
             }
@@ -678,18 +678,18 @@ func (St *Store) doScanJob(job ScanJob) error {
 
     const (
         batchMax = 50
-        batchBufSz = batchMax * pdi.UTIDBinarySz
+        batchBufSz = batchMax * pdi.URIDBinarySz
     )
     var (
-        UTIDbuf [batchMax * pdi.UTIDBinarySz]byte
-        UTIDs [batchMax][]byte
+        URIDbuf [batchMax * pdi.URIDBinarySz]byte
+        URIDs [batchMax][]byte
     )
     statuses := make([]byte, batchMax)
     for i := 0; i < batchMax; i++ {
         statuses[i] = byte(pdi.TxnStatus_FINALIZED)
 
-        pos := i * pdi.UTIDBinarySz
-        UTIDs[i] = UTIDbuf[pos:pos + pdi.UTIDBinarySz]
+        pos := i * pdi.URIDBinarySz
+        URIDs[i] = URIDbuf[pos:pos + pdi.URIDBinarySz]
     }
 
     heartbeat := time.NewTicker(time.Second * 28)
@@ -709,12 +709,12 @@ func (St *Store) doScanJob(job ScanJob) error {
 
         var (
             scanDir int
-            stopKeyBuf [pdi.UTIDBinarySz]byte
-            seekKeyBuf [pdi.UTIDBinarySz]byte
+            stopKeyBuf [pdi.URIDBinarySz]byte
+            seekKeyBuf [pdi.URIDBinarySz]byte
         )
 
-        seekKey := pdi.UTIDFromInfo(seekKeyBuf[:0], job.TxnScan.TimestampStart, nil)
-        stopKey := pdi.UTIDFromInfo(stopKeyBuf[:0], job.TxnScan.TimestampStop,  nil)
+        seekKey := pdi.URIDFromInfo(seekKeyBuf[:0], job.TxnScan.TimestampStart, nil)
+        stopKey := pdi.URIDFromInfo(stopKeyBuf[:0], job.TxnScan.TimestampStop,  nil)
 
         if opts.Reverse {
             scanDir = -1
@@ -753,12 +753,12 @@ func (St *Store) doScanJob(job ScanJob) error {
                         break
                     }
 
-                    if len(itemKey) != pdi.UTIDBinarySz {
-                        St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.UTIDBinarySz)
+                    if len(itemKey) != pdi.URIDBinarySz {
+                        St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDBinarySz)
                         continue
                     }
 
-                    copy(UTIDs[batchCount], itemKey)
+                    copy(URIDs[batchCount], itemKey)
 
                     batchCount++
                     totalCount++
@@ -774,11 +774,11 @@ func (St *Store) doScanJob(job ScanJob) error {
                     scanDir = 0
                 } else if err == nil {
                     err = job.Outlet.Send(&pdi.TxnList{
-                        UTIDs:    UTIDs[:batchCount],
+                        URIDs:    URIDs[:batchCount],
                         Statuses: statuses[:batchCount],
                     })
 
-                    copy(seekKey, UTIDs[batchCount-1])
+                    copy(seekKey, URIDs[batchCount-1])
                 }
 
                 itr.Close()
@@ -802,8 +802,8 @@ func (St *Store) doScanJob(job ScanJob) error {
 
                     select {
                         case txnUpdate := <- job.txnUpdates:
-                            if len(txnUpdate.UTID) == pdi.UTIDBinarySz {
-                                copy(UTIDs[batchCount], txnUpdate.UTID)
+                            if len(txnUpdate.URID) == pdi.URIDBinarySz {
+                                copy(URIDs[batchCount], txnUpdate.URID)
                                 statuses[batchCount] = byte(txnUpdate.TxnStatus)
                                 batchCount++
 
@@ -817,7 +817,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                                 
                         case <- wakeTimer:
                             err = job.Outlet.Send(&pdi.TxnList{
-                                UTIDs: UTIDs[:batchCount],
+                                URIDs: URIDs[:batchCount],
                                 Statuses: statuses[:batchCount],
                             })
                             sent = true

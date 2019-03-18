@@ -72,7 +72,7 @@ type CommunityRepo struct {
 
     DefaultFileMode         os.FileMode
 
-    txnDB                   *badger.DB      // Complete record of community txns (by UTID); i.e. a replica "follower" of StorageProvider
+    txnDB                   *badger.DB      // Complete record of community txns (by URID); i.e. a replica "follower" of StorageProvider
 
 
     //txnsDeferred            ds.Datastore        // Values point to txn?
@@ -100,10 +100,10 @@ type CommunityRepo struct {
     txnsToDecode            chan pdi.RawTxn
     txnsToWrite             chan pdi.RawTxn
 
-    txnsToRequest           chan *pdi.TxnList         // UTIDs to be fetched from the SP (that the repo needs)
+    txnsToRequest           chan *pdi.TxnList         // URIDs to be fetched from the SP (that the repo needs)
     txnCollater             pdi.TxnCollater
 
-    txnWorklist             *badger.DB      // Status info by txn UTID
+    txnWorklist             *badger.DB      // Status info by txn URID
 
     entriesToProcess        chan *entryIP
     communitySKI            ski.Session
@@ -284,17 +284,17 @@ func (CR *CommunityRepo) onInternalStartup() error {
     
         for txn := range CR.txnsToWrite {
             dbTxn := CR.txnDB.NewTransaction(true)
-            dbErr := dbTxn.Set([]byte(txn.UTID), txn.Bytes)
+            dbErr := dbTxn.Set([]byte(txn.URID), txn.Bytes)
             if dbErr == nil {
                 dbErr = dbTxn.Commit()
             } else {
                 dbTxn.Discard()
             }
 
-            CR.flow.Log.Infof("stored     txn %v", ski.BinDesc(txn.UTID))
+            CR.flow.Log.Infof("stored     txn %v", ski.BinDesc(txn.URID))
             
             if dbErr != nil {
-                err := plan.Errorf(dbErr, plan.TxnDBNotReady, "failed to write txn %v to db", txn.UTID)
+                err := plan.Errorf(dbErr, plan.TxnDBNotReady, "failed to write txn %v to db", txn.URID)
                 if CR.flow.FilterFault(err) != nil {
                     break
                 }
@@ -329,7 +329,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
             if err != nil {
                 err = plan.Error(err, plan.TxnDecodeFailed, "txn decode failed")
             } else {
-                txnIn.UTID = seg.Info.UTID
+                txnIn.URID = seg.Info.URID
             }
 
             // TODO: (DoS security) check that the SP isn't handing back wrong/unrequested txns
@@ -341,20 +341,20 @@ func (CR *CommunityRepo) onInternalStartup() error {
                 CR.txnsToWrite <- txnIn
             }
 
-            UTID := seg.UTID
+            URID := seg.URID
 
             if err == nil {
                 var solo *pdi.DecodedTxn
                 solo, err = CR.txnCollater.Desegment(seg)
 
                 if solo != nil && err != nil {
-                    UTID = seg.UTID
+                    URID = seg.URID
                     err = CR.DispatchPayload(solo)
                 }
             }
 
             if err != nil {
-                CR.flow.Log.WithError(err).Warnf("err processing txn %v", UTID)
+                CR.flow.Log.WithError(err).Warnf("err processing txn %v", URID)
             }
         }
 
@@ -416,7 +416,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
             }
 
 
-            CR.flow.Log.Infof("committing txn %v", ski.BinDesc(txn.UTID))
+            CR.flow.Log.Infof("committing txn %v", ski.BinDesc(txn.URID))
 
 
             // TODO: use stream input and output so that commit details can be reported?
@@ -442,27 +442,27 @@ func (CR *CommunityRepo) onInternalStartup() error {
     go CR.forwardTxnScanner()
     
     /*
-        var UTIDs []byte
+        var URIDs []byte
 
         for {
 
             // In the futurtre
-            UTIDs, err := CR.scanForTxns(UTIDs)
-            if err == nil && len(UTIDs) > 0 {
-                UTIDs, err = CR.filterMissingTxns(UTIDs)
+            URIDs, err := CR.scanForTxns(URIDs)
+            if err == nil && len(URIDs) > 0 {
+                URIDs, err = CR.filterMissingTxns(URIDs)
             }
 
             if txnBatch != nil {
                 
                 for CR.opState == repoStarting || CR.opState == repoRunning {
                     var err error
-                    txnBatch.UTIDs, err = CR.filterMissingTxns(txnBatch.UTIDs)
+                    txnBatch.URIDs, err = CR.filterMissingTxns(txnBatch.URIDs)
                     if CR.RetryCriticalOp(err) {
                         continue
                     }
 
                     // Request whatever txns we're missing
-                    if len(txnBatch.UTIDs) > 0 {
+                    if len(txnBatch.URIDs) > 0 {
                         CR.txnsToRequest <- txnBatch 
                     }
                 }
@@ -708,7 +708,7 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
 
 
     count := 0
-    N := len(ioTxnList.UTIDs)
+    N := len(ioTxnList.URIDs)
     if N != len(ioTxnList.Statuses) {
         CR.flow.Log.Warn("received bad TxnList")
         return plan.Error(nil, plan.StorageNotConsistent, "received bad TxnList")
@@ -720,19 +720,19 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
         dbTxn := CR.txnDB.NewTransaction(false)
         for i := 0; i < N && err == nil; i++ {
             txnStatus := pdi.TxnStatus(ioTxnList.Statuses[i])
-            UTID := ioTxnList.UTIDs[i]
+            URID := ioTxnList.URIDs[i]
             
             switch txnStatus {
                 case pdi.TxnStatus_COMMITTED:
                 case pdi.TxnStatus_FINALIZED:
-                    _, itemErr := dbTxn.Get(UTID)
+                    _, itemErr := dbTxn.Get(URID)
                     if itemErr == nil {
                         // entry exists; no op!
                     } else if itemErr == badger.ErrKeyNotFound {
-                        ioTxnList.UTIDs[count] = UTID
+                        ioTxnList.URIDs[count] = URID
                         count++
                     } else {
-                        err = plan.Errorf(itemErr, plan.TxnDBNotReady, "error reading txn DB key %v", UTID)
+                        err = plan.Errorf(itemErr, plan.TxnDBNotReady, "error reading txn DB key %v", URID)
                         err = CR.flow.FilterFault(err)
                     }
             }
@@ -740,7 +740,7 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
         dbTxn.Discard()
     }
 
-    ioTxnList.UTIDs = ioTxnList.UTIDs[:count]
+    ioTxnList.URIDs = ioTxnList.URIDs[:count]
     ioTxnList.Statuses = ioTxnList.Statuses[:0]
 
     return nil
@@ -756,8 +756,8 @@ const (
 
 
 //
-// It also starts a UTID scan from that time and earlier (in reverse order). As it encounters unwitnessed txns,
-// it will explicitly fetch them.  When the UTID txn correspondence is sufficient and convincing, the reverse scan
+// It also starts a URID scan from that time and earlier (in reverse order). As it encounters unwitnessed txns,
+// it will explicitly fetch them.  When the URID txn correspondence is sufficient and convincing, the reverse scan
 // is stopped, the fetch queue is emptied, and only the forward reader will eventually remain.
 func (CR *CommunityRepo) backwardTxnScanner() {
 
@@ -766,7 +766,7 @@ func (CR *CommunityRepo) backwardTxnScanner() {
 
 //
 // Continuously queries the community's storage provider(s) for txns (or txn status) this repo does not yet have.
-// When it receives UTID updates, reconciles that with the repo's txn db, and sends off requests for missing txns.
+// When it receives URID updates, reconciles that with the repo's txn db, and sends off requests for missing txns.
 func (CR *CommunityRepo) forwardTxnScanner() {
 
     for CR.flow.IsRunning() {
@@ -778,7 +778,7 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             scanCtx,
             &pdi.TxnScan{
                 TimestampStart: CR.State.LastTxnTimeRead,
-                TimestampStop: pdi.UTIDTimestampMax,
+                TimestampStop: pdi.URIDTimestampMax,
                 SendTxnUpdates: true,
             },
         )
@@ -801,7 +801,7 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             }
 
             // Request the txns we're missing
-            if len(txnList.UTIDs) > 0 && CR.flow.IsRunning() {
+            if len(txnList.URIDs) > 0 && CR.flow.IsRunning() {
                 CR.txnsToRequest <- txnList 
             }
         }
@@ -851,76 +851,6 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 }
 
 
-
-
-
-/*
-func (sess *MemberSession) DecryptAndDecodeEntry(
-    inEntry []byte,
-) error {
-
-    var packingInfo ski.SignedPayload
-    err := sess.unpacker.UnpackAndVerify(inEntry, &packingInfo)
-
-    var entryInfo pdi.EntryInfo
-    err = entryInfo.Unmarshal(packingInfo.Header)
-
-    // Lookup member ID's pub key and verify with packingInfo.PubKey
-    //if entryInfo.
-}
-
-
-
-func (sess *MemberSession) EncryptAndEncodeEntry(
-    ioHeader *pdi.EntryInfo,
-    inBody []byte,
-) ([]pdi.RawTxn, error) {
-
-    var err error
-
-    if ioHeader.TimeAuthored == 0 {
-        t := plan.Now()
-        ioHeader.TimeAuthored     = t.UnixSecs
-        ioHeader.TimeAuthoredFrac = uint32(t.FracSecs)
-    }
-
-    // TODO: allow multiple entries to be put into a plan.Block
-
-    entryCrypt := pdi.EntryCrypt{
-        CommunityPubKey: sess.communityKeyInfo.PubKey,
-    }
-
-    // TODO: use scrap buf
-    headerBuf, err := ioHeader.Marshal()
-
-    // Have the member sign the header
-    var packingInfo ski.PackingInfo
-    err = sess.Packer.PackAndSign(
-        plan.Encoding_Pb_EntryInfo,
-        headerBuf,
-        inBody,
-        0,
-        &packingInfo,
-    )
-    entryCrypt.PackedEntry, err = sess.CommunityEncrypt(packingInfo.SignedBuf)
-
-    // TODO: use scrap buf
-    entryBuf, err := entryCrypt.Marshal()
-
-    txns, err := sess.TxnEncoder.EncodeToTxns(
-        entryBuf,
-        plan.Encoding_Pb_EntryCrypt,
-        nil,
-        0,
-    )
-
-    if err != nil {
-        return nil, err
-    }
-    
-    return txns, nil
-}
-*/
 
 
 func (CR *CommunityRepo) processEntry(eip *entryIP) error {
@@ -1030,7 +960,7 @@ type entryIP struct {
     timeStart       plan.Time
 
     // Txn ID of the last/final segment storage provider txn
-   // ParentUTID      string
+   // ParentURID      string
 
 /*
     entryTxnIndex   int
@@ -1076,7 +1006,7 @@ type entryInProcess struct {
 
 
     // Txn ID of the last/final segment storage provider txn
-    ParentUTID      string
+    ParentURID      string
 
 
     entryTxnIndex   int
@@ -1281,7 +1211,7 @@ func (eip *entryInProcess) prepChannelAccess() error {
             var txnInfo pdi.TxnInfo
             var txnSeg pdi.TxnSegment
 
-            CR.flow.Log.Infof("Received txn %v", txn.UTID)
+            CR.flow.Log.Infof("Received txn %v", txn.URID)
             err = decoder.DecodeRawTxn(
                 txn.RawTxn,
                 &txnInfo,
@@ -1317,7 +1247,7 @@ func (eip *entryInProcess) prepChannelAccess() error {
                         var txnInfo pdi.TxnInfo
                         var txnSeg pdi.TxnSegment
 
-                        log.Infof("Recieved txn UTID %v", txn.UTID)
+                        log.Infof("Recieved txn URID %v", txn.URID)
                         err = decoder.DecodeRawTxn(
                             txn.RawTxn,
                             &txnInfo,

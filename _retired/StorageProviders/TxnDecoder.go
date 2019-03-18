@@ -96,14 +96,14 @@ func (dec *dsDecoder) DecodeRawTxn(
             dec.hashKits[txnInfo.HashKitId] = hashKit
         }
 
-        // Use a single allocation for the UTID backing buf and the hash digest buf
-        miscBuf := make([]byte, 0, pdi.UTIDBinarySz + hashKit.HashSz)
+        // Use a single allocation for the URID backing buf and the hash digest buf
+        miscBuf := make([]byte, 0, pdi.URIDBinarySz + hashKit.HashSz)
 
-        // 5) Calculate the hash digest and thus UTID of the raw txn
+        // 5) Calculate the hash digest and thus URID of the raw txn
         hashKit.Hasher.Reset()
         hashKit.Hasher.Write(rawTxn[:txnLen])
         txnInfo.TxnHashname = hashKit.Hasher.Sum(miscBuf)
-        txnInfo.UTID = pdi.UTIDFromInfo(miscBuf[hashKit.HashSz:hashKit.HashSz], txnInfo.TimeSealed, txnInfo.TxnHashname)
+        txnInfo.URID = pdi.URIDFromInfo(miscBuf[hashKit.HashSz:hashKit.HashSz], txnInfo.TimeSealed, txnInfo.TxnHashname)
     }
     
     if dec.theadsafe {

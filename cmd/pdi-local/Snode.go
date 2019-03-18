@@ -131,7 +131,7 @@ func NewSnode(
     var err error
 
     if inBasePath == nil || len(*inBasePath) == 0 {
-        sn.BasePath, err = plan.UseLocalDir("Stores")
+        sn.BasePath, err = plan.UseLocalDir("pdi-local")
     } else {
         sn.BasePath = *inBasePath
     }
@@ -437,7 +437,7 @@ func (sn *Snode) SendTxns(inTxnList *pdi.TxnList, inOutlet pdi.StorageProvider_S
     }
         
     job := ds.SendJob{
-        UTIDs:     inTxnList.UTIDs,
+        URIDs:     inTxnList.URIDs,
         Outlet:    inOutlet,
         OnComplete: make(chan error),
     }

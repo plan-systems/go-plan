@@ -136,11 +136,11 @@ func (enc *dsEncoder) EncodeToTxns(
             seg.HashKitId = hashKit.HashKitID
 
             if i > 0 {
-                seg.PrevUTID = txns[i-1].UTID
+                seg.PrevURID = txns[i-1].URID
             }
 
 			// Do one alloc for all out needs.  Add a lil extra for sig and len bytes.
-			buf := make([]byte, 200 + seg.Size() + int(seg.SegSz) + pdi.UTIDBinarySz + hashKit.HashSz)
+			buf := make([]byte, 200 + seg.Size() + int(seg.SegSz) + pdi.URIDBinarySz + hashKit.HashSz)
 
 			// 1) Append the TxnInfo
 			infoLen, merr := seg.MarshalTo(buf[2:])
@@ -160,11 +160,11 @@ func (enc *dsEncoder) EncodeToTxns(
 			hashKit.Hasher.Reset()
 			hashKit.Hasher.Write(buf[:txnLen])
 
-            // Use the extra we allocated to store the hashname and UTID
-            j := len(buf) - hashKit.HashSz - pdi.UTIDBinarySz
+            // Use the extra we allocated to store the hashname and URID
+            j := len(buf) - hashKit.HashSz - pdi.URIDBinarySz
 			seg.TxnHashname = hashKit.Hasher.Sum(buf[j:j])
             j += hashKit.HashSz
-            seg.UTID = pdi.UTIDFromInfo(buf[j:j], seg.TimeSealed, seg.TxnHashname)
+            seg.URID = pdi.URIDFromInfo(buf[j:j], seg.TimeSealed, seg.TxnHashname)
 
 			if len(seg.TxnHashname) != hashKit.Hasher.Size() {
 				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
@@ -192,7 +192,7 @@ func (enc *dsEncoder) EncodeToTxns(
                 }
             }
 
-            txns[i].UTID = seg.UTID
+            txns[i].URID = seg.URID
             txns[i].RawTxn = buf[:txnLen]
 		}
 

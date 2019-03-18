@@ -350,35 +350,35 @@ func SegmentIntoTxns(
 
 
 // Base64 is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
-// See comments for TxnInfo.UTID in pdi.proto
+// See comments for TxnInfo.URID in pdi.proto
 var Base64 = base64.NewEncoding(plan.Base64CharSet).WithPadding(base64.NoPadding)
 
 
 const (
 
-    // UTIDTimestampSz is the bytesize of the timestamp stored in a UTID
+    // URIDTimestampSz is the bytesize of the timestamp stored in a URID
     // This must be a multiple of 3 so that the encoded length doesn't have any bit overhang.
-    UTIDTimestampSz = 6
+    URIDTimestampSz = 6
 
-    // UTIDTimestampMax is the max time value 
+    // URIDTimestampMax is the max time value 
     // 48 bits of unix seconds maxes around 8,800,000 CE, so we'll call that good for now.  :D 
-    UTIDTimestampMax = (1 << (UTIDTimestampSz * 8) ) - 1
+    URIDTimestampMax = (1 << (URIDTimestampSz * 8) ) - 1
 
-    // UTIDTxnIDSz is the byte length of the ID bytes encoded within in a UTID.
+    // URIDTxnIDSz is the byte length of the ID bytes encoded within in a URID.
     // This is also chosen to be a multiple of 3 such that the encoded txn hashname falls on base64 digit boundaries. 
-    UTIDTxnIDSz = 27
+    URIDTxnIDSz = 27
 
-    // UTIDBinarySz is the total bytesize of a decoded UTID.
-    // UTID aka "Universal Transaction Identifier", an ASCII string that encodes 33 bytes using pdi.Base64: 
+    // URIDBinarySz is the total bytesize of a decoded URID.
+    // URID aka "Universal Transaction Identifier", an ASCII string that encodes 33 bytes using pdi.Base64: 
     //     6 bytes (rightmost BIG-endian bytes of TimeSealed) 
     //  + 27 bytes (rightmost-bytes of hash digest of this txn) ==> *33* bytes (total) ==> *44* chars (pdi.Base64 encoded)
-    UTIDBinarySz = UTIDTxnIDSz + UTIDTimestampSz
+    URIDBinarySz = URIDTxnIDSz + URIDTimestampSz
 
-    // UTIDTimestampStrLen is the base64 char len of an encoded timestamp.  To the right of this position, the txn hashname begins.
-    UTIDTimestampStrLen = 8 * UTIDTimestampSz / 6
+    // URIDTimestampStrLen is the base64 char len of an encoded timestamp.  To the right of this position, the txn hashname begins.
+    URIDTimestampStrLen = 8 * URIDTimestampSz / 6
 
-    // UTIDStrLen is the ASCII char length of an encoded UTID (44 chars)
-    UTIDStrLen = 8 * UTIDBinarySz / 6
+    // URIDStrLen is the ASCII char length of an encoded URID (44 chars)
+    URIDStrLen = 8 * URIDBinarySz / 6
 
 )
 
@@ -388,20 +388,20 @@ func Encode64(in []byte) string {
 }
 
 
-// UTID aka "Universal Transaction Identifier"
+// URID aka "Universal Resource Identifier"
 // 
-// The purpose of a UTID is that it can be easily compared with others and easily sorted chronologically.
-type UTID []byte
+// The purpose of a URID is that it can be easily compared with others and easily sorted chronologically.
+type URID []byte
 
-// String converts a binary UTID into its pdi.Base64 ASCII string representation.
-func (utid UTID) String() string {
-    var str [UTIDStrLen]byte
+// String converts a binary URID into its pdi.Base64 ASCII string representation.
+func (utid URID) String() string {
+    var str [URIDStrLen]byte
 
     sz := len(utid)
-    if sz == UTIDBinarySz {
-        sz = UTIDStrLen
-    } else if sz == UTIDTimestampSz {
-        sz = UTIDTimestampStrLen
+    if sz == URIDBinarySz {
+        sz = URIDStrLen
+    } else if sz == URIDTimestampSz {
+        sz = URIDTimestampStrLen
     } else {
         return ""
     }
@@ -411,17 +411,17 @@ func (utid UTID) String() string {
 }
 
 
-// UTIDFromInfo returns the binary/base256 form of a binary UTID aka "Universal Transaction Identifier"
-func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
+// URIDFromInfo returns the binary/base256 form of a binary URID aka "Universal Transaction Identifier"
+func URIDFromInfo(in []byte, inTimestamp int64, inID []byte) URID {
 
     idSz := len(inID)
-    utidLen := UTIDTimestampSz
+    utidLen := URIDTimestampSz
     if idSz > 0 {
-        utidLen += UTIDTxnIDSz
+        utidLen += URIDTxnIDSz
     }
 
-    if inTimestamp > UTIDTimestampMax {
-        inTimestamp = UTIDTimestampMax
+    if inTimestamp > URIDTimestampMax {
+        inTimestamp = URIDTimestampMax
     }
 
     var raw []byte
@@ -444,7 +444,7 @@ func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
 
     // Use right-most bytes
     if idSz > 0 {
-        overhang := idSz - UTIDTxnIDSz
+        overhang := idSz - URIDTxnIDSz
 
         if overhang > 0 {
             copy(raw[6:], inID[overhang:])
