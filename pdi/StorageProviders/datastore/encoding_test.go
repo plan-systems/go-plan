@@ -17,7 +17,15 @@ import (
 var gTestBuf = "May PLAN empower organizations and individuals, and may it be an instrument of productivity and self-organization."
 
 var gTesting *testing.T
-var gCommunityID = []byte{0, 1, 2, 3, 4, 5, 5, 7, 99, 123}
+
+
+var gCommunityEpoch = pdi.CommunityEpoch{
+    CommunityID: []byte{0, 1, 2, 3, 4, 5, 5, 7, 99, 123},
+    CommunityName: "encoding-test",
+    EntryHashKit: ski.HashKitID_LegacyKeccak_256,
+}
+
+
 
 func TestVarAppendBuf(t *testing.T) {
 
@@ -77,17 +85,30 @@ func TestTxnEncoding(t *testing.T) {
 	tool, err := ski.NewSessionTool(
 		session,
 		"Charles",
-		gCommunityID,
+		gCommunityEpoch.CommunityID,
 	)
 	if err != nil {
 		gTesting.Fatal(err)
 	}
 
-    stEpoch, err := NewStorageEpoch(tool.Session, gCommunityID, "encoding-test-epoch", []byte{1, 2, 3, 4})
+    stEpoch, err := NewStorageEpoch(tool.Session, gCommunityEpoch)
 	if err != nil {
 		gTesting.Fatal(err)
 	}
     stEpoch.TxnMaxSize = 10000
+
+
+    {
+        authorKey := ski.KeyRef{
+            KeyringName: stEpoch.StorageKeyringName(),
+        }
+
+        err := tool.GetLatestKey(&authorKey, ski.KeyType_SigningKey)
+        if err != nil {
+            gTesting.Fatal(err)
+        }
+    }
+
 
 	A := &testSession{
 		*tool,
@@ -136,21 +157,10 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 		decoder := A.decoder
 		encoder := A.encoder
 
-		{
-            authorKey := ski.KeyRef{
-                KeyringName: []byte("encoding test keyring"),
-            }
-
-            err := A.SessionTool.GetLatestKey(&authorKey, ski.KeyType_SigningKey)
-            if err != nil {
-                gTesting.Fatal(err)
-            }
-
-			err = encoder.ResetSigner(A.Session, authorKey)
-			if err != nil {
-				gTesting.Fatal(err)
-			}
-		}
+        err := encoder.ResetSigner(A.Session, nil)
+        if err != nil {
+            gTesting.Fatal(err)
+        }
 
         txns := make([]*pdi.DecodedTxn, 10000)
 

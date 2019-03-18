@@ -25,24 +25,22 @@ const (
 
 // NewStorageEpoch generates a new StorageEpoch, needed when creating a new community.
 func NewStorageEpoch(
-    skiSession       ski.Session,
-    inCommunityID    []byte,
-    inEpochName      string,
-    inGenesisKeyring []byte,
+    skiSession  ski.Session,
+    inCommunity pdi.CommunityEpoch,
 ) (*pdi.StorageEpoch, error) {
 
     epoch := &pdi.StorageEpoch{
         StorageProtocol: ProtocolDesc,
-        CommunityID: inCommunityID,
+        CommunityID: inCommunity.CommunityID,
         TxnHashKit: ski.HashKitID_LegacyKeccak_256,
-        Name: inEpochName,
+        Name: inCommunity.CommunityName,
         TxnMaxSize: 1000,
     }
 
     var err error
     epoch.OriginKey, err = ski.GenerateNewKey(
         skiSession,
-        inGenesisKeyring,
+        inCommunity.FormGenesisKeyringName(),
         ski.KeyInfo{
             KeyType: ski.KeyType_SigningKey,
             CryptoKit: ski.CryptoKitID_NaCl,
@@ -95,12 +93,15 @@ func NewTxnEncoder(
 // ResetSigner --see TxnEncoder
 func (enc *dsEncoder) ResetSigner(
 	inSession ski.Session,
-	inFrom    ski.KeyRef,
+	inFrom []byte,
 ) error {
 
 	return enc.packer.ResetSession(
         inSession, 
-        inFrom, 
+        ski.KeyRef{
+            KeyringName: enc.StorageEpoch.StorageKeyringName(),
+            PubKey: inFrom,
+        }, 
         enc.StorageEpoch.TxnHashKit,
         &enc.from)
 
@@ -155,7 +156,7 @@ func (enc *dsEncoder) EncodeToTxns(
 
             headerSz := seg.Size()
             if headerSz > len(scrap) {
-                enc.scrap = make([]byte, headerSz + 200)
+                enc.scrap = make([]byte, headerSz + 5000)
                 scrap = enc.scrap
             }
             headerSz, err = seg.MarshalTo(scrap)
