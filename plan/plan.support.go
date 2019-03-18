@@ -53,7 +53,7 @@ func (F *Flow) Startup(
 
     err := onInternalStartup()
     if err != nil {
-        F.Shutdown(inDesc + " internal startup failed")
+        F.InitiateShutdown(inDesc + " internal startup failed")
     }
 
     go func() {
@@ -74,6 +74,8 @@ func (F *Flow) Startup(
 
     if err != nil {
         F.ShutdownComplete.Wait()
+
+        F.Log.WithError(err).Warnf("%v startup failed", F.Desc)
     }
 
     return err
@@ -117,14 +119,12 @@ func (F *Flow) IsRunning() bool {
     return true
 }
 
-// Shutdown initiates a polite shutdown of this Context and blocks until complete.
-//
-// if inBlocker != nil, it is released when shutdown is complete
+// InitiateShutdown initiates a polite shutdown of this Context, returning immediately after.
 //
 // If Shutdown() has already been called, behavior is consistent but inReason will be dropped.
 //
 // THREADSAFE
-func (F *Flow) Shutdown(
+func (F *Flow) InitiateShutdown(
     inReason string,
 ) {
 
@@ -136,6 +136,17 @@ func (F *Flow) Shutdown(
         F.ctxCancel = nil
     }
     F.shutdownMutex.Unlock()
+
+}
+
+// Shutdown calls InitiateShutdown() and blocks until complete.
+//
+// THREADSAFE
+func (F *Flow) Shutdown(
+    inReason string,
+) {
+
+    F.InitiateShutdown(inReason)
 
     F.ShutdownComplete.Wait()
 }
@@ -240,6 +251,30 @@ func UseLocalDir(inSubDir string) (string, error) {
 }
 
 
+// CreateNewDir creates the specified dir (and returns an error if the dir already exists)
+// 
+// If inPath is absolute then inBasePath is ignored.
+func CreateNewDir(inBasePath, inPath string) error {
+
+    var pathname string
+
+    if path.IsAbs(inPath) {
+        pathname = inPath
+    } else {
+        pathname = path.Join(inBasePath, inPath)
+    }
+
+    if _, err := os.Stat(pathname); ! os.IsNotExist(err) {
+        return Errorf(nil, FailedToAccessPath, "for safety, the path '%s' must not already exist", pathname)
+    }
+
+    err := os.MkdirAll(pathname, DefaultFileMode)
+    if err != nil { return err }
+
+    return nil
+}
+
+
 var remapCharset = map[rune]rune{
     ' ':  '-',
     '.':  '-',
@@ -272,3 +307,5 @@ func MakeFSFriendly(inName string, inSuffix []byte) string {
 
     return name
 }
+
+
