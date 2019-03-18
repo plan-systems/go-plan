@@ -472,6 +472,8 @@ func (St *Store) doCommitJob(job CommitJob) error {
             err := batch.Txn.Set(job.Txn.Info.UTID, job.Txn.RawTxn)
             if err != nil {
                 err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
+            } else {
+                St.flow.Log.Infof("committed txn %v", job.Txn.UTID)
             }
 
             batch.Finish(err)
@@ -557,9 +559,7 @@ func (St *Store) DoScanJob(job ScanJob) {
             St.flow.Log.WithError(err).Warn("doQueryJob() returned error")   
         }
 
-        // This releases the GRPC handler
         job.OnComplete <- err
-
         atomic.AddInt32(&St.numScanJobs, -1)
     }()
 }
@@ -583,9 +583,7 @@ func (St *Store) DoSendJob(job SendJob) {
             St.flow.Log.WithError(err).Warn("doSendJob() returned error")   
         }
 
-        // This releases the GRPC handler
         job.OnComplete <- err
-
         atomic.AddInt32(&St.numSendJobs, -1)
     }()
 
@@ -621,7 +619,7 @@ func (St *Store) DoCommitJob(job CommitJob) error {
 
 func (St *Store) doSendJob(job SendJob) error {
 
-    var err error
+    var err error 
 
     dbTxn := St.txnDB.NewTransaction(false)
     {
@@ -632,32 +630,31 @@ func (St *Store) doSendJob(job SendJob) error {
         }
 
         for _, UTID := range job.UTIDs {
-            var txnOut *pdi.RawTxn
+            var (
+                txnOut *pdi.RawTxn
+            )
 
-            if err == nil {
-                item, dbErr := dbTxn.Get(UTID)
-                if dbErr == nil {
-                    txnOut = &txn
+            item, dbErr := dbTxn.Get(UTID)
+            if dbErr == nil {
+                txnOut = &txn
 
-                    err = item.Value(func(inVal []byte) error{
-                        txnOut.Bytes = inVal
-                        return nil
-                    })
-                } else if dbErr == badger.ErrKeyNotFound  {
-                    // TODO: send alert that UTID not found?
-                } else {
-                    err = dbErr
-                }
+                err = item.Value(func(inVal []byte) error {
+                    txnOut.Bytes = inVal
+                    return nil
+                })
+            } else if dbErr == badger.ErrKeyNotFound {
+                // TODO: send alert that UTID not found?
+            } else {
+                err = dbErr
+            }
 
-                if err != nil {
-                    err = plan.Errorf(err, plan.TxnDBNotReady, "failed to read txn")
-                    St.flow.Log.WithError(err).Warn("txnDB error")
-                    continue
-                }
+            if err != nil {
+                St.flow.Log.WithError(err).Warn("failed to read txn")
+                continue
             }
 
             err = St.flow.CheckStatus()
-            if err != nil && txnOut != nil {
+            if err == nil && txnOut != nil {
                 err = job.Outlet.Send(txnOut)
             }
 
@@ -680,124 +677,166 @@ func (St *Store) doScanJob(job ScanJob) error {
     var err error
 
     const (
-        batchMax = 20
+        batchMax = 50
         batchBufSz = batchMax * pdi.UTIDBinarySz
     )
     var (
+        UTIDbuf [batchMax * pdi.UTIDBinarySz]byte
         UTIDs [batchMax][]byte
     )
     statuses := make([]byte, batchMax)
     for i := 0; i < batchMax; i++ {
         statuses[i] = byte(pdi.TxnStatus_FINALIZED)
+
+        pos := i * pdi.UTIDBinarySz
+        UTIDs[i] = UTIDbuf[pos:pos + pdi.UTIDBinarySz]
     }
+
+    heartbeat := time.NewTicker(time.Second * 28)
+    var batchLag *time.Ticker
 
     // Before we start the db txn (and effectively get locked to a db rev in time), subscribe this job to receive new commits
     if job.TxnScan.SendTxnUpdates {
+        batchLag = time.NewTicker(time.Millisecond * 300)
+
         job.txnUpdates = St.addTxnSubscriber()
     }
 
-    dbTxn := St.txnDB.NewTransaction(false)
     {
         opts := badger.DefaultIteratorOptions
         opts.PrefetchValues = false
         opts.Reverse = job.TxnScan.TimestampStart > job.TxnScan.TimestampStop
-        itr := dbTxn.NewIterator(opts)
 
         var (
-            dir int
-            keyBuf [pdi.UTIDBinarySz]byte
+            scanDir int
+            stopKeyBuf [pdi.UTIDBinarySz]byte
+            seekKeyBuf [pdi.UTIDBinarySz]byte
         )
 
-        itr.Seek(  pdi.UTIDFromInfo(keyBuf[:0], job.TxnScan.TimestampStart, nil))
-        stopKey := pdi.UTIDFromInfo(keyBuf[:0], job.TxnScan.TimestampStop,  nil)
+        seekKey := pdi.UTIDFromInfo(seekKeyBuf[:0], job.TxnScan.TimestampStart, nil)
+        stopKey := pdi.UTIDFromInfo(stopKeyBuf[:0], job.TxnScan.TimestampStop,  nil)
 
         if opts.Reverse {
-            dir = -1
+            scanDir = -1
         } else {
-            dir = 1
+            scanDir = 1
         }
 
         totalCount := int32(0)
 
-        for dir != 0 && err == nil {
-            batchCount := int32(0)
-            
-            for  ; itr.Valid() && St.flow.IsRunning(); itr.Next() {
 
-                item := itr.Item()
-                itemKey := item.Key()
-                if dir * bytes.Compare(itemKey, stopKey) > 0 {
-                    dir = 0
-                    break
+        for  err == nil && (scanDir != 0 || job.TxnScan.SendTxnUpdates) {
+
+            if scanDir != 0 {
+                dbTxn := St.txnDB.NewTransaction(false)
+                itr := dbTxn.NewIterator(opts)
+
+                // Seek to the next key.  
+                // If we're resuming, step to the next key after where we left off
+                itr.Seek(seekKey)
+                if  totalCount > 0 && itr.Valid() {
+                    itr.Next()
                 }
 
-                if len(itemKey) != pdi.UTIDBinarySz {
-                    St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.UTIDBinarySz)
-                    continue
-                }
+                batchCount := int32(0)
+                
+                for  ; itr.Valid(); itr.Next() {
 
-                copy(UTIDs[batchCount], itemKey)
-
-                batchCount++
-                totalCount++
-                if totalCount == job.TxnScan.MaxTxns {
-                    dir = 0
-                    break
-                } else if batchCount == batchMax {
-                    break
-                }
-            }
-
-            if err == nil && batchCount > 0 {
-                err = job.Outlet.Send(&pdi.TxnList{
-                    UTIDs:    UTIDs[:batchCount],
-                    Statuses: statuses[:batchCount],
-                })
-            }
-        }
-
-        itr.Close()
-    }
-
-    dbTxn.Discard()
-    dbTxn = nil
-
-    if job.TxnScan.SendTxnUpdates {
-        heartbeat := time.NewTicker(time.Second * 10)
-        batchLag  := time.NewTicker(time.Millisecond * 300)
-
-        batchCount := int32(0)
-        wakeTimer := heartbeat.C
-
-        for err == nil && St.flow.IsRunning() {
-
-            select {
-
-                case txnUpdate := <- job.txnUpdates:
-                    if len(txnUpdate.UTID) != pdi.UTIDBinarySz {
-                        copy(UTIDs[batchCount], txnUpdate.UTID)
-                        statuses[batchCount] = byte(txnUpdate.TxnStatus)
-                        batchCount++
-
-                        if batchCount == 1 {
-                            wakeTimer = batchLag.C
-                            for len(wakeTimer) > 0 {
-                                <-wakeTimer
-                            }
-                        }
+                    if err = St.CheckStatus(); err != nil {
+                        break
                     }
-                        
-                case <- wakeTimer:
+
+                    item := itr.Item()
+                    itemKey := item.Key()
+                    if scanDir * bytes.Compare(itemKey, stopKey) > 0 {
+                        scanDir = 0
+                        break
+                    }
+
+                    if len(itemKey) != pdi.UTIDBinarySz {
+                        St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.UTIDBinarySz)
+                        continue
+                    }
+
+                    copy(UTIDs[batchCount], itemKey)
+
+                    batchCount++
+                    totalCount++
+                    if totalCount == job.TxnScan.MaxTxns {
+                        scanDir = 0
+                        break
+                    } else if batchCount == batchMax {
+                        break
+                    }
+                }
+
+                if batchCount == 0 {
+                    scanDir = 0
+                } else if err == nil {
                     err = job.Outlet.Send(&pdi.TxnList{
-                        UTIDs: UTIDs[:batchCount],
+                        UTIDs:    UTIDs[:batchCount],
                         Statuses: statuses[:batchCount],
                     })
-                    wakeTimer = heartbeat.C
-            }
-        }
 
+                    copy(seekKey, UTIDs[batchCount-1])
+                }
+
+                itr.Close()
+                dbTxn.Discard()
+                dbTxn = nil
+            }
+
+            {
+                batchCount := int32(0)
+                sent := false
+
+                // Wait the full heartbeat time unless we get a txn update in which case send out the batch after a short delay.
+                wakeTimer := heartbeat.C
+
+                // Flush out any queued heartbeats
+                for len(wakeTimer) > 0 {
+                    <-wakeTimer
+                }
+
+                for err == nil && ! sent {
+
+                    select {
+                        case txnUpdate := <- job.txnUpdates:
+                            if len(txnUpdate.UTID) == pdi.UTIDBinarySz {
+                                copy(UTIDs[batchCount], txnUpdate.UTID)
+                                statuses[batchCount] = byte(txnUpdate.TxnStatus)
+                                batchCount++
+
+                                if batchCount == 1 {
+                                    wakeTimer = batchLag.C
+                                    for len(wakeTimer) > 0 {
+                                        <-wakeTimer
+                                    }
+                                }
+                            }
+                                
+                        case <- wakeTimer:
+                            err = job.Outlet.Send(&pdi.TxnList{
+                                UTIDs: UTIDs[:batchCount],
+                                Statuses: statuses[:batchCount],
+                            })
+                            sent = true
+
+                        case <- St.flow.Ctx.Done():
+                            err = St.CheckStatus()
+                    }
+                }
+
+            }
+
+        }
+    }
+
+    if job.TxnScan.SendTxnUpdates {
         St.removeTxnSubscriber(job.txnUpdates)
     }
 
     return err
 }
+
+
