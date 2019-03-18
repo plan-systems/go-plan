@@ -5,11 +5,13 @@ package pdi
 import (
 
     "io"
+    crand "crypto/rand"
 
 	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/go-plan/ski"
 	//"github.com/plan-systems/go-plan/pdi"
 
-    "golang.org/x/crypto/sha3"
+    //"golang.org/x/crypto/sha3"
 
     //"github.com/ethereum/go-ethereum/common/hexutil"
 
@@ -17,12 +19,13 @@ import (
 )
 
 
-// GenesisEpochFilename is the default file name used to store the latest CommunityEpoch
-const GenesisEpochFilename = "genesis.json"
+// StorageEpochFilename is the default file name used to store the latest StorageEpoch
+const StorageEpochFilename = "StorageEpoch.json"
 
 // EntryVersionMask is a bit mask on EntryCrypt.CryptInfo to extract pdi.EntryVersion
-const EntryVersionMask = 0xFF
+//const EntryVersionMask = 0xFF
 
+/*
 // GetEntryVersion returns the version of this entry (should match EntryVersion1)
 func (entry *EntryCrypt) GetEntryVersion() EntryVersion {
 	return EntryVersion(entry.CryptInfo & EntryVersionMask)
@@ -61,7 +64,7 @@ func (entry *EntryCrypt) MarshalToBlock() *plan.Block {
     }
 
     return block
-}
+}*/
 
 /*****************************************************
 ** Utils
@@ -159,7 +162,7 @@ func (txn *StorageTxn) UnmarshalEntries(ioBatch []*EntryCrypt) ([]*EntryCrypt, e
 
     return ioBatch, err
 }
-*/
+
 
 // MarshalEntries marshals the given batch of entries into a single plan.Block
 func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {
@@ -181,7 +184,7 @@ func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {
 
     return head
 }
-
+*/
 
 // WriteVarInt appends the given integer in variable length format
 func WriteVarInt(dAtA []byte, offset int, v uint64) int {
@@ -303,7 +306,7 @@ func NewStorageAlert(
 
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
-	inPayload []byte,
+	inPayload         []byte,
     inPayloadEncoding plan.Encoding, 
 	inMaxSegmentSize uint32,
 ) ([]*TxnInfo, error) {
@@ -461,7 +464,7 @@ func UTIDFromInfo(in []byte, inTimestamp int64, inID []byte) UTID {
 func (acct *StorageAccount) Deposit(xfer *Transfer) error {
 
     acct.KbBalance += xfer.Kb
-    acct.TxBalance += xfer.Tx
+    acct.OpBalance += xfer.Ops
 
     return nil
 }
@@ -473,7 +476,7 @@ func (acct *StorageAccount) Withdraw(xfer *Transfer) error {
     if xfer.Kb < 0 {
         return plan.Errorf(nil, plan.TransferFailed, "fuel transfer amount can't be negative")
     }
-    if xfer.Tx < 0 {
+    if xfer.Ops < 0 {
         return plan.Errorf(nil, plan.TransferFailed, "mana transfer amount can't be negative")
     }
 
@@ -482,11 +485,151 @@ func (acct *StorageAccount) Withdraw(xfer *Transfer) error {
     }
     acct.KbBalance -= xfer.Kb
 
-    if acct.TxBalance < xfer.Tx {
+    if acct.OpBalance < xfer.Ops {
         return plan.Error(nil, plan.TransferFailed, "insufficient mana for transfer")
     }
-    acct.TxBalance -= xfer.Tx
+    acct.OpBalance -= xfer.Ops
 
     return nil
 }
 
+
+
+
+
+// CommunityKeyringName returns the name of the community keyring name
+func (epoch *CommunityEpoch) CommunityKeyringName() []byte {
+    return epoch.CommunityID
+}
+
+
+// CommunityKeyRef retruns the KeyRef that references this the community key on a SKI session.
+func (epoch *CommunityEpoch) CommunityKeyRef() ski.KeyRef {
+    return ski.KeyRef{
+        KeyringName: epoch.CommunityKeyringName(),
+        PubKey: epoch.KeyInfo.PubKey,
+    }
+}
+
+
+
+// FormGenesisKeyringName returns the name of the keyring name that stores keys created during community genesis.
+func (epoch *CommunityEpoch) FormGenesisKeyringName() []byte {
+
+    krName := make([]byte, len(epoch.CommunityID))
+    copy(krName, epoch.CommunityID)
+
+    krName[0] = byte(krName[0] + 1)
+
+    return krName
+
+}
+
+
+
+// RegenMemberKeys generates new keys for the given member.
+func (epoch *MemberEpoch) RegenMemberKeys(
+    skiSession ski.Session,
+    inCommunityEpoch *CommunityEpoch,
+) error {
+
+    keyInfo, err := ski.GenerateNewKey(
+        skiSession,
+        epoch.FormSigningKeyringName(inCommunityEpoch.CommunityID),
+        ski.KeyInfo{
+            KeyType: ski.KeyType_SigningKey,
+            CryptoKit: inCommunityEpoch.KeyInfo.CryptoKit,
+        },
+    )
+    if err != nil { return err }
+    epoch.PubSigningKey = keyInfo.PubKey
+
+    keyInfo, err = ski.GenerateNewKey(
+        skiSession,
+        epoch.FormSendingKeyringName(inCommunityEpoch.CommunityID),
+        ski.KeyInfo{
+            KeyType: ski.KeyType_AsymmetricKey,
+            CryptoKit: inCommunityEpoch.KeyInfo.CryptoKit,
+        },
+    )
+    if err != nil { return err }
+    epoch.PubEncryptKey = keyInfo.PubKey
+
+    return nil
+}
+
+
+
+
+
+
+// FormMemberStrID returns a Base64 representation of this MemberID
+func (epoch *MemberEpoch) FormMemberStrID() string {
+
+    var raw [plan.MemberIDSz]byte
+    
+    memberID := epoch.MemberID
+
+    for i := 0; i < plan.MemberIDSz; i++ {
+        raw[i] = byte(memberID)
+        memberID >>= 8
+    }
+    
+    return Base64.EncodeToString(raw[:])
+}
+
+
+
+
+
+// GenerateNewMemberID generates a random member ID
+func (epoch *MemberEpoch) GenerateNewMemberID() {
+
+    memberID := uint64(0)
+  
+    var buf [plan.MemberIDSz]byte
+    crand.Read(buf[:])
+    for i := 0; i < 8; i++ {
+        memberID = (memberID << 8) | uint64(buf[i])
+    }
+
+    epoch.MemberID = memberID
+}
+
+
+
+
+
+// FormSigningKeyringName forms the signing keyring name (ski.Keyring.KeyringName) for this member.
+func (epoch *MemberEpoch) FormSigningKeyringName(
+    inCommunityID []byte,
+) []byte {
+
+    clen := len(inCommunityID)
+    if clen < plan.MemberIDSz {
+        clen = plan.MemberIDSz
+    }
+    krName := make([]byte, clen)
+    copy(krName, inCommunityID)
+
+    memberID := epoch.MemberID
+
+    for i := 0 ; i < plan.MemberIDSz; i++ {
+        krName[i] ^= byte(memberID)
+        memberID >>= 8
+    }
+
+    return krName
+}
+
+
+// FormSendingKeyringName forms the sending keyring name (ski.Keyring.KeyringName) for this member.
+func (epoch *MemberEpoch) FormSendingKeyringName(
+    inCommunityID []byte,
+) []byte {
+
+    krName := epoch.FormSigningKeyringName(inCommunityID)
+    krName[0] = byte(krName[0] + 1)
+
+    return krName
+}
