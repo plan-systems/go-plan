@@ -69,6 +69,29 @@ enum ValType {
 
 
 
+enum Encoding {
+
+    Unspecified             = 0;
+
+    // A PLAN StorageProvider txn payload segment
+    TxnPayloadSegment       = 1;
+
+    // A protobufs-encoded plan.Block
+    Pb_Block                = 2;
+
+    // A protobufs-encoded pdi.EntryCrypt
+    Pb_EntryCrypt           = 3;
+
+    // A protobufs-encoded pdi.EntryInfo
+    Pb_EntryInfo            = 4;
+
+}
+
+
+
+
+
+
 message Val {
     
     // The value's name/label/key
@@ -95,3 +118,4 @@ message Status {
     repeated    Val             params                  = 3;
 
 }
+
