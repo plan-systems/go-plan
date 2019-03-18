@@ -35,7 +35,7 @@ import (
 
 /*
 // ValidateCitedAccessChannel checks inHeader.AccessChannel is valid to cite for the given channel store.
-func (CS *ChannelStore) ValidateCitedAccessChannel( inHeader *plan.PDIEntryHeader ) error {
+func (CS *ChannelStore) ValidateCitedAccessChannel( inHeader *plan.PDIEntryInfo ) error {
 
     var err error
 
@@ -305,7 +305,7 @@ func (CS *ChannelStore) OpenIndexDB() error {
 
 // WriteEntryToStorage inserts the given entries to the this channel
 // Pre: CS.channelName == inEntries[:].data.channelName
-func (CS *ChannelStore) WriteEntryToStorage( inEntry *pdi.EntryCrypt, inHdr *pdi.EntryHeader ) error {
+func (CS *ChannelStore) WriteEntryToStorage( inEntry *pdi.EntryCrypt, inHdr *pdi.EntryInfo ) error {
 
     plan.Assert( bytes.Equal(inHdr.ChannelId, CS.ChannelID[:]), "Bad channel given to InsertEntriesToChannel" )
 

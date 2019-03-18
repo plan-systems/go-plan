@@ -522,7 +522,7 @@ type entryInProcess struct {
     entryTxn        pdi.StorageTxn */
 
     entryHash       []byte
-    entryHeader     pdi.EntryHeader
+    entryHeader     pdi.EntryInfo
     entryBody       plan.Block
     
     authorEpoch     pdi.MemberEpoch
@@ -819,7 +819,7 @@ func (eip *entryInProcess) processAndMergeEntry(
     }
 
     // De-serialize inEntry.HeaderBuf into inEntry.Header
-    entry.Header = new( plan.PDIEntryHeader )
+    entry.Header = new( plan.PDIEntryInfo )
     err = rlp.DecodeBytes( entry.HeaderBuf, entry.Header )
     if err != nil {
         return err
@@ -882,7 +882,7 @@ func (eip *entryInProcess) processAndMergeEntry(
 
 // VerifyAccess checks that the given PDI Entry has the proper permissions to do what it says it wants to do and that
 //    the AccessChannelID cited is in fact a valid access channel to cite (given the timestamp of the entry, etc)
-func (CR *CommunityRepo) VerifyWriteAccess( CS *ChannelStore, inHeader *plan.PDIEntryHeader ) error {
+func (CR *CommunityRepo) VerifyWriteAccess( CS *ChannelStore, inHeader *plan.PDIEntryInfo ) error {
 
     // Get/Load/Create the data structure container for the cited access channel
     AC, _ := CR.GetChannelStore( &inHeader.AccessChannelID, IsAccessChannel | ReadingFromChannel | LoadIfNeeded )
