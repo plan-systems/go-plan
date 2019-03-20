@@ -63,6 +63,8 @@ type Store struct {
     //SendJobInbox                chan SendJob
     DecodedCommits              chan CommitJob
 
+    commitScrap                 []byte
+
     numScanJobs                 int32
     numSendJobs                 int32
     numCommitJobs               int32
@@ -402,8 +404,10 @@ func (St *Store) doCommitJob(job CommitJob) error {
         err error
     ) 
 
+    curTime := time.Now().Unix()
+
     if err == nil {
-        
+
         batch := NewTxnHelper(St.acctDB)
         for batch.NextAttempt() {
 
@@ -469,7 +473,21 @@ func (St *Store) doCommitJob(job CommitJob) error {
         batch := NewTxnHelper(St.txnDB)
         for batch.NextAttempt() {
 
-            err := batch.Txn.Set(job.Txn.Info.URID, job.Txn.RawTxn)
+            totalSz := len(job.Txn.RawTxn) + pdi.URIDTimestampSz
+            if len(St.commitScrap) < totalSz {
+                St.commitScrap = make([]byte, totalSz + 10000)
+            }
+            val := St.commitScrap[:totalSz]
+
+            val[0] = byte(curTime >> 40)
+            val[1] = byte(curTime >> 32)
+            val[2] = byte(curTime >> 24)
+            val[3] = byte(curTime >> 16)
+            val[4] = byte(curTime >> 8)
+            val[5] = byte(curTime)
+            copy(val[pdi.URIDTimestampSz:], job.Txn.RawTxn)
+
+            err := batch.Txn.Set(job.Txn.Info.URID, val)
             if err != nil {
                 err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
             } else {
@@ -616,7 +634,6 @@ func (St *Store) DoCommitJob(job CommitJob) error {
 
 
 
-
 func (St *Store) doSendJob(job SendJob) error {
 
     var err error 
@@ -630,16 +647,21 @@ func (St *Store) doSendJob(job SendJob) error {
         }
 
         for _, URID := range job.URIDs {
-            var (
-                txnOut *pdi.RawTxn
-            )
+            txnOut := &txn
 
             item, dbErr := dbTxn.Get(URID)
             if dbErr == nil {
                 txnOut = &txn
 
                 err = item.Value(func(inVal []byte) error {
-                    txnOut.Bytes = inVal
+                    t := int64(inVal[0]) << 40
+                    t |= int64(inVal[1]) << 32
+                    t |= int64(inVal[2]) << 24
+                    t |= int64(inVal[3]) << 16
+                    t |= int64(inVal[4]) <<  8
+                    t |= int64(inVal[5])
+                    txnOut.TxnMetaInfo.ConsensusTime = t
+                    txnOut.Bytes = inVal[pdi.URIDTimestampSz:]
                     return nil
                 })
             } else if dbErr == badger.ErrKeyNotFound {
