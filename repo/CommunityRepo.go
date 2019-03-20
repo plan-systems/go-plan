@@ -724,6 +724,7 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
             
             switch txnStatus {
                 case pdi.TxnStatus_COMMITTED:
+                    fallthrough
                 case pdi.TxnStatus_FINALIZED:
                     _, itemErr := dbTxn.Get(URID)
                     if itemErr == nil {
@@ -790,19 +791,20 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             var txnList *pdi.TxnList
             txnList, err = scanner.Recv()
         
-            if err != nil {
+            if ! CR.flow.IsRunning() {
+                break
+            } else if err != nil {
                 CR.flow.Log.WithError(err).Warn("forward scan recv err")
                 break
-            }
+            } else if txnList != nil{
 
-            CR.filterNeededTxns(txnList)
-            if ! CR.flow.IsRunning() { // TODO: use scanCtx.Done() instead?
-                break
-            }
+                // Filter for txn we need
+                CR.filterNeededTxns(txnList)
 
-            // Request the txns we're missing
-            if len(txnList.URIDs) > 0 && CR.flow.IsRunning() {
-                CR.txnsToRequest <- txnList 
+                // Request txns we're missing
+                if len(txnList.URIDs) > 0 {
+                    CR.txnsToRequest <- txnList 
+                }
             }
         }
 
@@ -841,6 +843,7 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
             if err != nil {
                 return plan.Errorf(nil, plan.CannotExtractTxnPayload, "failed to unmarshal EntryCrypt from txn payload")
             }
+            //eip.URIDtoVerify = txn.
             CR.entriesToProcess <- eip
 
         default:
@@ -849,7 +852,6 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 
     return nil
 }
-
 
 
 
@@ -892,6 +894,8 @@ func (CR *CommunityRepo) processEntry(eip *entryIP) error {
     if err != nil {
         return err
     }
+
+    eip.EntryInfo.URID = pdi.URIDFromInfo(nil, eip.EntryInfo.TimeAuthored, packingInfo.Hash)
 
     /* TODO: perform timestamp sanity checks
     if eip.EntryInfo.TimeAuthored < eip.CR.Info.TimeCreated.UnixSecs {
