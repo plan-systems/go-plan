@@ -33,13 +33,10 @@ func main() {
         log.WithError(err).Fatalf("sn.NewSnode failed")
     }
 
-    switch {
-
-        case *init == true:
-            log.Info("init successful")
-            
-        case len(*genesis) > 0: {
-
+    if *init {
+        log.Info("init successful")
+    } else {  
+        if len(*genesis) > 0 {
             info, err := loadGenesisInfo(*genesis)
             if err != nil {
                 log.WithError(err).Fatalf("error loading genesis file %s", *genesis)
@@ -49,9 +46,10 @@ func main() {
             if err != nil {
                 log.WithError(err).Fatalf("failed to create datastore: %s", info.CommunityName)
             }
-        } 
+        }
+
+        if err == nil {
         
-        default: {
             log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
 
             intr, intrCtx := plan.SetupInterruptHandler(context.Background())
@@ -86,8 +84,7 @@ func loadGenesisInfo(inPathname string) (*pdi.CommunityEpoch, error) {
     }
 
     if err != nil {
-        //return nil, err
-        params.CommunityName = "Drew2"
+        return nil, err
     }
 
     if len(params.CommunityName) < 3 {

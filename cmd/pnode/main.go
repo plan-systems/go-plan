@@ -69,7 +69,6 @@ func main() {
         }
     }
 
-
     {
         intr, intrCtx := plan.SetupInterruptHandler(context.Background())
         defer intr.Close()
@@ -81,25 +80,27 @@ func main() {
 
             log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
 
-            go func() {
-                buf, _ := ioutil.ReadFile("/Users/aomeara/go/src/github.com/plan-systems/go-plan/cmd/pdi-datastore/drewwww.plan.seed")
+            if true {
+                go func() {
+                    buf, _ := ioutil.ReadFile("/Users/aomeara/go/src/github.com/plan-systems/go-plan/cmd/pdi-local/drewwww.plan.seed")
 
-                seed := &pdi.MemberSeed{}
-                seed.Unmarshal(buf)
+                    seed := &pdi.MemberSeed{}
+                    seed.Unmarshal(buf)
 
-                var workstationID [plan.CommunityIDSz]byte
-                for i := 0; i < plan.CommunityIDSz; i++ {
-                    workstationID[i] = byte(i)
-                }
+                    var workstationID [plan.CommunityIDSz]byte
+                    for i := 0; i < plan.CommunityIDSz; i++ {
+                        workstationID[i] = byte(i)
+                    }
 
-                ms, _, _ := pn.StartMemberSession(context.Background(), &repo.SessionReq{
-                    WorkstationID: workstationID[:],
-                    CommunityID: seed.RepoSeed.CommunityEpoch.CommunityID,
-                    MemberEpoch: seed.MemberEpoch,
-                })
+                    ms, _, _ := pn.StartMemberSession(context.Background(), &repo.SessionReq{
+                        WorkstationID: workstationID[:],
+                        CommunityID: seed.RepoSeed.CommunityEpoch.CommunityID,
+                        MemberEpoch: seed.MemberEpoch,
+                    })
 
-                ms.GetItWorking()
-            }()
+                    ms.GetItWorking()
+                }()
+            }
 
             select {
                 case <- rnCtx.Done():
