@@ -227,7 +227,7 @@ func (sn *Snode) onInternalShutdown() {
 
 
 // readConfig uses BasePath to read in the node's config file
-func (sn *Snode) readConfig(inFirstTome bool) error {
+func (sn *Snode) readConfig(inFirstTime bool) error {
 
     pathname := path.Join(sn.BasePath, ConfigFilename)
  
@@ -235,18 +235,18 @@ func (sn *Snode) readConfig(inFirstTome bool) error {
     if err == nil { 
         err = json.Unmarshal(buf, &sn.Config)
     }
-    if err != nil {
+    if inFirstTime {
         if os.IsNotExist(err) {
-            if inFirstTome {
-                sn.Config.ApplyDefaults()
-                sn.Config.NodeID = make([]byte, plan.CommunityIDSz)
-                crand.Read(sn.Config.NodeID)
+            sn.Config.ApplyDefaults()
+            sn.Config.NodeID = make([]byte, plan.CommunityIDSz)
+            crand.Read(sn.Config.NodeID)
 
-                err = sn.writeConfig()
-            }
-        } else {
-            err = plan.Errorf(err, plan.ConfigFailure, "Failed to load node config")
+            err = sn.writeConfig()
+        } else if err == nil {
+            err = plan.Errorf(nil, plan.ConfigFailure, "Init failed: node config %v already exists", pathname)
         }
+    } else if err != nil {
+        err = plan.Errorf(err, plan.ConfigFailure, "Failed to load node config")
     }
 
     return err
