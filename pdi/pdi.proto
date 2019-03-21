@@ -600,8 +600,14 @@ message CommunityEpoch {
 }
 
 
-
-
+// MemberEpoch publishes a PLAN community member's public keys and other "community-public" info.
+// Members of a community uses its reserved MemberRegistryChannel as the starting point 
+//    to get critical community-public info about other members.  This process basically
+//    involves fetching the most recently published MemberEpoch by a member.
+// In effect, this allows community members to:
+//    (1) open cryptographically secure channels with other members
+//    (2) verify member sigs on channel entries (to ensure that they are authentic)
+//    (3) generate and publish new keys when personal security has been compromised. 
 message MemberEpoch {
 
     // Immutable -- generated during member genesis

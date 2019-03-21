@@ -31,9 +31,9 @@ const (
 	//    where nodes can "safely" generate hashnames alongside peers.  2^192 outta be enough for anybody.
 	CommunityIDSz = 24
 
-	// KeyIDSz is the number of bytes used to identify a key entry on a PLAN keyring.
-	// It's "modest-sized" since a newly generated key must pass collision checks before it's put into use.
-	KeyIDSz = 16
+	// SymmetricPubKeySz is the number of bytes used to identify a symmetric key entry on a PLAN keyring.
+	// It's "modest-sized" since a newly generated keys must pass collision checks before being put into use.
+	SymmetricPubKeySz = 16
 
 	// ChannelIDSz specifies the byte size of a ChannelID
     ChannelIDSz = 16
@@ -77,16 +77,7 @@ type MemberAlias string
 // ChannelID identifies a specific PLAN channel where PDI entries are posted to (for a given a community ID).
 type ChannelID [ChannelIDSz]byte
 
-// KeyID identifies a cryptographic key (for a given a community ID).
-//    For asymmetric keys, it is defined as the right-most bytes of the public key.
-//    For symmetric keys, it is randomly generated when the key is generated.
-type KeyID [KeyIDSz]byte
 
-// MemberEpoch changes each time a member creates a new set of public keys.  The community's MemberRegistryChannel allows
-//    any member to lookup public keys for a member for each crypto rev they've ever done, allows community members to:
-//    (1) send private messages to a given member
-//    (2) verify sigs on anything to ensure that they are authentic
-type MemberEpoch uint64
 
 var (
 
@@ -164,4 +155,5 @@ const (
 	// DistantPast is a const used to express the "distant past" in unix time.
 	DistantPast int64 = -DistantFuture
 )
+
 
