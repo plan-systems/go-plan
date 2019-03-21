@@ -19,16 +19,16 @@ import "github.com/plan-systems/go-plan/pdi/pdi.proto";
 message SessionRequest {
 
     // Normally the empty string, this is used when an existing token is req'd
-                bytes           session_token           = 1;
+                bytes               session_token           = 1;
 
     // Which community this session wants to access
-                bytes           community_id            = 2;
+                bytes               community_id            = 2;
 
     // Identifies who is requesting the session (via pubkey)
-                ski.KeyRef      client_id               = 3;
+                ski.KeyRef          client_id               = 3;
 
     // Additional keys, tokens, info, params
-                plan.Block      params                  = 5;
+                plan.Block          params                  = 5;
 }
 
 
@@ -36,13 +36,13 @@ message SessionRequest {
 message Msg {
 
     // Describes this msg in some way (optional)
-                string          label                   = 1;
+                string              label                   = 1;
 
     // Reports any error/state condition.
-                plan.Status     status                  = 2;
+                plan.Status         status                  = 2;
 
     // Holds arbitrary information/data
-                plan.Block      body                    = 3;
+                plan.Block          body                    = 3;
 }
 
 
@@ -75,32 +75,32 @@ message SessionReq {
 
     // Identifies a workstation/client installation (metaphorical to a "dumb" terminal in the 70's and 80's).
     // Two different members could have member sessions with the same workstation ID into a given repo (but not at the same time).
-                bytes           workstationID           = 1;
+                bytes               workstationID           = 1;
 
     // Which community this session wants to access
-                bytes           communityID             = 2;
+                bytes               communityID             = 2;
 
     // The member's community-given ID
-                pdi.MemberEpoch member_epoch            = 3;
+                pdi.MemberEpoch     member_epoch            = 3;
 
     // Optional -- used internally
-     //           string          repo_path               = 4;
+    //          string              repo_path               = 4;
 
-    //          bytes           prev_session_token      = 4;
-    //          bytes           next_session_token      = 5;
+    //          bytes               prev_session_token      = 4;
+    //          bytes               next_session_token      = 5;
 
     // This will evolve in time, but in general, the client authenticates by submitting a token, 
     //    which is a hash of biometric-based input (e.g. pin, password, key-fob, eye scan) plus 
     //    a secure token from the previous session.
     // This is used to create a symmetric key to encrypt/decrypt the member's primary key hive
     //    that resides on the host.
-                bytes           passhash                = 5;
+                bytes               passhash                = 5;
 
     // When the above symmetric key is created, it's placed it and other session info into a "secret box",
     //    and is locked with a key only the host has has, and sent back as the "session token".
     // This allows the client to present the session_token (until it expires) instead of the client 
     //    having to perform full biometric authentication.
-                bytes           session_token           = 6;
+                bytes               session_token           = 6;
 
 }
 
@@ -114,29 +114,104 @@ message SessionInfo {
 
 message ChInvocation {
 
-                fixed64         ch_id              = 1;
+                fixed64             ch_id                   = 1;
 
-                string          ch_adapter_desc    = 2;
+                string              ch_adapter_desc         = 2;
 
 }
 
 message ChStatus {
 
-                int32           ch_session_id           = 1;    
+                int32               ch_sessionID            = 1;    
 
     // Reports any error/state condition.
-                plan.Status     status                  = 2;
+                plan.Status         status                  = 2;
 }
 
 
 message ChMsg {
 
-                int32           ch_session_id           = 1;
+                int32               ch_sessionID            = 1;
 
-                plan.Block      content                 = 2;  
+                plan.Block          content                 = 2;  
 }
 
 
 
+
+
+message RepoSeed {
+                pdi.StorageEpoch    storage_epoch           = 1;
+                pdi.CommunityEpoch  community_epoch         = 2;
+    repeated    plan.ServiceInfo    services                = 5;
+}
+
+
+// GuestInvite -- STEP 1
+// A community issues this to a person they want to invite into their community.  A copy of this record is written to member registry channel.
+// This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
+message MemberSeed {
+                RepoSeed            repo_seed               = 1;
+
+                ski.KeyTome         key_tome                = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
+
+                pdi.MemberEpoch     member_epoch            = 6;
+
+    // WHO sent this invitation (note: the member's signing key is used to create this invite)
+                fixed64             origin_memberID         = 7;
+                ski.KeyInfo         origin_signing_key      = 8;
+
+    // A asym key used to encrypt an InvitationResponse
+                ski.KeyInfo         reply_to                = 9;
+
+}
+
+
+/*
+New member steps:
+1) Alice is community member of C and has member invite privs
+2) Alice generates a new MemberSeed ("MS") and writes it to the member registry channel (Alice locks the MS with a password)
+3) Alice gives Bob the MS (and the password)
+4) Bob installs PLAN
+5) Bob is prompted for a seed file and he selects it (and enters the decrypt password)
+6) Bob's client can now seed a new repo R, rebuilding from scratch
+7) When complete (when R sees the MemberEpoch record entry show up)
+8) Bob's client prompts him to enter his alias, member info, etc -- and generates and inserts a new MemberEpoch into the Community member epoch channel
+9) Bob picks up his lambo.
+
+*/
+
+
+/*****************************************************
+** Internal
+**/
+
+
+message ChStoreInfo {
+
+            
+                uint64              ch_storeID             = 1;
+
+                bytes               channelID              = 2;
+
+}
+
+
+
+message ChStoreEntry {
+
+                int64           time_authored               = 1;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
+                uint32          time_authored_frac          = 2;        // [0,0xFFFF] -- fraction of a second when authored 
+                pdi.EntryOp     entry_op                    = 4;
+                bytes           channel_id                  = 5;        // Channel that this entry is posted to.
+                fixed64         channel_epoch               = 6;        // Epoch of the channel in effect when this entry was sealed
+                fixed64         author_member_id            = 7;        // Creator (and signer) of this entry 
+                int32           author_member_epoch         = 8;        // Epoch of the author's identity when this entry was sealed
+                plan.Encoding   body_encoding               = 9;
+
+                plan.Block      extensions                  = 11;       // Available for unrestricted client use.
+
+
+}
 
 
