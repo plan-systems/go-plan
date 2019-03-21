@@ -8,12 +8,15 @@
         },
         {
             "path": "../plan-protobufs"
+        },
+        {
+            "path": "/Users/aomeara/go/src/github.com/dgraph-io/badger"
         }
     ],
     "settings": {
     
         "cSpell.words": [
-            "Perror",
+            "Err",
             "access",
             "asym",
             "ckid",
@@ -25,6 +28,7 @@
             "key",
             "nuls",
             "op",
+            "perr",
             "pgateway",
             "pnode",
             "priv",
@@ -33,6 +37,7 @@
             "readwrite",
             "recip",
             "repo",
+            "rnode",
             "sz",
             "uuid"
         ],

@@ -1,10 +1,11 @@
 package: github.com/plan-systems/go-plan
 import:
 - package: github.com/ethereum/go-ethereum/common/hexutil
-- package: github.com/ethereum/go-ethereum/crypto/sha3
 - package: github.com/ethereum/go-ethereum/rlp
 - package: github.com/mattn/go-sqlite3
 - package: golang.org/x/crypto/nacl/box
 - package: golang.org/x/crypto/nacl/secretbox
 - package: golang.org/x/crypto/nacl/sign
+- package: golang.org/x/crypto/sha3
 - package: github.com/sirupsen/logrus
+- package: github.com/ipfs/go-ds-badger
