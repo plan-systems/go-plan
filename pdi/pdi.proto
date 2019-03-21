@@ -12,19 +12,21 @@ import "github.com/plan-systems/go-plan/ski/ski.proto";
 
 
 /**********************************************************************************************************************
-A StorageProvider is an access point to a community's shared data store, and a community's member nodes access
-one in order to:
-    - Submit newly authored (and "sealed") txns to the community's shared data store.
-    - Query and receive txns
+A StorageProvider is an access point to a community's append-only shared persistent data store. 
+In addition to being a repository of community member txns, a StorageProvider (or set of
+StorageProviders), serve as the community's validators.  This means they:
+    (a) authenticate that a txn is officially part of the community record, and 
+    (b) seal *when* a txn became part of the record (preventing inside "submarine" txns)  
     
 Although the StorageProvider abstraction is *modeled* after a blockchain (an append-only ledger),
-its implementation can either be centralized *or* decentralized.  This allows a StorageProvider
-implementation to actually be a blockchain in addition to a conventional centralized server or cluster.
+its implementation can either be centralized *or* decentralized.  This means a StorageProvider
+implementation could be a blockchain or a conventional centralized server/cluster.
 
-So in the StorageProvider model, as with a conventional blockchain model, trust is externalized
-to outside the system by use of a unit of account called "fuel".  This is comparable to Ethereum's gas, 
-however unlike gas, fuel is not related or connected to a currency in any other way.  It is solely mechanism
-for controlling who has append access to the community's shared data store.
+So in the StorageProvider model (as with a conventional blockchain model) trust is externalized
+to outside the system by use of StorageProvider-maintained units of account: 
+    (1) Kb - Number of kilobytes of txn data a given address can post.
+    (2) Op - Number of "operations" a given address can perform.  Posting a new txn "costs" 1 Op.
+These units of account are solely a mechanism for controlling who has append access to the community's shared data store.
 
 See go-plan/pdi/StorageProvider.go. */
 service StorageProvider {
@@ -56,7 +58,7 @@ message SessionReq {
     // The requested storage epoch to be accessed.
                 StorageEpoch    storage_epoch           = 1;
 
-    // An empty but normally signed txn used to demonstrate to the host StorageProvider that the client
+    // An empty but signed txn that demonstrates to the host StorageProvider that the client
     //    has an active account with this storage provider.
                 RawTxn          proof_of_access         = 2;     
 
@@ -67,6 +69,10 @@ message SessionReq {
 
 message StorageInfo {
 
+    // This is a sig of SessionReq.ProofOfAccess, signed with the latest StorageProvider key.
+    // This authenticates this StorageProvider (since a 3rd party attempting to impersonate a StorageProvider
+    //    node would be unable to produce this signature).   
+                bytes           sig_response           = 1;     
 
 
 }
@@ -112,6 +118,10 @@ message TxnInfo {
 
     // Unix timestamp of when this txn was encoded and signed for storage.
                 int64           time_sealed             = 12;
+
+    // Links this txn to a specific payload.
+                bytes           payload_URID            = 13;
+
 
     /*****************************************************
     ** Regenerated Info (nil when encoding)
@@ -177,9 +187,12 @@ message TxnMetaInfo {
     // Consensus-based unix timestamp for this txn (or 0 if not available).  
     // If txn_status == FINALIZED, then this timestamp:
     //      - won't ever change, 
-    //      - is universal across storage peers
-    //      - is trustworthy
+    //      - is universal across StorageProvider peers
+    //      - is as trustworthy as the StorageProvider network.
                 int64           consensus_time          = 4;
+
+    // Proof that this txn was indeed received and validated by a valid StorageProvider.
+                bytes           txn_validation          = 5;
 }
 
 
@@ -511,13 +524,6 @@ message EntryInfo {
 
                 plan.Block      extensions              = 11;       // Available for unrestricted client use.
 
-    // Similar in construction to URID.
-    // Time authored followed by right-most part of hashname (available only after an existing entry is decoded) 
-                bytes           EID                     = 20;
-
-    // 
-                int64           time_received           = 21;        // Unix timestamp
-                int64           time_committed          = 22;        // Unix timestamp
 
 }
 
@@ -558,7 +564,7 @@ message StorageEpoch {
 message CommunityEpoch {
 
    // Immutable -- the community ID and community keyring name.
-                bytes           communityID            = 1;
+                bytes           communityID             = 1;
 
     // Official community name
                 string          community_name          = 2;
@@ -576,6 +582,21 @@ message CommunityEpoch {
     // Hash kit used to hash PDI entries
                 ski.HashKitID   entry_hash_kit          = 7;
 
+    // Max delay (in secs) allowed between pdi.EntryInfo.TimeAuthored of an incoming entry
+    //    and the TimeAuthored value of the most recently witnessed entry.  The idea is, how
+    //    can entries arrive days or weeks and then a back-dated entry arrives (preventing 
+    //    "submarine" attacks). 
+    // Note: this only applies to non-private ACCs.
+                int64           max_member_latency      = 8;
+
+    // Max number of seconds delay between pdi.EntryInfo.TimeAuthored and its corresponding TxnInfo.TimeSealed.
+    // Otherwise, entries that are sealed too late are auto-rejected during entry processing.
+    // The downside of larger number is that it limits how long members can be offline until
+    //     newly authored entries will be auto-rejected due to this security constraint.
+    // Tier 0: posts to reserved community channels
+    // Tier 1: posts to public ACCs 
+    repeated    int64           max_entry_latency       = 9;
+
 }
 
 
@@ -584,10 +605,10 @@ message CommunityEpoch {
 message MemberEpoch {
 
     // Immutable -- generated during member genesis
-                fixed64        memberID                 = 2;    
+                fixed64         memberID                = 2;    
 
     // Increments for each member epoch (0 meaning the creation, 1, 2, ...)
-                int32          epoch_num                = 3;
+                int32           epoch_num               = 3;
 
     // Unix timestamp when this epoch entered into effect
                 int64           time_started            = 5;
@@ -652,13 +673,13 @@ message MemberSeed {
 /*
 New member steps:
 1) Alice is community member of C and has member invite privs
-2) Alice generates a new MemberInvite ("MI") and writes it to the member registry channel (Alice locks the MI with a password)
-3) Alice gives the MI to Bob (and the password)
+2) Alice generates a new MemberSeed ("MS") and writes it to the member registry channel (Alice locks the MS with a password)
+3) Alice gives Bob the MS (and the password)
 4) Bob installs PLAN
-5) Bob is prompted for a MI and he selects it (and enters the decrypt password)
-6) Bob's client makes a fresh repo R and it rebuilds it from scratch
-7) When complete (when R sees the MemberInvite record entry show up)
-8) Bob's client prompts him to enter his alias, member info, etc -- and generates and inserts a new MemberEpoch 
+5) Bob is prompted for a seed file and he selects it (and enters the decrypt password)
+6) Bob's client can now seed a new repo R, rebuilding from scratch
+7) When complete (when R sees the MemberEpoch record entry show up)
+8) Bob's client prompts him to enter his alias, member info, etc -- and generates and inserts a new MemberEpoch into the Community member epoch channel
 9) Bob picks up his lambo.
 
 */
