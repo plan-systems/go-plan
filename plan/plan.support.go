@@ -195,36 +195,21 @@ func (F *Flow) FilterFault(inErr error) error {
 
 // GetCommunityID returns the CommunityID for the given buffer
 func GetCommunityID(in []byte) CommunityID {
-
 	var out CommunityID
 
-	overhang := CommunityIDSz - len(in)
-	if overhang < 0 {
-		in = in[-overhang:]
-		overhang = 0
-	}
-
-	copy(out[overhang:], in)
+	copy(out[:], in)
 	return out
 }
 
-/*
 
-// GetKeyID returns the KeyID for the given buffer
-func GetKeyID(in []byte) KeyID {
+// GetChannelID returns the channel ID for the given buffer
+func GetChannelID(in []byte) ChannelID {
+	var out ChannelID
 
-	var out KeyID
-
-	overhang := KeyIDSz - len(in)
-	if overhang < 0 {
-		in = in[-overhang:]
-		overhang = 0
-	}
-
-	copy(out[overhang:], in)
+	copy(out[:], in)
 	return out
 }
-*/
+
 
 // UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
 // inSubDir can be any relative pathname
