@@ -31,3 +31,6 @@ pdi/pdi.pb.go
 plan/plan.pb.go
 repo/repo.pb.go
 
+cmd/pdi-local/pdi-local
+cmd/pnode/pnode
+
