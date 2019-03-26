@@ -43,7 +43,7 @@ type TxnEncoder interface {
 	// Pre: ResetSigner() must be successfully called.
 	EncodeToTxns(
 		inPayloadData     []byte,
-        inPayloadName     []byte,
+        inPayloadHash     []byte,
 		inPayloadEncoding plan.Encoding,
 		inTransfers       []*Transfer,
 		inTimeSealed      int64, // If non-zero, this is used in place of the current time

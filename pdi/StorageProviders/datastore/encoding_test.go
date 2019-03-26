@@ -245,8 +245,8 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             }
 
             lenStr := fmt.Sprintf("%d", len(final.PayloadSeg))
-            if ! bytes.Equal([]byte(lenStr), final.Info.PayloadName) {
-                gTesting.Fatal("payload name chk failed")
+            if ! bytes.Equal([]byte(lenStr), final.Info.PayloadHash) {
+                gTesting.Fatal("payload hash chk failed")
             }
 
             if pdi.URID(prevURID).String() != final.URID {

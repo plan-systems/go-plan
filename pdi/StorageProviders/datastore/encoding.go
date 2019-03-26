@@ -111,7 +111,7 @@ func (enc *dsEncoder) ResetSigner(
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
 func (enc *dsEncoder) EncodeToTxns(
 	inPayload         []byte,
-    inPayloadName     []byte,
+    inPayloadHash     []byte,
 	inPayloadEnc      plan.Encoding,
 	inTransfers       []*pdi.Transfer,
     timeSealed        int64,
@@ -119,7 +119,7 @@ func (enc *dsEncoder) EncodeToTxns(
 
 	segs, err := pdi.SegmentIntoTxns(
 		inPayload,
-        inPayloadName,
+        inPayloadHash,
 		inPayloadEnc,
 		enc.StorageEpoch.TxnMaxSize,
 	)

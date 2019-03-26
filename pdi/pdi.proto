@@ -103,8 +103,8 @@ message TxnInfo {
     // This should be identical for each segment
                 plan.Encoding       payload_encoding            = 5;
 
-    // Links this txn to an arbitrary binary name of the payload (typically a hashname) 
-                bytes               payload_name                = 6;
+    // Links this txn to an arbitrary binary name of the payload
+                bytes               payload_hash                = 6;
 
     // Segment byte size
                 uint32              seg_sz                      = 8;
