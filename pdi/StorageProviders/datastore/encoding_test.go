@@ -169,16 +169,19 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 		for i := 0; i < 1000; i++ {
             testTime := plan.Now().UnixSecs
 
-			blobLen := int(1 + rand.Int31n(int32(stEpoch.TxnMaxSize) * 25))
+			payloadLen := int(1 + rand.Int31n(int32(stEpoch.TxnMaxSize) * 25))
 
-			payload := blobBuf[:blobLen]
+			payload := blobBuf[:payloadLen]
 			rand.Read(payload)
 
-            totalBytes += blobLen
+            totalBytes += payloadLen
             totalPayloads++
+
+            nameStr := fmt.Sprintf("%d", payloadLen)
 
 			txnsOut, err := encoder.EncodeToTxns(
 				payload,
+                []byte(nameStr),
 				plan.Encoding_Unspecified,
 				nil,
                 testTime + int64(i),
@@ -237,8 +240,13 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
                 gTesting.Fatal("didn't get final txn")
             }
 
-            if bytes.Compare(payload, final.PayloadSeg) != 0 {
+            if ! bytes.Equal(payload, final.PayloadSeg) {
                 gTesting.Fatal("payload failed")
+            }
+
+            lenStr := fmt.Sprintf("%d", len(final.PayloadSeg))
+            if ! bytes.Equal([]byte(lenStr), final.Info.PayloadName) {
+                gTesting.Fatal("payload name chk failed")
             }
 
             if pdi.URID(prevURID).String() != final.URID {

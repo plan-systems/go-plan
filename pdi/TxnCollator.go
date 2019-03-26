@@ -100,7 +100,9 @@ func (group *segGroup) Consolidate() (*DecodedTxn, error) {
 
         if seg.Info.SegTotal != group.Info.SegTotal || seg.Info.PayloadEncoding != group.Info.PayloadEncoding {
             return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed group consistency check", seg.URID)
-        } else if bytes.Compare(seg.Info.PrevURID, prevURID) != 0 {
+        } else if ! bytes.Equal(seg.Info.PayloadName, group.Info.PayloadName) {
+            return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expected payload name %v, got %v", seg.URID, group.Info.PayloadName, seg.Info.PayloadName)
+        } else if ! bytes.Equal(seg.Info.PrevURID, prevURID) {
 			return nil, plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg URID %v, got %v", seg.URID, seg.Info.PrevURID, prevURID)
 		}
 
