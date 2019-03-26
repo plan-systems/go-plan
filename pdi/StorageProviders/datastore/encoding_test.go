@@ -62,7 +62,7 @@ func TestVarAppendBuf(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Compare(payload, testBufs[i]) != 0 {
+		if ! bytes.Equal(payload, testBufs[i]) {
 			t.Fatalf("'%v' != '%v'", string(payload), string(testBufs[i]))
 		}
 	}
@@ -209,10 +209,10 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 				if err != nil {
 					gTesting.Fatal(err)
                 }
-                if bytes.Compare(txnOut.URID, decodedTxn.Info.URID) != 0 {
+                if ! bytes.Equal(txnOut.URID, decodedTxn.Info.URID) {
                     gTesting.Fatal("decoded URID doesn't match")
                 }
-                if bytes.Compare(prevURID, decodedTxn.Info.PrevURID) != 0 {
+                if ! bytes.Equal(prevURID, decodedTxn.Info.PrevURID) {
                     gTesting.Fatal("prev seg URID not set properly")
                 }
 
