@@ -26,7 +26,6 @@ var gCommunityEpoch = pdi.CommunityEpoch{
 }
 
 
-
 func TestVarAppendBuf(t *testing.T) {
 
 	gTesting = t
@@ -245,8 +244,8 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             }
 
             lenStr := fmt.Sprintf("%d", len(final.PayloadSeg))
-            if ! bytes.Equal([]byte(lenStr), final.Info.PayloadHash) {
-                gTesting.Fatal("payload hash chk failed")
+            if ! bytes.Equal([]byte(lenStr), final.Info.PayloadName) {
+                gTesting.Fatal("payload name chk failed")
             }
 
             if pdi.URID(prevURID).String() != final.URID {
