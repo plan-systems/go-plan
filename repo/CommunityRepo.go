@@ -16,6 +16,7 @@ import (
     "encoding/json"
     //"e
     
+    "github.com/plan-systems/go-plan/ski/Providers/hive"
 
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
@@ -54,7 +55,7 @@ type CommunityRepoState struct {
 
     LatestCommunityEpoch    pdi.CommunityEpoch  `json:"lastest_community_epoch"`
 
-    Services                []*pdi.ServiceInfo  `json:"services"`
+    Services                []*plan.ServiceInfo  `json:"services"`
 }
 
 
@@ -74,6 +75,7 @@ type CommunityRepo struct {
 
     txnDB                   *badger.DB      // Complete record of community txns (by URID); i.e. a replica "follower" of StorageProvider
 
+    chMgr                   *ChMgr
 
     //txnsDeferred            ds.Datastore        // Values point to txn?
 
@@ -113,7 +115,6 @@ type CommunityRepo struct {
 
     //pipelines               sync.WaitGroup
 
-
     MemberSessions          MemberSessions
 
 /*
@@ -150,39 +151,29 @@ func NewCommunityRepo(
     inBasePath string,
     ) *CommunityRepo {
 
+    homePath := inConfig.HomePath
+    if ! path.IsAbs(homePath) {
+        homePath = path.Join(inBasePath, homePath)
+    }
+
+    
     CR := &CommunityRepo{
         Config: inConfig,
         DefaultFileMode: plan.DefaultFileMode,
         CommunityKeyringName: inConfig.StorageEpoch.CommunityKeyringName(),
         //txnsToProcess: make(chan txnInProcess),
         entryUnpacker: ski.NewUnpacker(true),
+        chMgr: NewChMgr(homePath),
+        HomePath: homePath,
     }
   
-    if path.IsAbs(CR.Config.HomePath) {
-        CR.HomePath = CR.Config.HomePath
-    } else {
-        CR.HomePath = path.Join(inBasePath, CR.Config.HomePath)
-    }
+    CR.MemberSessions.Host = CR
 
     return CR
 }
 
 
 
-
-// SetupRepoHome is called when a CommunityRepo potentially needs to setup it home dir.
-func (CR *CommunityRepo) SetupRepoHome(inSeed *pdi.RepoSeed) error {
-
-    // TODO: this all is placeholder and will be replaced w reserve channel impls
-    CR.State = CommunityRepoState{
-        LatestCommunityEpoch: *inSeed.CommunityEpoch,
-        Services: inSeed.Services,
-    }
-
-    err := CR.flushState()
-
-    return err
-}
 
 
 func (CR *CommunityRepo) flushState() error {
@@ -202,14 +193,36 @@ func (CR *CommunityRepo) flushState() error {
 // Startup starts this repo
 func (CR *CommunityRepo) Startup(
     inCtx context.Context,
+    inSeed *RepoSeed,
 ) error {
 
-    err := CR.flow.Startup(
+    if CR.flow.IsRunning() {
+        panic("repo is already running")
+    }
+
+    var err error
+    if inSeed != nil { 
+
+        // TODO: this all is placeholder and will be replaced w reserve channel impls
+        CR.State = CommunityRepoState{
+            LatestCommunityEpoch: *inSeed.CommunityEpoch,
+            Services: inSeed.Services,
+        }
+
+        err = CR.flushState()
+    }
+
+    err = CR.flow.Startup(
         inCtx,
         fmt.Sprintf("repo %v", CR.Config.StorageEpoch.Name),
         CR.onInternalStartup,
         CR.onInternalShutdown,
     )
+
+
+    if err == nil && inSeed != nil { 
+        CR.chMgr.InscribeGenesis(inSeed)
+    }
 
     return err
 }
@@ -231,20 +244,18 @@ func (CR *CommunityRepo) onInternalStartup() error {
         err = json.Unmarshal(buf, &CR.State)
     }
 
-
     opts := badger.DefaultOptions
     opts.Dir = path.Join(CR.HomePath, "txnDB")
     opts.ValueDir = opts.Dir
 
-    if CR.txnDB, err = badger.Open(opts); err != nil {
-        return plan.Error(err, plan.StorageNotReady, "CommunityRepo.txnDB.Open() failed")
-    }
-
-
-    if err = CR.ConnectToStorage(); err != nil {
+    // Create a heap-only key hive used for the community keyring
+    if CR.communitySKI, err = hive.StartSession("", "", nil); err != nil {
         return err
     }
 
+    if CR.txnDB, err = badger.Open(opts); err != nil {
+        return plan.Error(err, plan.StorageNotReady, "CommunityRepo.txnDB.Open() failed")
+    }
 
     //
     //
@@ -269,6 +280,11 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         CR.txnDB.Close()
         CR.txnDB = nil
+
+        if CR.communitySKI != nil {
+            CR.communitySKI.EndSession(CR.flow.ShutdownReason)
+            CR.communitySKI = nil
+        }
 
         CR.flow.ShutdownComplete.Done()
     }()
@@ -438,9 +454,6 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     //
     // txn update monitor
-    CR.txnScanning.Add(1)
-    go CR.forwardTxnScanner()
-    
     /*
         var URIDs []byte
 
@@ -523,6 +536,7 @@ func (CR *CommunityRepo) onInternalShutdown() {
     }
 
 }
+
 
 
 
@@ -613,6 +627,8 @@ func (CR *CommunityRepo) ConnectToStorage() error {
         return err
     }
 
+    CR.txnScanning.Add(1)
+    go CR.forwardTxnScanner()
 
     return nil
 }
@@ -826,8 +842,6 @@ func (CR *CommunityRepo) forwardTxnScanner() {
 
 
 
-
-
 // DispatchPayload unpacks a decoded txn which is given to be a single/sole segment.
 func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 
@@ -843,7 +857,7 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
             if err != nil {
                 return plan.Errorf(nil, plan.CannotExtractTxnPayload, "failed to unmarshal EntryCrypt from txn payload")
             }
-            //eip.URIDtoVerify = txn.
+            eip.Entry.URID = txn.Info.PayloadName
             CR.entriesToProcess <- eip
 
         default:
@@ -865,7 +879,7 @@ func (CR *CommunityRepo) processEntry(eip *entryIP) error {
         return plan.Error(err, plan.FailedToProcessPDIHeader, "failed to unmarshal EntryCrypt")
     }
 
-    // The entry header is encrypted using the named community key.
+    // STEP 1 -- Decrypt the entry header and body using the cited community key ID.
     var decryptOut *ski.CryptOpOut 
     decryptOut, err = CR.communitySKI.DoCryptOp(&ski.CryptOpArgs{
         CryptOp: ski.CryptOp_DECRYPT_SYM,
@@ -888,14 +902,18 @@ func (CR *CommunityRepo) processEntry(eip *entryIP) error {
         return err
     }
 
-    eip.EntryBody = packingInfo.Body
+    eip.Entry.Body = packingInfo.Body
 
-    err = eip.EntryInfo.Unmarshal(packingInfo.Header)
+    err = eip.Entry.Info.Unmarshal(packingInfo.Header)
     if err != nil {
         return err
     }
 
-    eip.EntryInfo.URID = pdi.URIDFromInfo(nil, eip.EntryInfo.TimeAuthored, packingInfo.Hash)
+    var scrap [pdi.URIDBinarySz]byte
+    actualURID := pdi.URIDFromInfo(scrap[:], eip.Entry.Info.TimeAuthored, packingInfo.Hash)
+    if ! bytes.Equal(eip.Entry.URID, actualURID) {
+        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload URID was %v but actual is %v", eip.Entry.URID, actualURID)
+    }
 
     /* TODO: perform timestamp sanity checks
     if eip.EntryInfo.TimeAuthored < eip.CR.Info.TimeCreated.UnixSecs {
@@ -905,22 +923,15 @@ func (CR *CommunityRepo) processEntry(eip *entryIP) error {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future")
     }*/
 
-    err = CR.fetchMemberEpoch(
-        eip.EntryInfo.AuthorMemberId, 
-        eip.EntryInfo.AuthorMemberEpoch,
-        &eip.authorEpoch,
-    )
-    if err != nil {
-        return err
-    }
+    /*
+    Every entry has dependencies:
+        - the member epoch that contains the member's signing pub key (member reg channel, entry ID, time index)
+        - */
 
-    if ! bytes.Equal(eip.authorEpoch.PubSigningKey, packingInfo.Signer.PubKey) {
-        return plan.Error(err, plan.FailedToProcessPDIHeader, "PDI entry signature verification failed")
-    }
+    eip.Entry.ChEntry.AssignFromDecrytedEntry(&eip.Entry.Info, packingInfo.Signer.PubKey)
 
-
-    //err = eip.prepChannelAccess()
-
+    CR.chMgr.MergeEntry(&eip.Entry)
+ 
     // At this point, the PDI entry's signature has been verified
     return err
 
@@ -934,7 +945,6 @@ func (CR *CommunityRepo) StartMemberSession(in *SessionReq) (*MemberSession, err
     }
 
     ms, err := CR.MemberSessions.StartSession(
-        CR,
         in,
         CR.HomePath,
     )
@@ -942,21 +952,59 @@ func (CR *CommunityRepo) StartMemberSession(in *SessionReq) (*MemberSession, err
         return nil, err
     }
 
+    tomeBuf, pw := ms.ExportCommunityKeyring()
+    _, err = CR.communitySKI.DoCryptOp(&ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_IMPORT_USING_PW,
+        BufIn: tomeBuf,
+        PeerKey: pw,
+    })
+    CR.flow.LogErr(err, "error importing community keyring")
+
     return ms, nil
 }
 
 
+/*****************************************************
+** MemberHost (interface)
+**/
 
-func (CR *CommunityRepo) fetchMemberEpoch(
-    inMemberID uint64,
-    inMemberEpoch int32,
-    outInfo *pdi.MemberEpoch,
-) error {
-
-    return nil
-
+// Context -- see interface MemberHost
+func (CR *CommunityRepo) Context() context.Context {
+    return CR.flow.Ctx
 }
 
+// CommitAuthoredTxn -- see interface MemberHost
+func (CR *CommunityRepo) CommitAuthoredTxn(inTxn pdi.RawTxn) {
+    CR.txnsToCommit <- inTxn
+    CR.txnsToWrite  <- inTxn
+}
+
+// LatestCommunityEpoch -- see interface MemberHost
+func (CR *CommunityRepo) LatestCommunityEpoch() pdi.CommunityEpoch {
+    return CR.State.LatestCommunityEpoch
+}
+
+// StorageEpoch -- see interface MemberHost
+func (CR *CommunityRepo) StorageEpoch() pdi.StorageEpoch {
+    return CR.Config.StorageEpoch
+}
+
+// OnSessionEnded -- see interface MemberHost
+func (CR *CommunityRepo) OnSessionEnded(inSession *MemberSession) {
+    CR.MemberSessions.OnSessionEnded(inSession)
+}
+
+
+
+
+type DecryptedEntry struct {
+    Info            pdi.EntryInfo
+    URID            []byte
+    Body            []byte
+    //Hash            []byte
+    ChEntry         ChEntryInfo
+    Status          EntryStatus
+}
 
 
 type entryIP struct {
@@ -975,16 +1023,16 @@ type entryIP struct {
     entryIndex      int               // This is the index number into entryBatch that is currently being processed
     entryTxn        pdi.StorageTxn */
 
-    wireEntry      []byte
+    wireEntry       []byte
 
-    entryHash       []byte
+    Entry           DecryptedEntry
+
     EntryCrypt      pdi.EntryCrypt
-    EntryInfo       pdi.EntryInfo
-    EntryBody       []byte
 
-    ChannelEpoch    *pdi.ChannelEpoch
+
+    //ChannelEpoch    *pdi.ChannelEpoch
     
-    authorEpoch     pdi.MemberEpoch
+    authorEpoch     *pdi.MemberEpoch
 
  //   skiSession      ski.Session
 
@@ -1270,7 +1318,3 @@ func (eip *entryInProcess) prepChannelAccess() error {
                 }
 
     */
-
-
-
-
