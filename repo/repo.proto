@@ -19,16 +19,16 @@ import "github.com/plan-systems/go-plan/pdi/pdi.proto";
 message SessionRequest {
 
     // Normally the empty string, this is used when an existing token is req'd
-                bytes               session_token           = 1;
+                bytes               session_token               = 1;
 
     // Which community this session wants to access
-                bytes               community_id            = 2;
+                bytes               communityID                 = 2;
 
     // Identifies who is requesting the session (via pubkey)
-                ski.KeyRef          client_id               = 3;
+                ski.KeyRef          clientID                    = 3;
 
     // Additional keys, tokens, info, params
-                plan.Block          params                  = 5;
+                plan.Block          params                      = 5;
 }
 
 
@@ -36,13 +36,13 @@ message SessionRequest {
 message Msg {
 
     // Describes this msg in some way (optional)
-                string              label                   = 1;
+                string              label                       = 1;
 
     // Reports any error/state condition.
-                plan.Status         status                  = 2;
+                plan.Status         status                      = 2;
 
     // Holds arbitrary information/data
-                plan.Block          body                    = 3;
+                plan.Block          body                        = 3;
 }
 
 
@@ -75,32 +75,32 @@ message SessionReq {
 
     // Identifies a workstation/client installation (metaphorical to a "dumb" terminal in the 70's and 80's).
     // Two different members could have member sessions with the same workstation ID into a given repo (but not at the same time).
-                bytes               workstationID           = 1;
+                bytes               workstationID               = 1;
 
     // Which community this session wants to access
-                bytes               communityID             = 2;
+                bytes               communityID                 = 2;
 
     // The member's community-given ID
-                pdi.MemberEpoch     member_epoch            = 3;
+                pdi.MemberEpoch     member_epoch                = 3;
 
     // Optional -- used internally
-    //          string              repo_path               = 4;
+    //          string              repo_path                   = 4;
 
-    //          bytes               prev_session_token      = 4;
-    //          bytes               next_session_token      = 5;
+    //          bytes               prev_session_token          = 4;
+    //          bytes               next_session_token          = 5;
 
     // This will evolve in time, but in general, the client authenticates by submitting a token, 
     //    which is a hash of biometric-based input (e.g. pin, password, key-fob, eye scan) plus 
     //    a secure token from the previous session.
     // This is used to create a symmetric key to encrypt/decrypt the member's primary key hive
     //    that resides on the host.
-                bytes               passhash                = 5;
+                bytes               passhash                    = 5;
 
     // When the above symmetric key is created, it's placed it and other session info into a "secret box",
     //    and is locked with a key only the host has has, and sent back as the "session token".
     // This allows the client to present the session_token (until it expires) instead of the client 
     //    having to perform full biometric authentication.
-                bytes               session_token           = 6;
+                bytes               session_token               = 6;
 
 }
 
@@ -114,36 +114,40 @@ message SessionInfo {
 
 message ChInvocation {
 
-                fixed64             ch_id                   = 1;
+                fixed64             ch_id                       = 1;
 
-                string              ch_adapter_desc         = 2;
+                string              ch_adapter_desc             = 2;
 
 }
 
 message ChStatus {
 
-                int32               ch_sessionID            = 1;    
+                int32               ch_sessionID                = 1;    
 
     // Reports any error/state condition.
-                plan.Status         status                  = 2;
+                plan.Status         status                      = 2;
 }
 
 
 message ChMsg {
 
-                int32               ch_sessionID            = 1;
+                int32               ch_sessionID                = 1;
 
-                plan.Block          content                 = 2;  
+                plan.Block          content                     = 2;  
 }
 
 
 
 
-
 message RepoSeed {
-                pdi.StorageEpoch    storage_epoch           = 1;
-                pdi.CommunityEpoch  community_epoch         = 2;
-    repeated    plan.ServiceInfo    services                = 5;
+                pdi.StorageEpoch    storage_epoch               = 1;
+                pdi.CommunityEpoch  community_epoch             = 2;
+    repeated    plan.ServiceInfo    services                    = 5;
+
+
+                pdi.MemberEpoch     genesis_member_epoch        = 10;   // First member entry in the community's member registry
+                pdi.ChannelEpoch    genesis_registry_epoch      = 11;   // First channel epoch in the community's member registry
+                pdi.ChannelEpoch    genesis_acc_epoch           = 12;   // First channel epoch in the root ACC
 }
 
 
@@ -151,18 +155,18 @@ message RepoSeed {
 // A community issues this to a person they want to invite into their community.  A copy of this record is written to member registry channel.
 // This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
 message MemberSeed {
-                RepoSeed            repo_seed               = 1;
+                RepoSeed            repo_seed                   = 1;
 
-                ski.KeyTome         key_tome                = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
+                ski.KeyTome         key_tome                    = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
 
-                pdi.MemberEpoch     member_epoch            = 6;
+                pdi.MemberEpoch     member_epoch                = 6;
 
     // WHO sent this invitation (note: the member's signing key is used to create this invite)
-                fixed64             origin_memberID         = 7;
-                ski.KeyInfo         origin_signing_key      = 8;
+                fixed64             origin_memberID             = 7;
+                ski.KeyInfo         origin_signing_key          = 8;
 
     // A asym key used to encrypt an InvitationResponse
-                ski.KeyInfo         reply_to                = 9;
+                ski.KeyInfo         reply_to                    = 9;
 
 }
 
@@ -187,31 +191,166 @@ New member steps:
 **/
 
 
-message ChStoreInfo {
+enum EntryStatus {
 
-            
-                uint64              ch_storeID             = 1;
+    UNSPECIFIED                 = 0;
 
-                bytes               channelID              = 2;
+    NEEDS_VALIDATION            = 1;
+
+    // The given entry is considered authentic and a live operating part of the local community repo.
+    LIVE                        = 2;
+
+    // The given entry is currently in conflict with another entry having equal authority.
+    AMBIGUOUS_CONFLICT          = 3;
+
+    // The given entry is deferred as a result of one of many possibilities encountered during 
+    //    Channel Entry Validation (see design-docs/PLAN-Proof-of-correctness.md).
+    DEFERRED                    = 4;
+
+    // The given entry is currently in conflict with its channel's parent access control channel.
+    DISALLOWED                  = 5;
+
+    // The given entry has been confirmed to be associated with unauthorized activity, a security breach, or inappropriate behavior.
+    DISBARRED                   = 6;
+
+    // One or more parts of this entry are not self-consistent or does not self-validate.
+    MALFORMED                   = 7;
 
 }
 
 
 
-message ChStoreEntry {
 
-                int64           time_authored               = 1;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
-                uint32          time_authored_frac          = 2;        // [0,0xFFFF] -- fraction of a second when authored 
-                pdi.EntryOp     entry_op                    = 4;
-                bytes           channel_id                  = 5;        // Channel that this entry is posted to.
-                fixed64         channel_epoch               = 6;        // Epoch of the channel in effect when this entry was sealed
-                fixed64         author_member_id            = 7;        // Creator (and signer) of this entry 
-                int32           author_member_epoch         = 8;        // Epoch of the author's identity when this entry was sealed
-                plan.Encoding   body_encoding               = 9;
+message ChEntryInfo {
 
-                plan.Block      extensions                  = 11;       // Available for unrestricted client use.
+    // See pdi.EntryInfo
+                int64               time_authored               = 1;
+                uint32              time_authored_frac          = 2;
+                int64               time_received               = 3;
+                pdi.EntryOp         entry_op                    = 4;
+                fixed64             channel_epochID             = 6;
+                uint32              author_memberID             = 7;
+                uint32              author_member_epoch         = 8;
+                bytes               author_sig                  = 9;
+                plan.Encoding       body_encoding               = 10;
 
+
+    // Allows a ChStore to "know" what entries need to be passed to the agent (the next time it appears)
+                bool                processed_by_agent          = 20;
+
+                EntryStatus         entry_status                = 30;   
+                bytes               replaced_withURID           = 31;   // (only valid if EntryStatus == Replaced)
+
+    /*****************************************************
+    ** Regenerated Info (nil when encoding)
+    **/
+
+        // A hash digest of a packed and readied raw txn.  It is generated by TxnEncoder.EncodeToTxns()
+    // This is nil in packaged txns since its hash digest isn't knowable until after the txn is packaged.
+//                bytes               txn_hashname                = 21;
+
+
+    // Binary URID of this entry, derived from time_authored and txn_hashname.
+ //               bytes               URID                        = 22;
 
 }
 
 
+message ChEntryState {
+
+                EntryStatus         entry_status                = 10;   
+
+}
+
+
+
+/*
+message ChMgrState {
+
+                uint64              num_ch_stores               = 1;
+
+}
+*/
+
+
+
+
+message ChStoreState {
+
+    // Only set when this channel is in the process of being created.
+                bool                genesis_mode                = 1;
+
+                bytes               channelID                   = 2;
+
+    repeated    bytes               dep_channels                = 5;
+
+                int64               validated_upto              = 6;
+
+    // 
+                int64               agent_informed_upto         = 7;
+
+    // EpochHistory is list of all epochs for this channel since its creation (sorted with newer epochs appearing first) 
+    repeated    pdi.ChannelEpoch    epoch_history               = 8;
+
+                pdi.ChannelInfo     channel_info                = 9;
+    
+
+}
+
+
+
+
+message MemberEpochRefList {
+    repeated    uint32              memberIDs                   = 1;
+    repeated    uint32              epochIDs                    = 2;
+}
+
+
+message IntSet {
+
+    repeated    uint64              ints                        = 1;
+
+    // Range: [From, To) 
+                uint64              from                        = 2;
+                uint64              to                          = 3;
+
+}
+
+
+// These represent (re)validation to be done
+enum ChDependencyType {
+
+    // ALL entries with the given timestamp and later are dependent.
+    ALL_ENTRIES                 = 0;
+
+    // Only channel entries with a matching author member ID and epoch
+    BY_AUTHOR                   = 1;
+
+    // Only channel entries with a matching channel epoch
+    BY_CHANNEL_EPOCH            = 2;
+
+    // Only channel entries with a matching parent ACC ID (Aa
+    BY_ACC                      = 3;
+
+    // T
+    BY_BODY                     = 4;
+}
+
+
+message ChDependency {
+
+    // Specifies how the fields in this struct are interpreted and applied
+                ChDependencyType    dep_type                    = 1;
+
+    // Time index (and later) of applicable channel entries 
+                int64               time_index                  = 2;
+
+    // if DepType == BY_AUTHOR_EPOCH:
+                uint32              author_memberID             = 3;
+                uint32              author_member_epoch         = 4;
+
+    // if DepType == BY_CHANNEL_EPOCH:
+                fixed64             channel_epochID             = 5;
+
+
+}

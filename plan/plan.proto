@@ -39,32 +39,32 @@ message Block {
 
     // An optional, name/label for this Block (i.e. a field-name).
     // A Block's label conforms to the context/protocol it's being used with (as applicable).
-                string          label                       = 1;
+                string              label                   = 1;
 
     // Like a MIME type, this descriptor self-describes the data format of Block.content.
     // Anyone handed this Block uses this field to accurately process/deserialize its content.
     // This is a "multicodec path" -- see: https://github.com/multiformats/multistream
-                string          codec                       = 2;
+                string              codec                   = 2;
 
     // This is a reserved integer alternative to Block.Codec.
     // See: https://github.com/multiformats/multicodec/blob/master/table.csv
-                uint32          codec_code                  = 3;
+                uint32              codec_code              = 3;
 
     // Payload data, serialized in accordance with the accompanying codec descriptors (above).
-                bytes           content                     = 4;
+                bytes               content                 = 4;
 
     // A Block can optionally contain nested "sub" blocks.  A Block's sub-blocks
     //    can be interpreted or employed any way a client or protocol sees fit.
-    repeated    Block           subs                        = 5;
+    repeated    Block               subs                    = 5;
 }
 
 
 enum ValType {
-    NONE                        = 0;
-    INT                         = 1;
-    FLOAT                       = 2;
-    STR                         = 3;
-    BLOCK                       = 4;
+    NONE                    = 0;
+    INT                     = 1;
+    FLOAT                   = 2;
+    STR                     = 3;
+    BLOCK                   = 4;
 }
 
 
@@ -94,8 +94,8 @@ enum Encoding {
 
 // ServiceInfo contains descriptions, network addresses, ports, and connection info for remote services.
 message ServiceInfo {
-                string          addr                        = 1;
-                string          network                     = 2;
+                string              addr                        = 1;
+                string              network                     = 2;
 }
 
 
@@ -105,27 +105,27 @@ message ServiceInfo {
 message Val {
     
     // The value's name/label/key
-                string          name                        = 1;
+                string              name                        = 1;
 
     // Specifies which of the below are set/valid
-                ValType         val_type                    = 2;
+                ValType             val_type                    = 2;
 
-                int64           int                         = 3;
-                double          float                       = 4;
-                string          str                         = 5;
-                Block           block                       = 6; 
+                int64               int                         = 3;
+                double              float                       = 4;
+                string              str                         = 5;
+                Block               block                       = 6; 
 }
 
 message Status {
 
     // Information code
-                int32           code                        = 1;
+                int32               code                        = 1;
 
     // Information msg
-                string          msg                         = 2;
+                string              msg                         = 2;
 
     // An unordered list of arbitrary fields/params associated with this error
-    repeated    Val             params                      = 3;
+    repeated    Val                 params                      = 3;
 
 }
 
