@@ -5,6 +5,7 @@ import (
     //"fmt"
     //"log"
     //"os"
+    "time"
     "sync"
     "crypto/rand"
 
@@ -42,7 +43,7 @@ type ClientSession struct {
     SessionToken            string
 
     // PrevActivityTime says when this session was last accessed, used to know how long a session has been idle.
-    PrevActivityTime        plan.Time
+    PrevActivityTime        int64
 
     // OnEndSession performs any closing/cleanup associated with the given session.  
     // Note: this is called via goroutine, so concurrency considerations should be made.
@@ -145,7 +146,6 @@ func (group *SessionGroup) Pop() interface{} {
 
 
 
-
 // ExtractSessionToken extracts the session_token from the given context
 func ExtractSessionToken(ctx context.Context) (string, error) {
 
@@ -200,8 +200,6 @@ func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, er
 
 
 
-
-
 // LookupSession returns the ClientSession having the given session token.
 func (group *SessionGroup) LookupSession(inSessionToken string, inBumpActivity bool) *ClientSession {
    
@@ -212,7 +210,7 @@ func (group *SessionGroup) LookupSession(inSessionToken string, inBumpActivity b
         group.RUnlock()
 
         if inBumpActivity && session != nil {
-            session.PrevActivityTime = plan.Now()
+            session.PrevActivityTime = time.Now().Unix()
         }
 
         return session
@@ -245,7 +243,7 @@ func (group *SessionGroup) NewSession(
 // InsertSession inserts the given session into this SessionGroup -- THREADSAFE
 func (group *SessionGroup) InsertSession(inSession *ClientSession) {
 
-    inSession.PrevActivityTime = plan.Now()
+    inSession.PrevActivityTime = time.Now().Unix()
 
     group.Lock()
     group.table[inSession.SessionToken] = inSession
@@ -270,14 +268,14 @@ func (group *SessionGroup) EndSession(inSessionToken string, inReason string) {
 }
 
 // EndInactiveSessions removes alls sessions inactive longer than the given time index -- THREADSAFE
-func (group *SessionGroup) EndInactiveSessions(inExpiration plan.Time) {
+func (group *SessionGroup) EndInactiveSessions(inExpirationTime int64) {
 
     var expired []*ClientSession
 
     // First, make a list to see if any have even expired
     group.RLock()
     for _, session := range group.table {
-        if session.PrevActivityTime.UnixSecs > inExpiration.UnixSecs {
+        if session.PrevActivityTime > inExpirationTime {
             expired = append(expired, session)
         }
     }
