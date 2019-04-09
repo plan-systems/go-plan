@@ -358,7 +358,6 @@ enum EntryOp {
 
 
 
-
 message AccessControls {
 
 
@@ -376,7 +375,7 @@ message AccessGrant {
 
     // List of community member IDs being given the specified access grant. 
     // Note: if grantees[0] == "*" AND access_grant <= MODERATOR_ACCESS, then the grant implicitly applies to ALL community members. 
-    repeated    fixed64             grantees                    = 2;
+    repeated    uint32              grantees                    = 2;
 
 }
 
@@ -389,13 +388,13 @@ message AccessGrant {
 message ChannelEpoch {
 
     // Random "name" for this channel epoch -- must be unique for a channel's epoch history (and not 0). 
-                fixed64             epochID                     = 1;
+                uint64              epochID                     = 1;
 
     // Unix timestamp when this epoch entered into effect
                 int64               time_started                = 2;
 
     // Names the previous epoch.  0 if there was no previous epoch.
-                fixed64             prev_epochID                = 3;
+                uint64              prev_epochID                = 3;
 
     // Number of seconds the previous epoch can alternatively be used in place of this epoch.
                 int32               epoch_transition_period     = 4;
@@ -409,7 +408,7 @@ message ChannelEpoch {
                 string              protocol                    = 5;
 
     // Specifies the channel that is serving as this channel's access control channel (and has entries that conform to that spec)
-                bytes               access_channelID            = 7;
+                uint64              access_channelID            = 7;
 
     // If set, channel entries can be retroactively marked to be removed/superceded via EntryOp.SUPERSEDE_ENTRY
                 bool                entries_supersedable        = 8;
@@ -445,8 +444,9 @@ message ChannelEpoch {
     // This is the channel access level for members NOT specified in access_grants.
                 AccessLevel         default_access_level        = 21;
 
+    // Maps a given member ID number to an AccessLevel
     // Contains all the access grants published via EDIT_ACCESS_GRANTS sent to this channel (during this epoch).
-    map<        fixed64,
+    map<        uint32,
                 AccessLevel>        access_levels               = 22;
 
 }
@@ -495,9 +495,10 @@ message EntryCrypt {
 message EntryInfo {
                 int64               time_authored               = 1;        // Unix timestamp -- UTC in seconds elapsed since Jan 1, 1970.
                 uint32              time_authored_frac          = 2;        // [0,0xFFFF] -- fraction of a second when authored 
+                bool                is_genesis_entry            = 3;        // Set if this entry's URID is pre-whitelisted (and can be verified)
                 EntryOp             entry_op                    = 4;
-                bytes               channelID                   = 5;        // Channel that this entry is posted to.
-                fixed64             channel_epochID             = 6;        // Epoch of the channel in effect when this entry was sealed
+                uint64              channelID                   = 5;        // Channel that this entry is posted to.
+                uint64              channel_epochID             = 6;        // Epoch of the channel in effect when this entry was sealed
                 uint32              author_memberID             = 7;        // Creator (and signer) of this entry 
                 uint32              author_member_epoch         = 8;        // Epoch of the author's identity when this entry was sealed
                 plan.Encoding       body_encoding               = 9;
@@ -515,6 +516,7 @@ message EntryInfo {
 
 
 // StorageEpoch contains core params req'd for a community (and StorageProviders for that community) 
+// During community genesis, the newly created StorageEpoch is marshalled and signed by OriginKey
 message StorageEpoch {
 
     // OriginKey is a signing key that:
@@ -537,6 +539,9 @@ message StorageEpoch {
 
     // Max byte size of txns allowed to be posted to StorageProviders with this epoch.
                 uint32              txn_max_size                = 7;
+
+    // List of entry URIDs that are considered automatically validated at all times.
+    repeated    bytes               genesisURIDs                = 8;
 }
 
 
@@ -590,6 +595,7 @@ message CommunityEpoch {
 //    (3) generate and publish new keys when personal security has been compromised. 
 message MemberEpoch {
 
+                
     // Immutable -- generated during member genesis.
     // To ensure new member ID async uniqueness, community admins lease/reserve member ID ranges they are allowed to issue within.
                 uint32              memberID                    = 2;    
