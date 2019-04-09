@@ -163,3 +163,34 @@ func (block *Block) AddContentWithCodec(inContent []byte, inCodec string) {
 		Content: inContent,
 	})
 }
+
+
+
+// FindBlocksWithCodec traverses all Blocks with a matching codec.  
+// If/when an error is encountered, iteration stops and the error is returned.
+func (block *Block) FindBlocksWithCodec(
+    inCodec string,
+    inCodecCode uint32,
+    inCallback func(inMatch *Block) error,
+) error {
+
+    checkCodecStr := len(inCodec) > 0
+
+    var err error
+
+    // Start w/ the "self" block
+    sub := block
+    
+    N := len(block.Subs)
+    for i := -1; i < N && err == nil; i++ {
+        if i >= 0 {
+            sub = block.Subs[i]
+        }
+
+        if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || (checkCodecStr && inCodec == sub.Codec) {
+            err = inCallback(sub)
+        }
+    } 
+
+	return err
+}
