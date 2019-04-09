@@ -275,6 +275,14 @@ func (St *Store) CheckStatus() error {
 }
 
 
+// IsRunning -- see plan.Flow.IsRunning
+func (St *Store) IsRunning() bool {
+
+    return St.flow.IsRunning()
+
+}
+
+
 
 
 // ScanJob represents a pending Query() call to a StorageProvider
@@ -562,7 +570,7 @@ func (St *Store) DoScanJob(job ScanJob) {
 
     atomic.AddInt32(&St.numScanJobs, 1)
 
-    err := St.flow.CheckStatus()
+    err := St.CheckStatus()
     if err != nil {
         job.OnComplete <- err
         atomic.AddInt32(&St.numScanJobs, -1)
@@ -573,8 +581,8 @@ func (St *Store) DoScanJob(job ScanJob) {
     go func() {
         err := St.doScanJob(job)
 
-        if err != nil {
-            St.flow.Log.WithError(err).Warn("doQueryJob() returned error")   
+        if err != nil && St.IsRunning() {
+            St.flow.Log.WithError(err).Warn("scan job error")   
         }
 
         job.OnComplete <- err
@@ -587,7 +595,7 @@ func (St *Store) DoScanJob(job ScanJob) {
 func (St *Store) DoSendJob(job SendJob) {
     atomic.AddInt32(&St.numSendJobs, 1)
 
-    err := St.flow.CheckStatus()
+    err := St.CheckStatus()
     if err != nil {
         job.OnComplete <- err
         atomic.AddInt32(&St.numSendJobs, -1)
@@ -597,8 +605,8 @@ func (St *Store) DoSendJob(job SendJob) {
     go func() {
         err := St.doSendJob(job)
 
-        if err != nil {
-            St.flow.Log.WithError(err).Warn("doSendJob() returned error")   
+        if err != nil && St.IsRunning() {
+            St.flow.Log.WithError(err).Warn("send job error")   
         }
 
         job.OnComplete <- err
@@ -675,7 +683,7 @@ func (St *Store) doSendJob(job SendJob) error {
                 continue
             }
 
-            err = St.flow.CheckStatus()
+            err = St.CheckStatus()
             if err == nil && txnOut != nil {
                 err = job.Outlet.Send(txnOut)
             }
@@ -792,6 +800,14 @@ func (St *Store) doScanJob(job ScanJob) error {
                     }
                 }
 
+                itr.Close()
+                dbTxn.Discard()
+                dbTxn = nil
+
+                if err == nil {
+                    err = St.CheckStatus()
+                }
+
                 if batchCount == 0 {
                     scanDir = 0
                 } else if err == nil {
@@ -803,9 +819,6 @@ func (St *Store) doScanJob(job ScanJob) error {
                     copy(seekKey, URIDs[batchCount-1])
                 }
 
-                itr.Close()
-                dbTxn.Discard()
-                dbTxn = nil
             }
 
             {
@@ -829,6 +842,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                                 statuses[batchCount] = byte(txnUpdate.TxnStatus)
                                 batchCount++
 
+                                // Once we one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
                                 if batchCount == 1 {
                                     wakeTimer = batchLag.C
                                     for len(wakeTimer) > 0 {
