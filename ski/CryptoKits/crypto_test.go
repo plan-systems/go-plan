@@ -48,13 +48,42 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 		gTesting.Fatal("initial msg check failed!?")
 	}
 
+
+	var crypt []byte
+    var passBuf [200]byte
+
+	/*****************************************************
+	** Symmetric password test
+	**/
+
+	{
+
+        passLen := 1 + math_rand.Int31n(30)
+        pass := passBuf[:passLen]
+        math_rand.Read(pass)
+
+		crypt, err := kit.EncryptUsingPassword(reader, msgOrig, pass)
+		if err != nil {
+			gTesting.Fatal(err)
+		}
+
+		if len(badMsg) != len(crypt) {
+			badMsg = make([]byte, len(crypt))
+		}
+
+		msg, err = kit.DecryptUsingPassword(crypt, pass)
+		if bytes.Compare(msg, msgOrig) != 0 {
+			gTesting.Fatal("symmetric decrypt failed check")
+		}
+	}
+
+
 	entry := ski.KeyEntry{
         KeyInfo: &ski.KeyInfo{
             CryptoKit: kit.CryptoKitID,
         },
     }
 
-	var crypt []byte
 
 	/*****************************************************
 	** Symmetric test
@@ -102,7 +131,6 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 	**/
 
 	{
-
 		entry.KeyInfo.KeyType = ski.KeyType_AsymmetricKey
 		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
 		if err != nil {

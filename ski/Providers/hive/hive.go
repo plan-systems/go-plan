@@ -305,7 +305,7 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
     if err == nil {
         switch opArgs.CryptOp {
 
-            case ski.CryptOp_EXPORT_TO_PEER: {
+            case ski.CryptOp_EXPORT_TO_PEER, ski.CryptOp_EXPORT_USING_PW: {
                 if opArgs.TomeIn == nil {
                     err = plan.Error(nil, plan.AssertFailed, "op requires TomeIn")
                 } else {
@@ -325,14 +325,21 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
         cryptoKit *ski.CryptoKit
     )
     if err == nil {
-        if opArgs.OpKey == nil {
-            err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
-        } else {
-            opKey, err = session.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
-            if err == nil {
-                opOut.OpPubKey = opKey.KeyInfo.PubKey
-                cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKit)
-            }
+        switch opArgs.CryptOp {
+            case ski.CryptOp_EXPORT_USING_PW, 
+                 ski.CryptOp_IMPORT_USING_PW:
+                cryptoKit, err = ski.GetCryptoKit(opArgs.DefaultCryptoKit)
+
+            default:
+                if opArgs.OpKey == nil {
+                    err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
+                } else {
+                    opKey, err = session.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
+                    if err == nil {
+                        opOut.OpPubKey = opKey.KeyInfo.PubKey
+                        cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKit)
+                    }
+                }
         }
     }
 
@@ -359,18 +366,31 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
                     opArgs.BufIn, 
                     opKey.PrivKey)
 
-            case ski.CryptOp_ENCRYPT_TO_PEER, ski.CryptOp_EXPORT_TO_PEER:
+            case ski.CryptOp_ENCRYPT_TO_PEER, 
+                 ski.CryptOp_EXPORT_TO_PEER:
                 opOut.BufOut, err = cryptoKit.EncryptFor(
                     crypto_rand.Reader, 
                     opArgs.BufIn, 
-                    opArgs.PeerPubKey,
+                    opArgs.PeerKey,
                     opKey.PrivKey)
 
-            case ski.CryptOp_DECRYPT_FROM_PEER, ski.CryptOp_IMPORT_FROM_PEER:
+            case ski.CryptOp_DECRYPT_FROM_PEER,
+                 ski.CryptOp_IMPORT_FROM_PEER:
                 opOut.BufOut, err = cryptoKit.DecryptFrom(
                     opArgs.BufIn, 
-                    opArgs.PeerPubKey,
+                    opArgs.PeerKey,
                     opKey.PrivKey)
+
+            case ski.CryptOp_EXPORT_USING_PW:
+                opOut.BufOut, err = cryptoKit.EncryptUsingPassword(
+                    crypto_rand.Reader, 
+                    opArgs.BufIn, 
+                    opArgs.PeerKey)
+
+            case ski.CryptOp_IMPORT_USING_PW:
+                opOut.BufOut, err = cryptoKit.DecryptUsingPassword(
+                    opArgs.BufIn, 
+                    opArgs.PeerKey)
                 
             default:
                 err = plan.Errorf(nil, plan.UnknownSKIOpName, "unrecognized SKI operation %v", opArgs.CryptOp)
@@ -387,10 +407,12 @@ func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, err
             case ski.CryptOp_EXPORT_TO_PEER:
                 ski.Zero(opArgs.BufIn)
 
-            case ski.CryptOp_IMPORT_FROM_PEER: {
+            case ski.CryptOp_IMPORT_FROM_PEER,
+                 ski.CryptOp_IMPORT_USING_PW: {
                 newTome := ski.KeyTome{}
                 err = newTome.Unmarshal(opOut.BufOut)
                 ski.Zero(opOut.BufOut)
+                ski.Zero(opArgs.PeerKey)
 
                 if err == nil {
                     session.keyTomeMgr.MergeTome(&newTome)

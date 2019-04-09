@@ -51,7 +51,7 @@ func doProviderTest(A, B *testSession) {
     opBuf := A.doOp(ski.CryptOpArgs{
         CryptOp: ski.CryptOp_EXPORT_TO_PEER,
         OpKey: &A.P2PKey,
-        PeerPubKey: B.P2PKey.PubKey,
+        PeerKey: B.P2PKey.PubKey,
         TomeIn: &ski.KeyTome{
             Keyrings: []*ski.Keyring{
                 &ski.Keyring{
@@ -66,7 +66,7 @@ func doProviderTest(A, B *testSession) {
         CryptOp: ski.CryptOp_IMPORT_FROM_PEER,
         BufIn: opBuf,
         OpKey: &B.P2PKey,
-        PeerPubKey: A.P2PKey.PubKey,
+        PeerKey: A.P2PKey.PubKey,
     })
 
 

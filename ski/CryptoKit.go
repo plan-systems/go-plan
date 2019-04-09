@@ -27,6 +27,23 @@ type CryptoKit struct {
 	) error
 
 	/*****************************************************
+	** Symmetric encryption (via arbitrary password)
+	**/
+
+    // Encrypts a buffer using any arbitrary-length password
+    EncryptUsingPassword func(
+		inRand io.Reader,
+		inMsg []byte,
+        inPwd []byte,
+    ) ([]byte, error)
+
+    // Decrypt a buffer encrypted via EncryptUsingPassword()
+    DecryptUsingPassword func(
+		inMsg []byte,
+		inPwd []byte,
+    ) ([]byte, error)
+
+	/*****************************************************
 	** Symmetric encryption
 	**/
 

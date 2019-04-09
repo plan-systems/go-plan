@@ -9,6 +9,8 @@ import (
 	"github.com/plan-systems/go-plan/ski"
 	"github.com/plan-systems/go-plan/plan"
     
+    "golang.org/x/crypto/pbkdf2"
+
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
     sign "golang.org/x/crypto/nacl/sign"
@@ -37,6 +39,60 @@ var (
 
 func init() {
     ski.RegisterCryptoKit(&CryptoKit)
+}
+
+
+
+func symEncrypt(
+    inRand io.Reader, 
+    inMsg []byte,
+    inKey []byte,
+) ([]byte, error) {
+
+    if len(inKey) != 32 {
+        return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key size, want %v, got %v", 32, len(inKey))
+    }
+
+    var salt [24]byte
+    _, err := inRand.Read(salt[:])
+    if err != nil {
+        return nil, err
+    }
+
+    var privKey [32]byte
+    copy(privKey[:], inKey[:32])
+    
+    msg := secretbox.Seal(salt[:], inMsg, &salt, &privKey)
+
+    // Don't leave any private key bytes in memory
+    copy(privKey[:], zero64[:32])
+
+    return msg, nil
+}
+
+
+func symDecrypt(
+    inMsg []byte,
+    inKey []byte,
+) ([]byte, error) {
+
+    var salt [24]byte
+    copy(salt[:], inMsg[:24])
+    
+    var privKey [32]byte
+    copy(privKey[:], inKey[:32])
+
+    var err error
+    msg, ok := secretbox.Open(nil, inMsg[24:], &salt, &privKey)
+    if ! ok {
+        err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt data")
+    }
+
+    // Don't leave any private key bytes in memory
+    copy(privKey[:], zero64[:32])
+
+
+    return msg, err
 }
 
 
@@ -102,58 +158,55 @@ var CryptoKit = ski.CryptoKit{
         return nil
     },
 
+    EncryptUsingPassword: func(
+        inRand io.Reader, 
+        inMsg []byte,
+        inPwd []byte,
+    ) ([]byte, error) {
+
+        hashKitID := ski.HashKitID_LegacyKeccak_256
+        hasher := ski.FetchHasher(hashKitID)
+
+        var salt [26]byte
+        salt[0] = byte(hashKitID)
+        salt[1] = 0
+        inRand.Read(salt[2:])
+
+        privKey := pbkdf2.Key(inPwd, salt[2:], 4096, 32, hasher)
+
+        buf, err := symEncrypt(inRand, inMsg, privKey)
+        if err != nil {
+            return nil, err
+        }
+
+        return append(salt[:], buf...), nil
+    },
+
+
+    DecryptUsingPassword: func(
+        inMsg []byte,
+        inPwd []byte,
+    ) ([]byte, error) {
+
+        hashKitID := ski.HashKitID(inMsg[0])
+        hasher := ski.FetchHasher(hashKitID)
+        if hasher == nil {
+            return nil, plan.Errorf(nil, plan.HashKitNotFound, "failed to recognize HashKitID %v", hashKitID)
+        }
+
+        privKey := pbkdf2.Key(inPwd, inMsg[2:26], 4096, 32, hasher)
+
+        return symDecrypt(inMsg[26:], privKey)
+
+    },
+
 	/*****************************************************
 	** Symmetric encryption
 	**/
 
-    Encrypt: func(
-        inRand io.Reader, 
-        inMsg []byte,
-        inKey []byte,
-    ) ([]byte, error) {
+    Encrypt: symEncrypt,
 
-        if len(inKey) != 32 {
-            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected key size, want %v, got %v", 32, len(inKey))
-        }
-
-        var salt [24]byte
-        inRand.Read(salt[:])
-
-        var privKey [32]byte
-        copy(privKey[:], inKey[:32])
-        
-        msg := secretbox.Seal(salt[:], inMsg, &salt, &privKey)
-
-        // Don't leave any private key bytes in memory
-        copy(privKey[:], zero64[:32])
-
-        return msg, nil
-    },
-
-
-    Decrypt: func(
-        inMsg []byte,
-        inKey []byte,
-    ) ([]byte, error) {
-
-        var salt [24]byte
-        copy(salt[:], inMsg[:24])
-        
-        var privKey [32]byte
-        copy(privKey[:], inKey[:32])
-
-        var err error
-        msg, ok := secretbox.Open(nil, inMsg[24:], &salt, &privKey)
-        if ! ok {
-            err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt data")
-        }
-
-        // Don't leave any private key bytes in memory
-        copy(privKey[:], zero64[:32])
-
-
-        return msg, err
-    },
+    Decrypt: symDecrypt,
 
 	/*****************************************************
 	** Asymmetric encryption
@@ -175,7 +228,10 @@ var CryptoKit = ski.CryptoKit{
         }
 
         var salt [24]byte
-        inRand.Read(salt[:])
+        _, err := inRand.Read(salt[:])
+        if err != nil {
+            return nil, err
+        }
 
         var privKey, peerPubKey [32]byte
         copy(peerPubKey[:], inPeerPubKey[:32])
