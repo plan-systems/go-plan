@@ -5,7 +5,7 @@
          A rchitecture
 P  L  A  N etwork
 
-May PLAN support her users, the members of the PLAN Foundation, and myself so that I could not wish for more.
+May PLAN support her users, the members of PLAN Systems, and myself so that I could not wish for more.
 
 ~ proto, summer 2018  */
 
@@ -15,6 +15,8 @@ import (
 	"time"
     "os"
     "encoding/base64"
+
+    //"github.com/plan-systems/go-plan/pcore"
 )
 
 // DataHandler is a deferred data handler function
@@ -36,10 +38,10 @@ const (
 	SymmetricPubKeySz = 16
 
 	// ChannelIDSz specifies the byte size of a ChannelID
-    ChannelIDSz = 16
+    ChannelIDSz = 8
 
     // MemberIDSz is the byte size of a MemberID
-    MemberIDSz = 8
+    MemberIDSz = 4
 
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
 	MemberAliasMaxLen = 127
@@ -56,7 +58,7 @@ type CommunityID [CommunityIDSz]byte
 //    a new "epoch" so their crypto can be regenerated.
 // Member IDs are considered collision-proof since inside a community, they must be cleared through
 //    the community's new member registration process (which will reject a collision).
-type MemberID uint64
+type MemberID uint32
 
 // StorageID identifies a storage instance within a given community.  
 //
@@ -74,26 +76,23 @@ type StorageID uint16
 //    scheme makes the member ID recoverable from human memory, even if there is no network access.
 type MemberAlias string
 
+// PeerUUID is a peer-generated ID, formed via Multiplex(memberID, memberIssueNum)
+type PeerUUID uint64
+
 // ChannelID identifies a specific PLAN channel where PDI entries are posted to (for a given a community ID).
-type ChannelID [ChannelIDSz]byte
+type ChannelID PeerUUID
 
 
+const (
 
-var (
-
-	// RootAccessChannel is the community's root access-level channel, meaning this channel effectively
+    // RootACChannelID is the community's root access-level channel, meaning this channel effectively
 	//    specifies which community members are "community admins".  All other channels and access channels
 	//    are ultimately controlled by the community members listed in this root channel.  This means
 	//    the hierarchy of access channels is rooted in this channel.
 	// Note that the parent access channel is set to itself by default.
-	RootAccessChannel = ChannelID{
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 1,
-	}	
+	RootACChannelID = ChannelID(1)
     
-    // MemberRegistryChannel is the community's master (community-public) member registry.  Each entry specifies a
+    // MemberRegistryChannelID is the community's master (community-public) member registry.  Each entry specifies a
 	//    each community member's member ID, latest public keys, and member info (e.g. home ChannelID).  This allows each of the
 	//    community's pnodes to verify member signatures and enable the passing of secrets to other members or groups
 	//    via asymmetric encryption. Naturally, this channel is controlled by an access channel that is controlled only
@@ -103,23 +102,14 @@ var (
 	// Note how a member's ID can always be remapped to any number of deterministically generated channel IDs.  For
 	//    example, by convention, a member's /plan/member "home channel" is implicitly specified by virtue of knowing
 	//    a member's community member ID (since a community member ID never changes)
-	MemberRegistryChannel = ChannelID{
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 2,
-	}
+	MemberRegistryChannelID = ChannelID(2)
 
-	// ChannelCatalogChannel is where the existence of community-public channels is communicated to other community members.
-	// By default, only community admins can post to this channel, ensuring community admins decide what channels are readily
-	//     visible to other community though access can be granted to other select users.  This channel allows users to find
-	//     any community-public channel, regardless if the channel has been linked in a public workspace.
-	ChannelCatalogChannel = ChannelID{
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 3,
-	}
+)
+
+var (
+
+
+
 
     // DefaultFileMode is used to express the default mode of file creation.
     DefaultFileMode = os.FileMode(0775)
@@ -127,6 +117,9 @@ var (
     // Base64 encodes/decodes binary strings.
     Base64 = base64.NewEncoding(Base64CharSet).WithPadding(base64.NoPadding)
 
+    // GenesisMemberID is the genesis member ID 
+    GenesisMemberID = uint32(1)
+    
 )
 
 // Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflipping
@@ -156,4 +149,7 @@ const (
 	DistantPast int64 = -DistantFuture
 )
 
-
+// Unplex decomposes a ChannelID into the orginator member ID and issue ID.
+func (chID ChannelID) Unplex() (memberID, issueID uint32) {
+    return Unplex(uint64(chID))
+}
