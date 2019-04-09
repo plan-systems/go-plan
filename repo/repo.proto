@@ -138,16 +138,16 @@ message ChMsg {
 
 
 
-
-message RepoSeed {
+message GenesisSeed {
                 pdi.StorageEpoch    storage_epoch               = 1;
                 pdi.CommunityEpoch  community_epoch             = 2;
-    repeated    plan.ServiceInfo    services                    = 5;
+}
 
 
-                pdi.MemberEpoch     genesis_member_epoch        = 10;   // First member entry in the community's member registry
-                pdi.ChannelEpoch    genesis_registry_epoch      = 11;   // First channel epoch in the community's member registry
-                pdi.ChannelEpoch    genesis_acc_epoch           = 12;   // First channel epoch in the root ACC
+message RepoSeed {
+                bytes               signed_genesis_seed         = 1;
+
+
 }
 
 
@@ -156,6 +156,8 @@ message RepoSeed {
 // This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
 message MemberSeed {
                 RepoSeed            repo_seed                   = 1;
+                
+    repeated    plan.ServiceInfo    services                    = 5;
 
                 ski.KeyTome         key_tome                    = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
 
@@ -221,6 +223,25 @@ enum EntryStatus {
 
 
 
+enum ChEntryFlags {
+
+    // Set if author member ID + member epoch validates against the community's member registred
+    AUTHOR_VALIDATED             = 0;
+
+    // Set if this entry validates against the cited channel epoch ID
+    CHANNEL_EPOCH_VALIDATED      = 1;
+
+    // Set if this entry validates against the cited or implied governing ACC
+    ACC_VALIDATED                = 2;
+
+    // Set if this entry is a genesis entry URID was white-listed (and can be verified)
+    IS_GENESIS_ENTRY             = 3;
+
+}
+
+
+
+
 message ChEntryInfo {
 
     // See pdi.EntryInfo
@@ -228,11 +249,12 @@ message ChEntryInfo {
                 uint32              time_authored_frac          = 2;
                 int64               time_received               = 3;
                 pdi.EntryOp         entry_op                    = 4;
-                fixed64             channel_epochID             = 6;
+                uint64              channel_epochID             = 6;
                 uint32              author_memberID             = 7;
                 uint32              author_member_epoch         = 8;
                 bytes               author_sig                  = 9;
                 plan.Encoding       body_encoding               = 10;
+                uint32              flags                       = 11;
 
 
     // Allows a ChStore to "know" what entries need to be passed to the agent (the next time it appears)

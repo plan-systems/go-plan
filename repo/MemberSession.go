@@ -1,6 +1,7 @@
 package repo
 
 import (
+	crypto_rand "crypto/rand"
     "os"
     "path"
     //"io/ioutil"
@@ -10,10 +11,11 @@ import (
     //"sort"
     //"encoding/hex"
     //"encoding/json"
-    //"context"
+    "context"
     "fmt"
     
-    "github.com/plan-systems/go-plan/ski/Providers/hive"
+    //"github.com/plan-systems/go-plan/ski/Providers/hive"
+
 
  	//"google.golang.org/grpc"
     //"google.golang.org/grpc/metadata"
@@ -28,10 +30,28 @@ import (
 
 )
 
+/*
+
+Huge!
+
+Every Repo maintains a list of when the latest entry from a given member has been witnessed.  
+
+this prevents any member from holding onto a "submarine" entry intended to disrupt the community etc.
+
+entries that are older than a set const delta from the latest post are auto-rejected since there's no way
+one entry would be offline for weeks/months while *behind* another that is live.
+*************
+
+Newly authoered entries sit around until there's a storage provider 
+
+*/
+
 
 // MemberSessions contains functionality that manages live active member connections.  
 type MemberSessions struct {
     sync.RWMutex
+
+    Host                    MemberHost
 
     List                    []*MemberSession
 
@@ -65,8 +85,8 @@ func (MS *MemberSessions) OnSessionEnded(inSess *MemberSession) {
 
     MS.Lock()
     N := int32(len(MS.List))
-    for i, msess := range MS.List {
-        if msess == inSess {
+    for i, ms := range MS.List {
+        if ms == inSess {
             N--
             MS.List[i] = MS.List[N]
             MS.List[N] = nil
@@ -82,14 +102,18 @@ func (MS *MemberSessions) OnSessionEnded(inSess *MemberSession) {
 
 
 // StartSession sets up a MemberSession for use
+//
+// TODO: close inSKI if an error is returned
 func (MS *MemberSessions) StartSession(
-    inHostRepo *CommunityRepo,
     inSessReq *SessionReq,
+    inSKI ski.Session,
     inBasePath string,
 ) (*MemberSession, error) {
 
+    // TODO: close inSKI if an error is returned
+    var err error
 
-    if len(inSessReq.WorkstationID) != plan.CommunityIDSz {
+    if len(inSessReq.WorkstationID) > 0 && len(inSessReq.WorkstationID) != plan.CommunityIDSz {
         return nil, plan.Error(nil, plan.AssertFailed, "invalid workstation ID")
     }
 
@@ -113,21 +137,25 @@ func (MS *MemberSessions) StartSession(
     }
 
     ms := &MemberSession{
-        HostRepo: inHostRepo,
+        Host: MS.Host,
+        PersonalSKI: inSKI,
         WorkstationID: inSessReq.WorkstationID,
         MemberEpoch: *inSessReq.MemberEpoch,
-        CommunityEpoch: inHostRepo.State.LatestCommunityEpoch,
+        CommunityEpoch: MS.Host.LatestCommunityEpoch(),
     }
 
     ms.communityKey = ms.CommunityEpoch.CommunityKeyRef()
-
     ms.MemberIDStr = ms.MemberEpoch.FormMemberStrID()
-
     ms.SharedPath = path.Join(inBasePath, ms.MemberIDStr)
-    ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64.EncodeToString(ms.WorkstationID[:15]))
+
+    if len(inSessReq.WorkstationID) == 0 {
+        ms.WorkstationPath = ms.SharedPath
+    } else {
+        ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64.EncodeToString(ms.WorkstationID[:15]))
+    }
     
-    err := ms.Flow.Startup(
-        inHostRepo.flow.Ctx,
+    err = ms.flow.Startup(
+        ms.Host.Context(),
         fmt.Sprintf("MemberSession %v", ms.MemberIDStr),
         ms.onInternalStartup,
         ms.onInternalShutdown,
@@ -163,12 +191,36 @@ type MemberTerminal struct {
 
 */
 
+// MemberHost is a context for a MemberSession to operate wthin.
+type MemberHost interface {
+
+    // Returns an encapsulating context
+    Context() context.Context
+
+    // Commits the newly authored txn
+    CommitAuthoredTxn(inTxn pdi.RawTxn)
+
+    // Returns the latest community epoch
+    LatestCommunityEpoch() pdi.CommunityEpoch
+
+    // Returns the latest storage epoch.
+    LatestStorageEpoch() pdi.StorageEpoch
+
+    // The given session is ending
+    OnSessionEnded(inSession *MemberSession)
+}
+
+
+
 // MemberSession represents a user/member "logged in", meaning a SKI session is active.
 type MemberSession struct {
-    Flow            plan.Flow
+    flow            plan.Flow
 
-    // The latest community epoch
+    // The current community epoch
     CommunityEpoch  pdi.CommunityEpoch
+
+    // Allows key callback functionality 
+    Host            MemberHost
 
     // Pathname to member repo files (shared by all client instances)
     SharedPath      string
@@ -187,7 +239,6 @@ type MemberSession struct {
     //    may have a device pin to nerf anonymous easy physical theft, etc).
     //sessionDB      *badger.DB
     // Host 
-    HostRepo       *CommunityRepo
 
 
 
@@ -200,7 +251,7 @@ type MemberSession struct {
     Packer          ski.PayloadPacker
 
     TxnEncoder      pdi.TxnEncoder
-    personalSKI     ski.Session
+    PersonalSKI     ski.Session
 
     //txnSignKey     *ski.KeyRef
     //txnSignKeyInfo  *ski.KeyInfo
@@ -242,23 +293,10 @@ func (ms *MemberSession) onInternalStartup() error {
         return err
     }
 
-    // TODO: make repo ski sesson mgr?  use workstation path??  
-    skiDir, err := hive.GetSharedKeyDir()
-    if err != nil { return err }
-
-    // TODO: close prev skiSession
-    ms.personalSKI, err = hive.StartSession(
-        skiDir,
-        ms.MemberIDStr,
-        nil,
-    )
-    if err != nil { return err }
-
-
     // Set up the entry packer using the singing key associated w/ the member's current MemberEpoch
     ms.Packer = ski.NewPacker(false)
     err = ms.Packer.ResetSession(
-        ms.personalSKI,
+        ms.PersonalSKI,
         ski.KeyRef{
             KeyringName: ms.MemberEpoch.FormSigningKeyringName(ms.CommunityEpoch.CommunityID),
             PubKey: ms.MemberEpoch.PubSigningKey,
@@ -269,10 +307,10 @@ func (ms *MemberSession) onInternalStartup() error {
     if err != nil { return err }
 
     // Set up the txn encoder
-    ms.TxnEncoder = ds.NewTxnEncoder(false, ms.HostRepo.Config.StorageEpoch)
+    ms.TxnEncoder = ds.NewTxnEncoder(false, ms.Host.LatestStorageEpoch())
 
     // Use the member's latest txn/storage signing key.
-    if err = ms.TxnEncoder.ResetSigner(ms.personalSKI, nil); err != nil { 
+    if err = ms.TxnEncoder.ResetSigner(ms.PersonalSKI, nil); err != nil { 
         return err
     }
 
@@ -281,28 +319,27 @@ func (ms *MemberSession) onInternalStartup() error {
     // outbound entry processor
     //
     // encrypts and encodes entries from channel sessions, sending the finished txns to the host repo to be stored/saved.
-    ms.Flow.ShutdownComplete.Add(1)
+    ms.flow.ShutdownComplete.Add(1)
     ms.EntriesToCommit = make(chan *entryIP, 8)
     go func() {
         for entryIP := range ms.EntriesToCommit {
 
-            txns, err := ms.EncryptAndEncodeEntry(&entryIP.EntryInfo, entryIP.EntryBody)
+            txns, err := ms.EncryptAndEncodeEntry(&entryIP.Entry.Info, entryIP.Entry.Body)
             if err != nil {
-                ms.Flow.FilterFault(err)
+                ms.flow.FilterFault(err)
                 continue
             }
 
             for _, txn := range txns {
-                ms.Flow.Log.Infof("encoded    txn %v", ski.BinDesc(txn.URID))
+                ms.flow.Log.Infof("encoded    txn %v", ski.BinDesc(txn.URID))
 
-                ms.HostRepo.txnsToCommit <- txn
-                ms.HostRepo.txnsToWrite  <- txn
+                ms.Host.CommitAuthoredTxn(txn)
             }
         }
 
-        ms.personalSKI.EndSession(ms.Flow.ShutdownReason)
+        ms.PersonalSKI.EndSession(ms.flow.ShutdownReason)
 
-        ms.Flow.ShutdownComplete.Done()
+        ms.flow.ShutdownComplete.Done()
     }()
 
     return nil
@@ -315,17 +352,18 @@ func (ms *MemberSession) onInternalShutdown() {
     ms.ChSessions.Wait()
 
     // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
-    close(ms.EntriesToCommit)
+    if ms.EntriesToCommit != nil {
+        close(ms.EntriesToCommit)
+    }
 }
 
 
 
 // EndSession shutsdown this MemberSession, blocking until the session has been completely removed from use.
 func (ms *MemberSession) EndSession(inReason string) {
-    ms.Flow.Shutdown(inReason)
-    ms.HostRepo.MemberSessions.OnSessionEnded(ms)
+    ms.flow.Shutdown(inReason)
+    ms.Host.OnSessionEnded(ms)
 }
-
 
 
 
@@ -335,7 +373,7 @@ func (ms *MemberSession) CommunityEncrypt(
     inBuf    []byte,
 ) ([]byte, error) {
 
-    out, err := ms.personalSKI.DoCryptOp(&ski.CryptOpArgs{
+    out, err := ms.PersonalSKI.DoCryptOp(&ski.CryptOpArgs{
         CryptOp: ski.CryptOp_ENCRYPT_SYM,
         OpKey: &ms.communityKey,
         BufIn: inBuf,
@@ -347,6 +385,30 @@ func (ms *MemberSession) CommunityEncrypt(
     return out.BufOut, nil
 }
 
+func (ms *MemberSession) ExportCommunityKeyring(
+)  (outTome, outPassword []byte) {
+
+    var pw [8]byte
+    crypto_rand.Read(pw[:])
+
+    out, err := ms.PersonalSKI.DoCryptOp(&ski.CryptOpArgs{
+        CryptOp: ski.CryptOp_EXPORT_USING_PW,
+        PeerKey: pw[:],
+        TomeIn: &ski.KeyTome{
+            Keyrings: []*ski.Keyring{
+                &ski.Keyring{
+                    Name: ms.communityKey.KeyringName,
+                },
+            },
+        },
+    })
+
+    if err != nil {
+        return nil, nil
+    }
+
+    return out.BufOut, pw[:]
+}
 
 /*
 
@@ -388,7 +450,7 @@ func (ms *MemberSession) EncryptAndEncodeEntry(
         CommunityPubKey: ms.communityKey.PubKey,
     }
 
-    // TODO: use scrap buf
+// TODO: use scrap buf
     headerBuf, err := ioInfo.Marshal()
 
     // Have the member sign the header
@@ -402,14 +464,17 @@ func (ms *MemberSession) EncryptAndEncodeEntry(
     )
     entryCrypt.PackedEntry, err = ms.CommunityEncrypt(packingInfo.SignedBuf)
 
-    // TODO: use scrap buf
+// TODO: use scrap buf
     entryBuf, err := entryCrypt.Marshal()
 
+    var scrap [pdi.URIDBinarySz]byte
+    entryURID := pdi.URIDFromInfo(scrap[:], ioInfo.TimeAuthored, packingInfo.Hash)
     txns, err := ms.TxnEncoder.EncodeToTxns(
         entryBuf,
+        entryURID,
         plan.Encoding_Pb_EntryCrypt,
         nil,
-        0,
+        ioInfo.TimeAuthored,
     )
 
     if err != nil {
@@ -426,20 +491,20 @@ var gTestBuf = "May PLAN empower organizations and individuals, and may it be an
 
 func (ms *MemberSession) GetItWorking() {
 
-    for i := 0; i < 100 && ms.Flow.IsRunning(); i++ {
-
-        info := pdi.EntryInfo{
-            EntryOp: pdi.EntryOp_POST_CONTENT,
-            ChannelId: plan.MemberRegistryChannel[:],
-            AuthorMemberId: ms.MemberEpoch.MemberID,
-            AuthorMemberEpoch: ms.MemberEpoch.EpochNum,
-        }
+    for i := 0; i < 100 && ms.flow.IsRunning(); i++ {
 
         cheese := fmt.Sprintf("#%d: %s", i, gTestBuf)
 
+
         ms.EntriesToCommit <- &entryIP{
-            EntryInfo: info,
-            EntryBody: []byte(cheese),
+            Entry: DecryptedEntry{
+                Info: pdi.EntryInfo{
+                    EntryOp: pdi.EntryOp_POST_CONTENT,
+                    ChannelID: 123,
+                    AuthorMemberID: ms.MemberEpoch.MemberID,
+                    AuthorMemberEpoch: ms.MemberEpoch.EpochNum },
+                Body: []byte(cheese),
+            },
         }
         
         time.Sleep(10 * time.Second)
