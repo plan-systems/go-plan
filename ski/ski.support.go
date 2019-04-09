@@ -674,39 +674,52 @@ func Zero(buf []byte) {
 	}
 }
 
+// FetchHasher returns the hash pkg for the given hash kit
+func FetchHasher(hashKitID HashKitID) func() hash.Hash {
+
+	switch hashKitID {
+
+        case 0:
+        case HashKitID_LegacyKeccak_256:
+            return sha3.NewLegacyKeccak256
+
+        case HashKitID_LegacyKeccak_512:
+            return sha3.NewLegacyKeccak512
+
+        case HashKitID_SHA3_256:
+            return sha3.New256
+
+        case HashKitID_SHA3_512:
+            return sha3.New512
+
+    }
+
+    return nil
+}
+
+
 // NewHashKit returns the requested HashKit.
-func NewHashKit(inID HashKitID) (HashKit, error) {
+func NewHashKit(hashKitID HashKitID) (HashKit, error) {
 
 	var kit HashKit
 
-	if inID == 0 {
-		inID = HashKitID_LegacyKeccak_256
+	if hashKitID == 0 {
+		hashKitID = HashKitID_LegacyKeccak_256
 	}
 
-	kit.HashKitID = inID
 
-	switch inID {
+    hasher := FetchHasher(hashKitID)
+    if hasher == nil {
+		return kit, plan.Errorf(nil, plan.HashKitNotFound, "failed to recognize HashKitID %v", hashKitID)
+    }
 
-	case HashKitID_LegacyKeccak_256:
-		kit.Hasher = sha3.NewLegacyKeccak256()
-
-	case HashKitID_LegacyKeccak_512:
-		kit.Hasher = sha3.NewLegacyKeccak512()
-
-	case HashKitID_SHA3_256:
-		kit.Hasher = sha3.New256()
-
-	case HashKitID_SHA3_512:
-		kit.Hasher = sha3.New512()
-
-	default:
-		return HashKit{}, plan.Errorf(nil, plan.HashKitNotFound, "failed to recognize HashKitID %v", inID)
-	}
-
+	kit.HashKitID = hashKitID
+	kit.Hasher = hasher()
 	kit.HashSz = kit.Hasher.Size()
 
 	return kit, nil
 }
+
 
 /*
 // GenerateNewKeys is a convenience bulk function for CryptoKit.GenerateNewKey()
@@ -908,7 +921,7 @@ func BinDesc(inBinStr []byte) string {
     suffix := ""
     if len(binStr) > limit {
         binStr = binStr[:limit]
-        suffix = "[…]"
+        suffix = "…"
     }
 
     outStr := ""
@@ -1028,7 +1041,7 @@ type PackingInfo struct {
 
 
 // PackAndSign signs a hash digest and packages it along with the payload and encodinginto into a single composite buffer
-//    that is indented to be decoded via PayloadUnpacker.UnpackAndVerify()
+// intended to be decoded via PayloadUnpacker.UnpackAndVerify()
 //
 // THREADSAFE
 func (P *PayloadPacker) PackAndSign(
@@ -1178,8 +1191,8 @@ func NewUnpacker(
 
 
 // UnpackAndVerify decodes the given buffer into its payload and signature components, and verifies the signature.
-// This procedures assumes the signed buf was produced via Signer.SignAndPack()
-// Note: they returned payload buffer is a slice of inSignedBuf.
+// This procedure assumes the signed buf was produced via Signer.SignAndPack()
+// Note: the returned payload buffer is a slice of inSignedBuf.
 func (U* PayloadUnpacker) UnpackAndVerify(
     inSignedBuf []byte,
     out *SignedPayload,
