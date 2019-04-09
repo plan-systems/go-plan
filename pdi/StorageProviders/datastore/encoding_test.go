@@ -90,7 +90,7 @@ func TestTxnEncoding(t *testing.T) {
 		gTesting.Fatal(err)
 	}
 
-    stEpoch, err := NewStorageEpoch(tool.Session, gCommunityEpoch)
+    stEpoch, err := NewStorageEpoch(tool.Session, &gCommunityEpoch)
 	if err != nil {
 		gTesting.Fatal(err)
 	}

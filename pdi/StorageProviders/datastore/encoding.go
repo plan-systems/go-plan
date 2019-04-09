@@ -26,7 +26,7 @@ const (
 // NewStorageEpoch generates a new StorageEpoch, needed when creating a new community.
 func NewStorageEpoch(
     skiSession  ski.Session,
-    inCommunity pdi.CommunityEpoch,
+    inCommunity *pdi.CommunityEpoch,
 ) (*pdi.StorageEpoch, error) {
 
     epoch := &pdi.StorageEpoch{
