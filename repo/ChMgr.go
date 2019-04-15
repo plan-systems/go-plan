@@ -4,17 +4,17 @@ package repo
 import (
     //"bytes"
     "log"
-    //"os"
+    "os"
     "path"
     //"io/ioutil"
     //"strings"
     "sync"
     "context"
-    //"fmt"
+    "fmt"
     //"sort"
     //"encoding/hex"
     //"encoding/json"
-    "encoding/base64"
+    //"encoding/base64"
     //"encoding/binary"
 
     //"github.com/plan-systems/go-plan/pcore"
@@ -46,7 +46,7 @@ type ChMgr struct {
     //db                      *badger.DB
     //State                   ChMgrState
 
-    fsNameEncoding          *base64.Encoding
+    //fsNameEncoding          *base64.Encoding
 
 
     lookupMutex             sync.RWMutex
@@ -66,12 +66,13 @@ var (
 )
 
 func NewChMgr(
-    inBaseDir string,
+    inHomeDir string,
 ) *ChMgr {
 
     chMgr := &ChMgr{
         hotChannels: make(map[plan.ChannelID]ChAgent),
-        fsNameEncoding: plan.Base64,
+        HomePath: path.Join(inHomeDir, "ChMgr"),
+        //fsNameEncoding: plan.Base64
     }
 
     return chMgr
@@ -92,6 +93,8 @@ func (chMgr *ChMgr) Startup(
 
     return err
 }
+
+
 
 
 
@@ -140,6 +143,7 @@ func (chMgr *ChMgr) onInternalShutdown() {
 }
 
 
+/*
 func (chMgr *ChMgr) InscribeGenesis(inSeed *RepoSeed) error {
 
     _, err := chMgr.FetchChannel(plan.RootACChannelID[:], inSeed.GenesisAccEpoch)
@@ -157,7 +161,7 @@ func (chMgr *ChMgr) InscribeGenesis(inSeed *RepoSeed) error {
 
     return nil
 }
-
+*/
 
 
 
@@ -174,7 +178,78 @@ func (chMgr *ChMgr) AuthenticateEntry(
 }*/
 
 
+// MissingFlag returns true if the given flag is NOT set
+func (chEntry *ChEntryInfo) MissingFlag(inFlag ChEntryFlag) bool {
+    flag := uint32(1) << byte(inFlag)
+    return (chEntry.Flags & flag) == 0
+}
 
+// ClearFlag clears the given flag
+func (chEntry *ChEntryInfo) ClearFlag(inFlag ChEntryFlag) {
+    flag := uint32(1) << byte(inFlag)
+    chEntry.Flags &^= flag
+}
+
+// HasFlag returns true if the given flag is set
+func (chEntry *ChEntryInfo) HasFlag(inFlag ChEntryFlag) bool {
+    flag := uint32(1) << byte(inFlag)
+    return (chEntry.Flags & flag) == flag
+}
+
+// HasFlags returns true if ALL of the passed flags are present
+func (chEntry *ChEntryInfo) HasFlags(inFlags...ChEntryFlag) bool {
+
+    chFlags := chEntry.Flags
+
+    for _, flag := range inFlags {
+        bit := uint32(1) << uint8(flag)
+        if (chFlags & bit) != bit {
+            return false
+        }
+    }
+
+    return true
+}
+
+// AddFlags ORs the given flags to this
+func (chEntry *ChEntryInfo) AddFlags(inFlags...ChEntryFlag) {
+
+    addFlags := uint32(0)
+    for _, flag := range inFlags {
+        addFlags |= uint32(1) << uint8(flag)
+    }
+
+    chEntry.Flags |= addFlags
+}
+
+// ThrowMalformed marks this entry as disbarred due to not being self-consistent for the given reason.
+func (chEntry *ChEntryInfo) ThrowMalformed(inErr error) {
+    chEntry.ClearFlag(ChEntryFlag_WELL_FORMED)
+    chEntry.Status = ChEntryStatus_DISBARRED
+}
+
+// Defer marks this entry as deferred for the given reason/error.
+func (chEntry *ChEntryInfo) Defer(inErr error) {
+    chEntry.Status = ChEntryStatus_DEFERRED
+}
+
+// IsLive returns true if the requisite flags are present for a channel entry to be live.
+func (chEntry *ChEntryInfo) IsLive() bool {
+    return (chEntry.Flags & ChEntryFlagsLiveFlags) == ChEntryFlagsLiveFlags
+}
+
+// IsWellFormed returns true if ChEntryFlag_WELL_FORMED is set for this entry.
+func (chEntry *ChEntryInfo) IsWellFormed() bool {
+    return (chEntry.Flags & (1 << byte(ChEntryFlag_WELL_FORMED))) != 0
+}
+
+// ChEntryFlagsLiveFlags reppresent the conditions needed for a channel entry to be considered live.
+const ChEntryFlagsLiveFlags = 
+    (1 << byte(ChEntryFlag_AUTHOR_VALIDATED)) |
+    (1 << byte(ChEntryFlag_CHANNEL_EPOCH_VALIDATED)) | 
+    (1 << byte(ChEntryFlag_ACC_VALIDATED)) | 
+    (1 << byte(ChEntryFlag_AGENT_VALIDATED)) |
+    (1 << byte(ChEntryFlag_WELL_FORMED))
 
 // MergeEntry is called when an entry arrives to a repo and must be merged into the repo.
 func (chMgr *ChMgr) MergeEntry(
@@ -183,42 +258,68 @@ func (chMgr *ChMgr) MergeEntry(
 
     var (
         ch ChAgent
-        err error
+        entryErr, processErr error
         chGenesis *pdi.ChannelEpoch
     )
 
+    if ioEntry.ChEntry.HasFlags(ChEntryFlag_IS_GENESIS_ENTRY, ChEntryFlag_WELL_FORMED) {
+        ioEntry.ChEntry.Flags |= ChEntryFlagsLiveFlags
+    }
 
     switch ioEntry.Info.EntryOp {
         
         case pdi.EntryOp_NEW_CHANNEL_EPOCH: {
             chGenesis = &pdi.ChannelEpoch{}
-            err := chGenesis.Unmarshal(ioEntry.Body)
-            if err != nil {
-                ioEntry.Status = EntryStatus_MALFORMED
-                err = plan.Error(err, plan.ChEntryIsMalformed, "error unmarshalling EntryOp_NEW_CHANNEL_EPOCH")
+            if entryErr := chGenesis.Unmarshal(ioEntry.Body); entryErr != nil {
+                entryErr = plan.Error(entryErr, plan.ChEntryIsMalformed, "error unmarshalling NEW_CHANNEL_EPOCH")
+                ioEntry.ChEntry.ThrowMalformed(entryErr)
             }
         }
     }
 
-    if err == nil {
-        ch, err = chMgr.FetchChannel(ioEntry.Info.ChannelID, chGenesis)
-        if err != nil {
-            ioEntry.Status = EntryStatus_DEFERRED
+    if ioEntry.ChEntry.IsWellFormed() {
+        ch, entryErr = chMgr.FetchChannel(ioEntry.ChannelID(), chGenesis)
+        if entryErr != nil {
+            ioEntry.ChEntry.Defer(entryErr)
+        } else {
+            ch.ValidateEntry(ioEntry.URID, &ioEntry.ChEntry, chMgr)
         }
     }
 
-    if err == nil {
-        ioEntry.Status, err = ch.ValidateEntry(ioEntry.URID, &ioEntry.ChEntry, chMgr)
+    // TODO: IF deferred or malformed already, stop processing
+    { }
+
+    {
+        chTxn := ch.Store().StartMerge()
+
+        switch ioEntry.Info.EntryOp {
+            
+            case pdi.EntryOp_POST_CONTENT:
+                entryErr, processErr = ch.PostNewEntry(chTxn, ioEntry)
+                if entryErr != nil {
+                    ioEntry.ChEntry.ThrowMalformed(entryErr)
+                }
+        }
+
+        if entryErr == nil && processErr == nil {
+            ioEntry.ChEntry.AddFlags(ChEntryFlag_AGENT_VALIDATED)        
+        }
+
+        if processErr == nil {
+            processErr = ch.Store().WriteEntryRaw(chTxn, ioEntry)
+        }
+
+        if processErr == nil {
+            processErr = chTxn.Commit()
+        } else {
+            chTxn.Discard()
+        }
     }
 
-    if err == nil {
-        err = ch.MergeEntry(ioEntry)
-    }
 
 
-    chMgr.flow.LogErr(err, "error merging entry")
-
-
+    chMgr.flow.LogErr(entryErr, "error merging entry")
+    chMgr.flow.LogErr(processErr, "error processing entry")
 }
 
 
@@ -226,12 +327,12 @@ func (chMgr *ChMgr) MergeEntry(
 
 
 func (chMgr *ChMgr) FetchACC(
-    inChannelID []byte,
+    inChannelID uint64,
 ) (*ChACC, error) {
 
     var acc *ChACC
 
-    ch, err := chMgr.FetchChannel(inChannelID, nil)
+    ch, err := chMgr.FetchChannel(plan.ChannelID(inChannelID), nil)
     if ch != nil {
         acc, _ := ch.(*ChACC)
         if acc == nil {
@@ -248,12 +349,11 @@ func (chMgr *ChMgr) FetchACC(
 
 
 
-
 func (chMgr *ChMgr) FetchMemberRegistry() (*ChMemberRegistry, error) {
 
     //var epoch *pdi.MemberEpoch
 
-    ch, err := chMgr.FetchChannel(plan.MemberRegistryChannelID[:], nil)
+    ch, err := chMgr.FetchChannel(plan.MemberRegistryChannelID, nil)
     if err == nil {
         return nil, err
     }
@@ -267,7 +367,7 @@ func (chMgr *ChMgr) FetchMemberRegistry() (*ChMemberRegistry, error) {
 // FetchChannel returns the owning ChAgent for the given channel ID.
 // If inGenesisEpoch is set, channel genesis is performed. 
 func (chMgr *ChMgr) FetchChannel(
-    inChannelID []byte,
+    inChannelID plan.ChannelID,
     inGenesisEpoch *pdi.ChannelEpoch,
 ) (ChAgent, error) {
 
@@ -275,11 +375,9 @@ func (chMgr *ChMgr) FetchChannel(
         err error
     )
 
-    chID := plan.GetChannelID(inChannelID)
-
     chMgr.lookupMutex.Lock()
     defer chMgr.lookupMutex.Unlock()
-    chSt := chMgr.hotChannels[chID]
+    chSt := chMgr.hotChannels[inChannelID]
 
     // TODO: channel genesis dupes?
 
@@ -294,7 +392,7 @@ func (chMgr *ChMgr) FetchChannel(
 
 
         if err == nil {
-            chMgr.hotChannels[chID] = chSt
+            chMgr.hotChannels[inChannelID] = chSt
         }  
     }
     
@@ -308,22 +406,25 @@ func (chMgr *ChMgr) FetchChannel(
 
 
 func (chMgr *ChMgr) loadChannel(
-    inChannelID []byte,
+    inChannelID plan.ChannelID,
     inGenesisEpoch *pdi.ChannelEpoch,
 ) (ChAgent, error) {
 
     chSt := &ChStore{
-        ChannelID: inChannelID,
     }
+
+    memberID, issuedID := inChannelID.Unplex() 
 
     opts := badger.DefaultOptions
     opts.Dir = path.Join(
         chMgr.HomePath,
-        chMgr.fsNameEncoding.EncodeToString(inChannelID[:1]),
-        chMgr.fsNameEncoding.EncodeToString(inChannelID),
+        fmt.Sprintf("%04d/%06d", memberID, issuedID),
     )
     opts.ValueDir = opts.Dir
 
+    if err := os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
+        return nil, plan.Error(err, plan.FailedToLoadChannel, "failed to create channel dir")
+    }
 
     chDb, err := badger.Open(opts)
     if err != nil {
@@ -405,6 +506,8 @@ func (chEntry *ChEntryInfo) AssignFromDecrytedEntry(
     chEntry.AuthorMemberEpoch   = inEntryInfo.AuthorMemberEpoch
     chEntry.BodyEncoding        = inEntryInfo.BodyEncoding
     chEntry.AuthorSig           = inAuthorSig
+    chEntry.Status              = ChEntryStatus_AWAITING_MERGE
+    chEntry.Flags               = 1 << byte(ChEntryFlag_WELL_FORMED)
 
 }
 

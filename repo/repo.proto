@@ -144,8 +144,17 @@ message GenesisSeed {
 }
 
 
+message RepoConfig {
+
+}
+
+
 message RepoSeed {
                 bytes               signed_genesis_seed         = 1;
+    // 
+                string              suggested_dir_name          = 2;
+
+    repeated    plan.ServiceInfo    services                    = 5;
 
 
 }
@@ -156,8 +165,7 @@ message RepoSeed {
 // This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
 message MemberSeed {
                 RepoSeed            repo_seed                   = 1;
-                
-    repeated    plan.ServiceInfo    services                    = 5;
+
 
                 ski.KeyTome         key_tome                    = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
 
@@ -193,49 +201,52 @@ New member steps:
 **/
 
 
-enum EntryStatus {
+enum ChEntryStatus {
 
-    UNSPECIFIED                 = 0;
-
-    NEEDS_VALIDATION            = 1;
-
-    // The given entry is considered authentic and a live operating part of the local community repo.
-    LIVE                        = 2;
-
-    // The given entry is currently in conflict with another entry having equal authority.
-    AMBIGUOUS_CONFLICT          = 3;
+    // This entry has yet to merged into the repo's channel subsystem. 
+    AWAITING_MERGE              = 0;
 
     // The given entry is deferred as a result of one of many possibilities encountered during 
-    //    Channel Entry Validation (see design-docs/PLAN-Proof-of-correctness.md).
-    DEFERRED                    = 4;
+    // channel entry validation (see design-docs/PLAN-Proof-of-correctness.md). Specifically, 
+    // this means ChEntryInfo.Flags lacks one or more req'd flags in order for the entry to be live.
+    DEFERRED                    = 1;
 
-    // The given entry is currently in conflict with its channel's parent access control channel.
-    DISALLOWED                  = 5;
+    // The given entry is currently in conflict with another entry having equal authority.
+    AMBIGUOUS_CONFLICT          = 2;
+
+    // The given entry is considered authentic and a live operating part of the local community repo.
+    // The corresponding ChEntryInfo.Flags contains all the flags required for an entry to be live.
+    LIVE                        = 3;
 
     // The given entry has been confirmed to be associated with unauthorized activity, a security breach, or inappropriate behavior.
-    DISBARRED                   = 6;
+    DISBARRED                   = 4;
 
-    // One or more parts of this entry are not self-consistent or does not self-validate.
-    MALFORMED                   = 7;
 
 }
 
 
 
-
-enum ChEntryFlags {
+// ChEntryFlags are bit shift values (not actual values)
+enum ChEntryFlag {
 
     // Set if author member ID + member epoch validates against the community's member registred
-    AUTHOR_VALIDATED             = 0;
+    AUTHOR_VALIDATED            = 0;
 
     // Set if this entry validates against the cited channel epoch ID
-    CHANNEL_EPOCH_VALIDATED      = 1;
+    CHANNEL_EPOCH_VALIDATED     = 1;
 
     // Set if this entry validates against the cited or implied governing ACC
-    ACC_VALIDATED                = 2;
+    ACC_VALIDATED               = 2;
+
+    // Set if the ChAgent regards this entry as well-formed.
+    AGENT_VALIDATED             = 3;
+
+    // If not set, one or more parts of this entry are not self-consistent and/or do not self-validate.
+    // By definition, once this flag is cleared, it will never reappear.
+    WELL_FORMED                 = 4;
 
     // Set if this entry is a genesis entry URID was white-listed (and can be verified)
-    IS_GENESIS_ENTRY             = 3;
+    IS_GENESIS_ENTRY            = 5;
 
 }
 
@@ -254,13 +265,13 @@ message ChEntryInfo {
                 uint32              author_member_epoch         = 8;
                 bytes               author_sig                  = 9;
                 plan.Encoding       body_encoding               = 10;
-                uint32              flags                       = 11;
+                uint32              flags                       = 11;       // Union of ChEntryFlags
 
 
     // Allows a ChStore to "know" what entries need to be passed to the agent (the next time it appears)
                 bool                processed_by_agent          = 20;
 
-                EntryStatus         entry_status                = 30;   
+                ChEntryStatus       status                      = 30;   
                 bytes               replaced_withURID           = 31;   // (only valid if EntryStatus == Replaced)
 
     /*****************************************************
@@ -277,13 +288,13 @@ message ChEntryInfo {
 
 }
 
-
+/*
 message ChEntryState {
 
-                EntryStatus         entry_status                = 10;   
+                ChEntryStatus       entry_status                = 10;   
 
 }
-
+*/
 
 
 /*
@@ -300,9 +311,9 @@ message ChMgrState {
 message ChStoreState {
 
     // Only set when this channel is in the process of being created.
-                bool                genesis_mode                = 1;
+    //            bool                genesis_mode                = 1;
 
-                bytes               channelID                   = 2;
+                uint64              channelID                   = 2;
 
     repeated    bytes               dep_channels                = 5;
 

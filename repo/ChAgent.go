@@ -31,19 +31,6 @@ import (
 
 
 
-// Marshaler used to generalize serialization
-type Marshaler interface {
-	Marshal() ([]byte, error)
-    MarshalTo([]byte) (int, error)
-    Size() int
-}
-
-// Unmarshaler used to generalize serialization
-type Unmarshaler interface {
-	Unmarshal([]byte) error
-}
-
-
 // ChAgentFactory is a ChAgent factory function. 
 // It returns a new ChAgent instance associated with the given channel protocol invocation.
 type ChAgentFactory func(inChProtocol string) ChAgent
@@ -92,22 +79,24 @@ const (
 // ChAgent is a protocol-specific implementation built on ChStore
 type ChAgent interface {
 
+    Store() *ChStore
+
     Startup() error
 
     ValidateEntry(
         inEntryURID []byte,
         inEntry *ChEntryInfo,
         chMgr *ChMgr,
-    ) (EntryStatus, error)
+    )
 
     CanAcceptEntry(
         inChEntry ChEntryInfo,
     ) (*pdi.ChannelEpoch, error)
 
-
-    MergeEntry(
-        inEntry *DecryptedEntry,
-    ) error
+    PostNewEntry(
+        inChTxn *badger.Txn,
+        ioEntry *DecryptedEntry,
+    ) (entryErr error, dbErr error)
 
     // Initiates a reversal and revalidation cascade for each recursive-reversed entry.
     ReverseEntry(
@@ -222,8 +211,6 @@ type ChStore struct {
 
     State                   ChStoreState
 
-    ChannelID               []byte
-
     // A Ch store needs to have each active channel sessions available so changes/notifications can be sent out.
     ChSessions              []*ChSession
 
@@ -262,12 +249,29 @@ func (chSt *ChStore) WriteAssetToDb(
 
 */
 
+// Store -- see ChAgent.Startup()
+func (chSt *ChStore) Store() *ChStore {
+    return chSt
+}
 
 
+
+// Startup -- see ChAgent.Startup()
 func (chSt *ChStore) Startup() error {
-
     return nil
 }
+
+
+
+// StartMerge -- see ChAgent.StartMerge
+func (chSt *ChStore) StartMerge(
+) *badger.Txn {
+
+    dbTxn := chSt.db.NewTransaction(true)
+
+    return dbTxn
+}
+
 
 /*
 func (chSt *ChStore) AddDependency(
@@ -314,50 +318,53 @@ func (chSt *ChStore) AddDependency(
 
 
 
-
 func (chSt *ChStore) ValidateEntry(
-    inEntryURID []byte,
-    inEntry *ChEntryInfo,
+    inChEntryURID []byte,
+    inChEntry *ChEntryInfo,
     chMgr *ChMgr,
-) (EntryStatus, error) {
+) {
 
     var (
+        accID uint64
         //err error
         //authorEpoch *pdi.MemberEpoch
     )
 
     // 1 -- Check community membership records
-    registry, err := chMgr.FetchMemberRegistry()
-    err = registry.ValidateAuthor(inEntry)
-    if err != nil {
-        return EntryStatus_DEFERRED, err
+    if inChEntry.MissingFlag(ChEntryFlag_AUTHOR_VALIDATED) {
+        registry, err := chMgr.FetchMemberRegistry()
+        err = registry.ValidateAuthor(inChEntry)
+        if err == nil {
+            inChEntry.AddFlags(ChEntryFlag_AUTHOR_VALIDATED)
+        }
     }
 
     // 2 -- Check entry's parent channel governing epoch
-    chEpoch, err := chSt.CanAcceptEntry(*inEntry)
-    if err != nil {
-        return EntryStatus_DEFERRED, nil
+    if inChEntry.MissingFlag(ChEntryFlag_CHANNEL_EPOCH_VALIDATED) || inChEntry.MissingFlag(ChEntryFlag_ACC_VALIDATED) {
+        chEpoch, err := chSt.CanAcceptEntry(*inChEntry)
+        if err == nil {
+            inChEntry.AddFlags(ChEntryFlag_CHANNEL_EPOCH_VALIDATED)
+            accID = chEpoch.AccessChannelID
+        } else {
+            inChEntry.ClearFlag(ChEntryFlag_CHANNEL_EPOCH_VALIDATED)
+        }
     }
 
     //ch.AddDependency(inEntry.Info.ChannelID, inEntry.TimeAuthored, BY_CHANNEL)
 
     // 3 -- Check parent ACC
-    acc, err := chMgr.FetchACC(chEpoch.AccessChannelID)
-    if err != nil {
-        return EntryStatus_DEFERRED, nil
-    }
-
-    status, authErr := acc.IsEntryAuthorized(inEntryURID, inEntry)
-    if authErr != nil {
-        return EntryStatus_DEFERRED, nil
+    if accID != 0  && inChEntry.MissingFlag(ChEntryFlag_ACC_VALIDATED) {
+        acc, err := chMgr.FetchACC(accID)
+        if err == nil {
+            authErr := acc.IsEntryAuthorized(inChEntryURID, inChEntry)
+            if authErr != nil {
+                inChEntry.AddFlags(ChEntryFlag_ACC_VALIDATED)
+            }
+        }
     }
 
     //acc.AddDependency(inEntry.Info.ChannelID, inEntry.TimeAuthored, BY_ACC)
-
-    
-    return status, nil
 }
-
 
 
 
@@ -537,7 +544,6 @@ func (h *TxnHelper) FatalErr() error {
 func (chSt *ChStore) WriteEntryRaw(
     dbTxn *badger.Txn,
     inEntry *DecryptedEntry,
-    inEntryAsset []byte,
 ) error {
     
     var (
@@ -557,31 +563,31 @@ func (chSt *ChStore) WriteEntryRaw(
     if err == nil {
         entryKey[chEntryForkPos] = chEntryAsset
         if err == nil {
-            err = dbTxn.Set(entryKey[:], inEntryAsset)
+            err = dbTxn.Set(entryKey[:], inEntry.ChAgentAsset)
         }
     }
 
     return err
 }
 
-
+/*
 func (chSt *ChStore) WriteEntry(
     dbTxn *badger.Txn,
     inEntry *DecryptedEntry,
-    inEntryAsset1 Marshaler,
+    inEntryAsset pcore.Marshaller,
 ) error {
 
     var scrap [1024]byte
 
-    sz, err := inEntryAsset1.MarshalTo(scrap[:])
+    sz, err := inEntryAsset.MarshalTo(scrap[:])
     buf := scrap[:sz]
     if err != nil {
-        buf, err = inEntryAsset1.Marshal()
+        buf, err = inEntryAsset.Marshal()
     }
 
     return chSt.WriteEntryRaw(dbTxn, inEntry, buf)
 
-}
+}*/
 
 
 
@@ -616,7 +622,7 @@ func (chSt *ChStore) WriteEntry(
 
 // InstantiateChAgent instantiates a new ChAgent for the given channel protocol string.
 func InstantiateChAgent(
-    chID []byte,
+    chID plan.ChannelID,
     chDb *badger.DB,
     chGenesisEpoch *pdi.ChannelEpoch,
 ) (ChAgent, error) {
@@ -638,8 +644,13 @@ func InstantiateChAgent(
             err = item.Value(func(val []byte) error {
                 return chState.Unmarshal(val)
             })
+            if err == nil {
+                if chState.ChannelID != uint64(chID) {
+                    err = plan.Errorf(nil, plan.FailedToLoadChannel, "channel ID in state does not match %v, got %v", chID, chState.ChannelID)
+                }
+            }
         } else if err == badger.ErrKeyNotFound {
-            chState.GenesisMode = true
+            chState.ChannelID = uint64(chID)
             chState.EpochHistory = []*pdi.ChannelEpoch{ 
                 chGenesisEpoch,
             }
@@ -661,10 +672,9 @@ func InstantiateChAgent(
 
         ch = agentFactory(chProtocol)
         if err == nil {
-            chSt := ch.(*ChStore)
+            chSt := ch.Store()
             chSt.State = chState
             chSt.db = chDb
-            chSt.ChannelID = append(chSt.ChannelID[:0], chID...)
 
             err = ch.Startup()
         }
@@ -704,21 +714,22 @@ const (
 )
 
 
-// MergeEntry -- see ChAgent.MergeEntry
-func (ch *ChACC) MergeEntry(
-    inEntry *DecryptedEntry,
-) error {
+// PostNewEntry -- see ChAgent.MergeEntry
+func (ch *ChACC) PostNewEntry(
+    chTxn *badger.Txn,
+    ioEntry *DecryptedEntry,
+) (entryErr error, processErr error) {
 
-    return nil
+    return nil, nil
 }
 
 
 func (ch *ChACC) IsEntryAuthorized(
     inEntryURID []byte,
     inEntry *ChEntryInfo,
-) (EntryStatus, error) {
+) error {
 
-    entryStatus := EntryStatus_NEEDS_VALIDATION
+    //entryStatus := ChEntryStatus_AWAITING_VALIDATION
 
     epoch := ch.State.FetchChannelEpoch(inEntry.ChannelEpochID)
     if epoch != nil {
@@ -726,17 +737,18 @@ func (ch *ChACC) IsEntryAuthorized(
         // Normal permissions lookup. boring: do last :\
         { }
 
+        /*
         if epoch.Extensions != nil {
             epoch.Extensions.FindBlocksWithCodec(codecChEntryWhitelistURID, 0, func(inMatch *plan.Block) error {
                 if bytes.Equal(inEntryURID, inMatch.Content) {
-                    entryStatus = EntryStatus_LIVE
+                    entryStatus = ChEntryStatus_LIVE
                 }
                 return nil
             })
-        }
+        }*/
     }
 
-    return entryStatus, nil
+    return nil
 
 }
 
@@ -769,7 +781,7 @@ type ChMemberRegistry struct {
 
 
 
-
+/*
 func (ch *ChMemberRegistry) Startup() error {
 
     if ch.epochLookup == nil {
@@ -780,42 +792,38 @@ func (ch *ChMemberRegistry) Startup() error {
 
     return nil
 }
+*/
 
 
 
-// MergeEntry -- see ChAgent.MergeEntry
-func (ch *ChMemberRegistry) MergeEntry(
+// PostNewEntry -- see ChAgent.MergeEntry
+func (ch *ChMemberRegistry) PostNewEntry(
+    chTxn *badger.Txn,
     ioEntry *DecryptedEntry,
-) error {
-
- 
-    dbTxn := ch.db.NewTransaction(true)
+) (entryErr error, processErr error) {
 
     body := plan.Block{}
-    err := body.Unmarshal(ioEntry.Body)
+    entryErr = body.Unmarshal(ioEntry.Body)
 
-    var scrap [128]byte
-    epochList := scrap[:0]
+    epochList := ioEntry.ChAgentAsset[:0]
 
-    ioEntry.Status = EntryStatus_MALFORMED
-
-    if err != nil {
-        ioEntry.Status = EntryStatus_MALFORMED
+    if entryErr != nil {
+        entryErr = plan.Error(entryErr, plan.UnmarshalFailed, "entry body not plan.Block")
     } else {
-        err = body.FindBlocksWithCodec(
+        err := body.FindBlocksWithCodec(
             MemberEpochCodec, 0,
             func (match *plan.Block) error {
                 epoch := &pdi.MemberEpoch{}
                 err := epoch.Unmarshal(match.Content)
                 if err != nil {
-                    ioEntry.Status = EntryStatus_MALFORMED
+                    err = plan.Error(err, plan.UnmarshalFailed, "error unmarshalling ChMemberRegistry MemberEpoch")
                 } else {
                     var epochKey [1 + 4 + 4 + pdi.URIDBinarySz]byte
                     epochKey[0] = chAgentForkPrefix
                     binary.BigEndian.PutUint32(epochKey[1:5], epoch.MemberID)
                     binary.BigEndian.PutUint32(epochKey[5:9], epoch.EpochNum)
                     copy(epochKey[9:], ioEntry.URID)
-                    err = dbTxn.Set(epochKey[:], match.Content)
+                    err = chTxn.Set(epochKey[:], match.Content)
 
                     // Maintain a list of all the epochs we're writing
                     epochList = append(epochList, epochKey[1:9]...)
@@ -824,32 +832,18 @@ func (ch *ChMemberRegistry) MergeEntry(
                 return err
             },
         )
+        if plan.IsError(err, plan.UnmarshalFailed) {
+            entryErr = err
+        } else {
+            processErr = err 
+        }
     }
 
-    if err == nil {
-        err = ch.WriteEntryRaw(dbTxn, ioEntry, epochList)
-    }
+    ioEntry.ChAgentAsset = epochList
 
-    if err == nil {
-        err = dbTxn.Commit()
-    } else {
-        dbTxn.Discard()
-    }
-
-
-
-  
-    return nil
+    return entryErr, processErr
 }
 
-
-func (ch *ChMemberRegistry) WriteGenesis(
-    inChEntry ChEntryInfo,
-    inBody []byte,
-) error { 
-
-    return nil
-}
 
 
 func (ch *ChMemberRegistry) ValidateAuthor(
@@ -956,12 +950,14 @@ type ChTalk struct {
 
 }
 
-// MergeEntry -- see ChAgent.MergeEntry
-func (ch *ChTalk) MergeEntry(
-    inEntry *DecryptedEntry,
-) error {
 
-    return nil
+// PostNewEntry -- see ChAgent.MergeEntry
+func (ch *ChTalk) PostNewEntry(
+    chTxn *badger.Txn,
+    ioEntry *DecryptedEntry,
+) (entryErr error, processErr error) {
+
+    return nil, nil
 }
 
 

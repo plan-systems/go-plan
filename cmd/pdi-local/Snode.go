@@ -43,7 +43,6 @@ type GenesisParams struct {
 
 
 
-
 const (
 
     // DefaultGrpcNetworkName is the default net.Listen() network layer name
@@ -112,7 +111,6 @@ func (config *Config) ApplyDefaults() {
     config.Version = 1
 
 }
-
 
 
 // NewSnode creates and initializes a new Snode instance
@@ -274,6 +272,7 @@ func (sn *Snode) writeConfig() error {
 func (sn *Snode) CreateNewStore(
     inImplName string,
     inDeposits []*pdi.Transfer,
+    inGenesisTxns []pdi.RawTxn,
     inEpoch pdi.StorageEpoch,
 ) error {
     
@@ -282,12 +281,12 @@ func (sn *Snode) CreateNewStore(
     }
 
     stConfig := &ds.StorageConfig{
-        HomePath: path.Join("datastore", plan.MakeFSFriendly(inEpoch.Name, inEpoch.CommunityID[:2])),
+        HomePath: path.Join("datastore", inEpoch.FormSuggestedDirName()),
         ImplName: inImplName,
         StorageEpoch: inEpoch,
     }
 
-    err := plan.CreateNewDir(sn.BasePath, stConfig.HomePath)
+    _, err := plan.CreateNewDir(sn.BasePath, stConfig.HomePath)
     if err != nil { return err }
 
     St := ds.NewStore(
@@ -301,11 +300,25 @@ func (sn *Snode) CreateNewStore(
     if err = St.DepositTransfers(inDeposits); err != nil {
         return err
     }
-    
-    sn.Config.StorageConfigs = append(sn.Config.StorageConfigs, *stConfig)
 
-    if err = sn.writeConfig(); err != nil {
-        return err
+    // Commit the given txns
+    for _, txn := range inGenesisTxns {
+        if err != nil {
+            break
+        }
+        err = St.DoCommitJob(ds.CommitJob{
+            Txn: pdi.DecodedTxn{
+                RawTxn: txn.Bytes,
+            },
+        })
+    }
+
+    if err == nil {
+        sn.Config.StorageConfigs = append(sn.Config.StorageConfigs, *stConfig)
+
+        if err = sn.writeConfig(); err != nil {
+            return err
+        }
     }
 
     St.Shutdown("creation complete")
@@ -322,9 +335,9 @@ func (sn *Snode) registerStore(St *ds.Store) {
     sn.storesMutex.Unlock()
 }
 
-func (sn *Snode) fetchStore(inID []byte) *ds.Store {
+func (sn *Snode) fetchStore(inCommunityID []byte) *ds.Store {
 
-    communityID := plan.GetCommunityID(inID)
+    communityID := plan.GetCommunityID(inCommunityID)
 
     sn.storesMutex.RLock()
     St := sn.stores[communityID]
@@ -467,3 +480,4 @@ func (sn *Snode) CommitTxn(ctx context.Context, inRawTxn *pdi.RawTxn) (*plan.Sta
 
     return &plan.Status{}, nil
 }
+

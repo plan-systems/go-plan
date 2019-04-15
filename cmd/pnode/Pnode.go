@@ -21,7 +21,7 @@ import (
 
     "github.com/ethereum/go-ethereum/common/hexutil"
 
-    "github.com/plan-systems/go-plan/pdi"
+    //"github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pcore"
     "github.com/plan-systems/go-plan/repo"
@@ -39,8 +39,6 @@ type PnodeConfig struct {
 
     Name                        string                          `json:"node_name"`
     NodeID                      hexutil.Bytes                   `json:"node_id"`
-
-    RepoConfigs                 []repo.Config                   `json:"repo_configs"`
 
     DefaultFileMode             os.FileMode                     `json:"default_file_mode"`
 
@@ -74,6 +72,7 @@ type Pnode struct {
     activeSessions              pcore.SessionGroup
 
     BasePath                    string
+    ReposPath                   string
     Config                      PnodeConfig
 
     grpcServer                  *grpc.Server
@@ -101,6 +100,8 @@ func NewPnode(
         pn.BasePath = *inBasePath
     }
     if err != nil { return nil, err }
+
+    pn.ReposPath = path.Join(pn.BasePath, "repos")
 
     if err = os.MkdirAll(pn.BasePath, plan.DefaultFileMode); err != nil {
         return nil, err
@@ -164,23 +165,30 @@ func (pn *Pnode) writeConfig() error {
 
 func (pn *Pnode) internalStartup() error {
 
-
-    for i := range pn.Config.RepoConfigs {
-
-        CR := repo.NewCommunityRepo(
-            &pn.Config.RepoConfigs[i],
-            pn.BasePath,
-        )
-        
-        pn.registerRepo(CR)
+// TODO: test w/ sym links
+    repoDirs, err := ioutil.ReadDir(pn.ReposPath)
+    if err != nil {
+        return err
     }
 
-    var err error
+    for _, repoDir := range repoDirs {
+        path := path.Join(pn.ReposPath, repoDir.Name())
+        CR, err := repo.NewCommunityRepo(path, nil)
+        if err != nil {
+            return err
+        }
+
+        pn.registerRepo(CR)
+    } 
+
+
     for _, CR := range pn.repos {
         err = CR.Startup(pn.flow.Ctx)
         if err != nil {
             break
         }
+
+        go CR.ConnectToStorage()
     }
 
     /*
@@ -250,32 +258,22 @@ func (pn *Pnode) Shutdown(inReason string) {
 
 
 
-
-// InflateRepo adds a new repo (if it doesn't already exist)
-func (pn *Pnode) InflateRepo(
-    inSeed *pdi.RepoSeed,
+// SeedRepo adds a new repo (if it doesn't already exist)
+func (pn *Pnode) SeedRepo(
+    inSeed *repo.RepoSeed,
 ) error {
 
     if pn.flow.IsRunning() {
         //pn.registerRepo(CR)
     }
 
-    config := &repo.Config{
-        HomePath: plan.MakeFSFriendly(inSeed.CommunityEpoch.CommunityName, inSeed.StorageEpoch.CommunityID[:2]),
-        StorageEpoch: *inSeed.StorageEpoch,
-    }
-
-    err := plan.CreateNewDir(pn.BasePath, config.HomePath)
+    // Only proceed if the dir doesn't exist
+    repoPath, err := plan.CreateNewDir(pn.ReposPath, inSeed.SuggestedDirName)
     if err != nil { return err }
 
-    CR := repo.NewCommunityRepo(
-        config, 
-        pn.BasePath,
-    )
-
-    if err == nil {
-        err = CR.SetupRepoHome(inSeed)
-    }
+    // When we pass the seed, it means create from scratch
+    CR, err := repo.NewCommunityRepo(repoPath, inSeed)
+    if err != nil { return err }
 
     pn.flow.ShutdownComplete.Add(1)
 
@@ -284,8 +282,6 @@ func (pn *Pnode) InflateRepo(
     }
 
     if err == nil {
-
-        pn.Config.RepoConfigs = append(pn.Config.RepoConfigs, *config)
 
         err = pn.writeConfig()
     }
@@ -366,7 +362,7 @@ func (pn *Pnode) fetchMemberSession(ctx context.Context) (*repo.MemberSession, e
         return nil, plan.Errorf(nil, plan.AssertFailed, "internal type assertion err")
     }
 
-    err = ms.Flow.CheckStatus()
+    err = ms.CheckStatus()
     if err != nil {
         return nil, err
     }
@@ -376,10 +372,9 @@ func (pn *Pnode) fetchMemberSession(ctx context.Context) (*repo.MemberSession, e
 
 
 
-
 func (pn *Pnode) registerRepo(CR *repo.CommunityRepo) {
    
-    communityID := plan.GetCommunityID(CR.Config.StorageEpoch.CommunityID)
+    communityID := plan.GetCommunityID(CR.GenesisSeed.StorageEpoch.CommunityID)
 
     pn.reposMutex.Lock()
     pn.repos[communityID] = CR
