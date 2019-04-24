@@ -23,7 +23,7 @@ import (
 
     "github.com/plan-systems/go-plan/plan"
     //"github.com/plan-systems/go-plan/ski"
-    "github.com/plan-systems/go-plan/pdi"
+    //"github.com/plan-systems/go-plan/pdi"
     //"github.com/plan-systems/go-plan/pservice"
 
     "context"
@@ -41,7 +41,7 @@ func main() {
 
     basePath    := flag.String( "path",         "",         "Directory for all files associated with this repo" )
     init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh repo" )
-    inflate     := flag.String( "inflate",      "",         "Reads the given member invite and reflates repo and account")
+    seed        := flag.String( "seed",         "",         "Reads the given member invite and reflates repo and account")
 
 
 
@@ -52,20 +52,20 @@ func main() {
         log.Fatal(err)
     }
 
-
-    if len(*inflate) > 0 {
-        buf, err := ioutil.ReadFile(*inflate)
+    // Seed a new repo?
+    if len(*seed) > 0 {
+        buf, err := ioutil.ReadFile(*seed)
         if err != nil {
             log.Fatal(err)
         }
 
-        seed := &pdi.MemberSeed{}
+        seed := &repo.MemberSeed{}
         if err = seed.Unmarshal(buf); err != nil {
             log.Fatal(err)
         }
 
-        if err = pn.InflateRepo(seed.RepoSeed); err != nil {
-            log.WithError(err).Fatalf("inflate failed from %v", *inflate)
+        if err = pn.SeedRepo(seed.RepoSeed); err != nil {
+            log.WithError(err).Fatalf("seed failed from %v", *seed)
         }
     }
 
@@ -73,37 +73,15 @@ func main() {
         intr, intrCtx := plan.SetupInterruptHandler(context.Background())
         defer intr.Close()
         
-        rnCtx, err := pn.Startup(intrCtx)
+        pnCtx, err := pn.Startup(intrCtx)
         if err != nil {
             log.WithError(err).Fatalf("failed to startup repo node")
         } else {
 
             log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
 
-            if true {
-                go func() {
-                    buf, _ := ioutil.ReadFile("/Users/aomeara/go/src/github.com/plan-systems/go-plan/cmd/pdi-local/drewwww.plan.seed")
-
-                    seed := &pdi.MemberSeed{}
-                    seed.Unmarshal(buf)
-
-                    var workstationID [plan.CommunityIDSz]byte
-                    for i := 0; i < plan.CommunityIDSz; i++ {
-                        workstationID[i] = byte(i)
-                    }
-
-                    ms, _, _ := pn.StartMemberSession(context.Background(), &repo.SessionReq{
-                        WorkstationID: workstationID[:],
-                        CommunityID: seed.RepoSeed.CommunityEpoch.CommunityID,
-                        MemberEpoch: seed.MemberEpoch,
-                    })
-
-                    ms.GetItWorking()
-                }()
-            }
-
             select {
-                case <- rnCtx.Done():
+                case <- pnCtx.Done():
             }
 
             pn.Shutdown("task complete")
