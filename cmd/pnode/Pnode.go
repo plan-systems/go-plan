@@ -12,11 +12,13 @@ import (
     "encoding/json"
     "context"
     "net"
+    "strings"
     crand "crypto/rand" 
     //"fmt"
     
 
  	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
     //"google.golang.org/grpc/metadata"
 
     "github.com/ethereum/go-ethereum/common/hexutil"
@@ -25,6 +27,7 @@ import (
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pcore"
     "github.com/plan-systems/go-plan/repo"
+
 
     //"github.com/dgraph-io/badger"
 
@@ -56,7 +59,7 @@ func (config *PnodeConfig) ApplyDefaults() {
 
     config.DefaultFileMode = plan.DefaultFileMode
     config.GrpcNetworkName = "tcp"
-    config.GrpcNetworkAddr = ":50053"
+    config.GrpcNetworkAddr = ":50080"
     config.Version = 1
 
 }
@@ -95,7 +98,7 @@ func NewPnode(
     var err error
 
     if inBasePath == nil || len(*inBasePath) == 0 {
-        pn.BasePath, err = plan.UseLocalDir("Repos")
+        pn.BasePath, err = plan.UseLocalDir("pnode")
     } else {
         pn.BasePath = *inBasePath
     }
@@ -103,7 +106,7 @@ func NewPnode(
 
     pn.ReposPath = path.Join(pn.BasePath, "repos")
 
-    if err = os.MkdirAll(pn.BasePath, plan.DefaultFileMode); err != nil {
+    if err = os.MkdirAll(pn.ReposPath, plan.DefaultFileMode); err != nil {
         return nil, err
     }
 
@@ -119,7 +122,7 @@ func NewPnode(
 
 
 // readConfig uses BasePath to read in the node's config file
-func (pn *Pnode) readConfig(inFirstTome bool) error {
+func (pn *Pnode) readConfig(inFirstTime bool) error {
 
     pathname := path.Join(pn.BasePath, configFilename)
  
@@ -128,16 +131,14 @@ func (pn *Pnode) readConfig(inFirstTome bool) error {
         err = json.Unmarshal(buf, &pn.Config)
     }
     if err != nil {
-        if os.IsNotExist(err) {
-            if inFirstTome {
-                pn.Config.ApplyDefaults()
-                pn.Config.NodeID = make([]byte, plan.CommunityIDSz)
-                crand.Read(pn.Config.NodeID)
+        if os.IsNotExist(err) && inFirstTime {
+            pn.Config.ApplyDefaults()
+            pn.Config.NodeID = make([]byte, plan.CommunityIDSz)
+            crand.Read(pn.Config.NodeID)
 
-                err = pn.writeConfig()
-            }
+            err = pn.writeConfig()
         } else {
-            err = plan.Errorf(err, plan.ConfigFailure, "Failed to load node config")
+            err = plan.Errorf(err, plan.ConfigFailure, "Failed to load pnode config")
         }
     }
 
@@ -172,30 +173,28 @@ func (pn *Pnode) internalStartup() error {
     }
 
     for _, repoDir := range repoDirs {
-        path := path.Join(pn.ReposPath, repoDir.Name())
-        CR, err := repo.NewCommunityRepo(path, nil)
-        if err != nil {
-            return err
+        repoPath := repoDir.Name()
+        if ! strings.HasPrefix(repoPath, ".") {
+            repoPath := path.Join(pn.ReposPath, repoPath)
+            CR, err := repo.NewCommunityRepo(repoPath, nil)
+            if err != nil {
+                return err
+            }
+
+            pn.registerRepo(CR)
         }
-
-        pn.registerRepo(CR)
-    } 
-
+    }
 
     for _, CR := range pn.repos {
         err = CR.Startup(pn.flow.Ctx)
         if err != nil {
             break
         }
-
-        go CR.ConnectToStorage()
     }
 
-    /*
     if err == nil {
         err = pn.startServer()
     }
-    */
 
     return err
 }
@@ -219,15 +218,13 @@ func (pn *Pnode) internalShutdown() {
     }
     pn.reposMutex.RUnlock()
 
-
-/*
     if pn.grpcServer != nil {
-        log.Info("initiating grpc graceful stop")
+        pn.flow.Log.Info("Stopping Repo grpc service")
         pn.grpcServer.GracefulStop()
 
         _, _ = <- pn.grpcDone
-        log.Info("grpc server done")
-    }*/
+        pn.flow.Log.Debug("Repo stopped")
+    }
 
     reposRunning.Wait()
 
@@ -258,13 +255,18 @@ func (pn *Pnode) Shutdown(inReason string) {
 
 
 
-// SeedRepo adds a new repo (if it doesn't already exist)
-func (pn *Pnode) SeedRepo(
+// seedRepo adds a new repo (if it doesn't already exist)
+func (pn *Pnode) seedRepo(
     inSeed *repo.RepoSeed,
 ) error {
 
-    if pn.flow.IsRunning() {
-        //pn.registerRepo(CR)
+    // In the unlikely event that pn.Shutdown() is called while this is all happening, 
+    //    prevent the rug from being snatched out from under us.
+    pn.flow.ShutdownComplete.Add(1)
+    defer pn.flow.ShutdownComplete.Done()
+
+    if ! pn.flow.IsRunning() {
+        return plan.Error(nil, plan.AssertFailed, "pnode must be running to seed a new repo")
     }
 
     // Only proceed if the dir doesn't exist
@@ -275,14 +277,11 @@ func (pn *Pnode) SeedRepo(
     CR, err := repo.NewCommunityRepo(repoPath, inSeed)
     if err != nil { return err }
 
-    pn.flow.ShutdownComplete.Add(1)
-
     if err == nil {
-        err = CR.Startup(context.Background())
+        err = CR.Startup(pn.flow.Ctx)
     }
 
     if err == nil {
-
         err = pn.writeConfig()
     }
 
@@ -294,61 +293,8 @@ func (pn *Pnode) SeedRepo(
         }
     }
 
-    pn.flow.ShutdownComplete.Done()
-
     return err
 }
-
-
-// StartMemberSession -- see repo.proto.
-func (pn *Pnode) StartMemberSession(
-    ctx context.Context, 
-    in *repo.SessionReq,
-) (*repo.MemberSession, *repo.SessionInfo, error) {
-
-    CR := pn.fetchRepo(in.CommunityID)
-    if CR == nil {
-        return nil, nil, plan.Error(nil, plan.CommunityNotFound, "community not found")
-    }
-
-    ms, err := CR.StartMemberSession(in)
-    if err != nil {
-        return nil, nil, err
-    }
-
-    sess := pn.activeSessions.NewSession(ctx)
-    sess.Cookie = ms
-
-    info := &repo.SessionInfo{
-    }
-
-	return ms, info, nil
-}
-
-// InvokeChannel -- see repo.proto.
-func (pn *Pnode) InvokeChannel(ctx context.Context, in *repo.ChInvocation) (*repo.ChStatus, error) {
-    _, err := pn.fetchMemberSession(ctx)
-    if err != nil {
-        return nil, err
-    }
-    //pn.activeSessions.FetchSession
-
-
-    return nil, nil
-}
-
-
-
-// ChSessionPipe -- see repo.proto.
-func (pn *Pnode) ChSessionPipe(in repo.Repo_ChSessionPipeServer) error {
-    _, err := pn.fetchMemberSession(in.Context())
-    if err != nil {
-        return err
-    }
-
-    return nil
-}
-
 
 
 func (pn *Pnode) fetchMemberSession(ctx context.Context) (*repo.MemberSession, error) {
@@ -395,4 +341,118 @@ func (pn *Pnode) fetchRepo(inID []byte) *repo.CommunityRepo {
 }
 
 
+func (pn *Pnode) startServer() error {
+
+    pn.grpcDone = make(chan struct{})
+
+    pn.flow.Log.Infof("starting Repo service on %v %v", pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
+    listener, err := net.Listen(pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
+    if err != nil {
+        return err
+    }
+
+    pn.grpcServer = grpc.NewServer()
+    repo.RegisterRepoServer(pn.grpcServer, pn)
+    
+    // Register reflection service on gRPC server.
+    reflection.Register(pn.grpcServer)
+    go func() {
+
+        if err := pn.grpcServer.Serve(listener); err != nil {
+            pn.flow.LogErr(err, "grpc Serve() failed")
+        }
+        
+        listener.Close()
+
+        close(pn.grpcDone)
+    }()
+
+    return nil
+}
+
+/*****************************************************
+**
+**
+**
+** rpc service Repo
+**
+**
+**
+**/
+
+// SeedMember -- see service Repo in repo.proto.
+func (pn *Pnode) SeedMember(
+    ctx context.Context, 
+    in *repo.MemberSeed,
+) (*plan.Status, error) {
+
+    err := pn.seedRepo(in.RepoSeed)
+    if err != nil {
+        return nil, err
+    }
+
+    // Set up the member sub dir and write the intital KeyTome
+    // For now we can skip this b/c the KeyTime is already known to be local
+    {
+        // TODO
+    }
+
+    return &plan.Status{}, nil
+}
+
+// StartMemberSession -- see service Repo in repo.proto.
+func (pn *Pnode) StartMemberSession(
+    ctx context.Context, 
+    in *repo.SessionReq,
+) (*repo.SessionInfo, error) {
+
+    CR := pn.fetchRepo(in.CommunityID)
+    if CR == nil {
+        return nil, plan.Error(nil, plan.CommunityNotFound, "community not found")
+    }
+
+    ms, err := CR.StartMemberSession(in)
+    if err != nil {
+        return nil, err
+    }
+
+    sess := pn.activeSessions.NewSession(ctx)
+    sess.Cookie = ms
+
+    info := &repo.SessionInfo{
+    }
+
+	return info, nil
+}
+
+// OpenChannelSession -- see service Repo in repo.proto.
+func (pn *Pnode) OpenChannelSession(
+    inInvocation *repo.ChInvocation, 
+    io repo.Repo_OpenChannelSessionServer,
+) error {
+    ms, err := pn.fetchMemberSession(io.Context())
+    if err != nil {
+        return err
+    }
+
+    _, err = ms.OpenChannelSession(inInvocation, io)
+    if err != nil {
+        return err
+    }
+
+    ctx := io.Context()
+    <- ctx.Done()
+
+    return nil
+}
+
+// ChSessionPipe -- see service Repo in repo.proto.
+func (pn *Pnode) ChSessionPipe(in repo.Repo_ChSessionPipeServer) error {
+    ms, err := pn.fetchMemberSession(in.Context())
+    if err != nil {
+        return err
+    }
+
+    return ms.ManageChSessionPipe(in)
+}
 

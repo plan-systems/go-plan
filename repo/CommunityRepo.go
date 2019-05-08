@@ -36,7 +36,9 @@ import (
 // TODO: where do these settings go?  StorageEpoch 
 type Config struct {
 
-    // Max number of seconds that any two community peers could have different clock readings
+    // Max number of seconds that any two community peers could have different clock readings.
+    // This value implies a dependency time "slop" for validation.  That is, no entry can be dependent on another
+    //     entry that is more than this value in the future.  Beyond this, this is a causality inconsistency.
     MaxPeerClockDelta       int64               `json:"max_peer_clock_delta"`
 
     // Number of storage provider faults/errors before this repo disconnects and requires manual override
@@ -78,14 +80,20 @@ type CommunityRepo struct {
 
     //txnsDeferred            ds.Datastore        // Values point to txn?
 
+
+    spSyncStatus            spSyncStatus
+    spSyncActive            bool
+    spSyncWakeup            chan struct{}
+    spSyncWorkers           sync.WaitGroup
+
     spClient                pdi.StorageProviderClient
     spInfo                 *pdi.StorageInfo
     spCancel                context.CancelFunc
     spContext               context.Context
     spClientConn           *grpc.ClientConn
 
-    spCommitContext         context.Context
-    spCommitCancel          context.CancelFunc
+    //spCommitContext         context.Context
+    //spCommitCancel          context.CancelFunc
 
   //  spScanContext           context.Context
   //  spScanCancel            context.CancelFunc
@@ -95,13 +103,11 @@ type CommunityRepo struct {
     unpacker                ski.PayloadUnpacker
 
 
-    syncMode                syncMode
-
     txnsToCommit            chan pdi.RawTxn
     txnsToDecode            chan pdi.RawTxn
     txnsToWrite             chan pdi.RawTxn
 
-    txnsToRequest           chan *pdi.TxnList         // URIDs to be fetched from the SP (that the repo needs)
+    txnsToFetch             chan *pdi.TxnList         // URIDs to be fetched from the SP (that the repo needs)
     txnCollater             pdi.TxnCollater
 
     txnWorklist             *badger.DB      // Status info by txn URID
@@ -110,10 +116,10 @@ type CommunityRepo struct {
     CommunityKeyringName    []byte
 
     communitySKI            ski.Session
-    communitySKICond        *sync.Cond
-    communitySKIMutex       sync.RWMutex
+    //communitySKICond        *sync.Cond
+    //communitySKIMutex       sync.RWMutex
 
-    txnScanning             sync.WaitGroup
+    //txnScanning             sync.WaitGroup
 
     //pipelines               sync.WaitGroup
 
@@ -162,13 +168,16 @@ func NewCommunityRepo(
         unpacker: ski.NewUnpacker(true),
         chMgr: NewChMgr(inHomePath),
         HomePath: inHomePath,
+        spSyncWakeup: make(chan struct{}, 5),
+        spSyncActive: false,
+        spSyncStatus: spSyncStopped,
     }
 
-    CR.communitySKICond = sync.NewCond(&CR.communitySKIMutex)
+    //CR.communitySKICond = sync.NewCond(&CR.communitySKIMutex)
  
     seedPathname := CR.GenesisSeedPathname()
 
-    // If we're seeding this repo, write out critical files
+    // If we're seeding this repo, write out critical files.
     if inSeed != nil {
 
         // Write out the initial state
@@ -213,6 +222,7 @@ func (CR *CommunityRepo) LoadGenesisSeed(inSeedPathname string) error {
     }
     return err
 }
+
 
 
 
@@ -313,10 +323,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
         CR.txnDB = nil
 
         if CR.communitySKI != nil {
-            CR.communitySKIMutex.Lock()
             CR.communitySKI.EndSession(CR.flow.ShutdownReason)
             CR.communitySKI = nil
-            CR.communitySKIMutex.Unlock()
         }
 
         CR.flow.ShutdownComplete.Done()
@@ -416,7 +424,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     // txn requester
     //
     // Dispatches txn ID requests to the community's (remote) StorageProvider(s), managing connections etc.
-    CR.txnsToRequest = make(chan *pdi.TxnList, 16)
+    CR.txnsToFetch = make(chan *pdi.TxnList, 16)
     go func() {
 
         /*var (
@@ -424,14 +432,14 @@ func (CR *CommunityRepo) onInternalStartup() error {
             spReader pdi.StorageProvider_SendTxnsClient
         )*/
 
-        for txnList := range CR.txnsToRequest {
+        for txnList := range CR.txnsToFetch {
             
-            // Drop requests until the channel closes.  This avoids case where the shutdown process is blocked b/c of a full channel.
+            // Drop requests until the channel closes.  This prevents shutdown being blocked b/c of a full channel.
             if ! CR.flow.IsRunning() {
                 continue
             }
 
-            spReader, err := CR.spClient.SendTxns(CR.spContext, txnList)
+            spReader, err := CR.spClient.FetchTxns(CR.spContext, txnList)
             for err == nil && CR.flow.IsRunning() {
                 var txnIn *pdi.RawTxn
                 txnIn, err = spReader.Recv()
@@ -440,7 +448,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
                 }
             }
             if err != nil && err != io.EOF {
-                CR.flow.Log.WithError(err).Warn("got batch err")
+                CR.flow.Log.WithError(err).Warn("StorageProvider.FetchTxns() err")
             }
         }
 
@@ -460,29 +468,30 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
             // TODO drop txn gracefully?
 
-            if CR.spCommitContext == nil {
-                CR.spCommitContext, CR.spCommitCancel = context.WithCancel(CR.spContext)
-            }
-
-
             CR.flow.Log.Infof("committing txn %v", ski.BinDesc(txn.URID))
 
 
             // TODO: use stream input and output so that commit details can be reported?
-            _, err := CR.spClient.CommitTxn(CR.spCommitContext, &pdi.RawTxn{Bytes: txn.Bytes})
+            _, err := CR.spClient.CommitTxn(CR.spContext, &pdi.RawTxn{Bytes: txn.Bytes})
             if err != nil {
                 CR.flow.Log.WithError(err).Warn("got commit err")
+            } else {
+                // TODO: mark txn as committed
+                // TODO: mark txn as conformed/witnessed when seen later on a scan
+                // All possible txn meta info: 
+                //    - txn authored locally?
+                //    - (if NOT authored locally), when was txn received?
+                //    - (if authored locally), txn successfully committed?
+                //    - (if authored locally and sucessfully committed), txn ID witnessed at a later time?
+                //     - idea: maintain separate table of txns:
+                //          - locally authored txns to be committed, confirmed committed, and confirmed witnessed? (3 lists)
+                //          - txns that have yet to be processed into channels (e.g. post to channel that doesn't exist yet)
             }
         }
 
-        if CR.spCancel != nil {
-            CR.spCancel()
-        }
+        CR.spSyncStop()        
 
-        // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
-        CR.txnScanning.Wait()
-
-        close(CR.txnsToRequest)
+        close(CR.txnsToFetch)
     }()
     //
     //
@@ -511,7 +520,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
                     // Request whatever txns we're missing
                     if len(txnBatch.URIDs) > 0 {
-                        CR.txnsToRequest <- txnBatch 
+                        CR.txnsToFetch <- txnBatch 
                     }
                 }
             }
@@ -556,7 +565,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
         return err
     }
     
-
+    // This kicks off the top-level SP sync controller
+    go CR.spSyncController()
 
     return nil
 }
@@ -579,26 +589,37 @@ func (CR *CommunityRepo) onInternalShutdown() {
 
 
 
+func (CR *CommunityRepo) spSyncActivate() {
 
-/*
-type StorageAgent struct {
-
-
-}
-
-func (SA *StorageAgent) New() {
-
+    // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
+    CR.spSyncActive = true
+    CR.spSyncWake()
 }
 
 
-func (SA *StorageAgent) Shutdown() {
 
+func (CR *CommunityRepo) spSyncStop() {
+
+    // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
+    CR.spSyncActive = false
+    CR.spSyncWake()
+
+    CR.spSyncWorkers.Wait()
 }
-*/
 
 
-// DisconnectFromStorage disconnects from the currently connected StorageProvider
-func (CR *CommunityRepo) DisconnectFromStorage() {
+func (CR *CommunityRepo) spSyncWake() {
+
+    if len(CR.spSyncWakeup) <= 1 {
+        CR.spSyncWakeup <- struct{}{}
+    }
+}
+
+
+// disconnectFromStorage disconnects from the currently connected StorageProvider
+func (CR *CommunityRepo) disconnectFromStorage() {
+
+    CR.spSyncStatus = spSyncStopping
 
     if CR.spClientConn != nil {
         CR.spClientConn.Close()
@@ -613,24 +634,79 @@ func (CR *CommunityRepo) DisconnectFromStorage() {
         CR.spCancel()
         CR.spCancel = nil
     }
+
+    CR.spSyncWorkers.Wait()
+    CR.spSyncStatus = spSyncStopped
+    CR.spSyncWake()
 }
 
 
-// ConnectToStorage connects to the given storage and blocks until a fatal error or the connection is over.
-func (CR *CommunityRepo) ConnectToStorage() error {
+func (CR *CommunityRepo) spSyncController() {
 
-    // TODO
-    // DisconnectFromStorage()
+    sleep := true
 
-// TODO -- is there something better to use?
-// communitySKICond shouldn't be used here.  Instead, it's used to inititate a repo processing txns that have been recieved but not yet processed (or
-// the retry txns that referenced a community key that wasn't (yet) present. 
-CR.communitySKIMutex.Lock()
-CR.communitySKICond.Wait()
-CR.communitySKIMutex.Unlock()
+    CR.flow.ShutdownComplete.Add(1)
+
+    // The objective is for the StorageProvider sync subsystem to be active or inactive (stopped).
+    // That is a complex network evolution, so this loop serves to control the smaller pieces,
+    //    and its goal state is governed by CR.spSyncActive, a bool set if the system should be running
+    //    or should be transitioned to spSyncStopped.
+    for {
+
+        // Are we stopping?  Before we break this loop, we must get back to a stopped state.
+        if ! CR.flow.IsRunning() {
+            if ! CR.spSyncActive {
+                CR.spSyncActive = false
+            }
+            
+            // Only stop if we're in a grounded state.
+            if CR.spSyncStatus == spSyncStopped {
+                break
+            }
+        } else if sleep {
+
+            // Wait until someone wakes us up!
+            select {
+                case <- CR.spSyncWakeup:
+            }
+        } else {
+            //time.Sleep(1 * time.Second)
+        }
+
+        sleep = false
+
+        // Are in active sync mode?  
+        // If yes, initiate connection (or go back to sleep and expect to be woken when we're in the right state to connect)
+        // If not, disconnect from SPs and wait until we've returned to a proper inactive/shutdown state. 
+        if CR.spSyncActive {
+            switch CR.spSyncStatus {
+                case spSyncStopped:
+                    CR.connectToStorage()
+                default:
+                    sleep = true
+            }
+        } else {
+            switch CR.spSyncStatus {
+                case spSyncStopped:
+                    sleep = true
+                case spSyncStopping:
+                    sleep = true
+                default:
+                    CR.disconnectFromStorage()
+            }
+        }
+    }
+
+    CR.flow.ShutdownComplete.Done()
+
+}
 
 
-    //CR.scanMode = syncReverseScan
+
+
+func (CR *CommunityRepo) connectToStorage() {
+
+    CR.spSyncStatus = spSyncConnecting
 
     var err error
 	CR.spContext, CR.spCancel = context.WithCancel(CR.flow.Ctx)
@@ -668,14 +744,12 @@ CR.communitySKIMutex.Unlock()
     }
 
     if err != nil {
-        CR.DisconnectFromStorage()
-        return err
+        CR.disconnectFromStorage()
     }
 
-    CR.txnScanning.Add(1)
+    CR.spSyncWorkers.Add(1)
+    CR.spSyncStatus = spSyncForwardScan
     go CR.forwardTxnScanner()
-
-    return nil
 }
 
 
@@ -749,12 +823,21 @@ func (CR* CommunityRepo) getMostRecentTxnTime() {
 
 
 
-
+/*
 type syncMode int
-
 const (
-	syncReverseScan syncMode = 0
+	syncReverseScan syncMode = iota
     syncForwardScan
+)
+*/
+
+type spSyncStatus int32
+const (
+	spSyncStopped spSyncStatus = iota
+    spSyncConnecting
+    spSyncForwardScan
+    spSyncReverseScan
+    spSyncStopping
 )
 
 
@@ -825,11 +908,10 @@ func (CR *CommunityRepo) forwardTxnScanner() {
 
     for CR.flow.IsRunning() {
 
-        CR.flow.Log.Info("starting forward scan")
+        CR.Trace("starting forward txn scan")
 
-        scanCtx, scanCancel := context.WithCancel(CR.spContext)
         scanner, err := CR.spClient.Scan(
-            scanCtx,
+            CR.spContext,
             &pdi.TxnScan{
                 TimestampStart: CR.State.LastTxnTimeRead,
                 TimestampStop: pdi.URIDTimestampMax,
@@ -849,34 +931,39 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             } else if err != nil {
                 CR.flow.Log.WithError(err).Warn("forward scan recv err")
                 break
-            } else if txnList != nil{
+            } else if txnList != nil {
+                CR.Tracef("received %v txn URIDs", len(txnList.URIDs))
 
                 // Filter for txn we need
                 CR.filterNeededTxns(txnList)
 
+                CR.Tracef("after filter, %v txns remain", len(txnList.URIDs))
+
                 // Request txns we're missing
                 if len(txnList.URIDs) > 0 {
-                    CR.txnsToRequest <- txnList 
+                    CR.txnsToFetch <- txnList 
                 }
             }
         }
 
-
         select {
-            case <- scanCtx.Done():
+            case <- CR.spContext.Done():
             case <- time.After(5 * time.Second):
         }
-        
-        scanCancel()
-
     }
 
-    CR.txnScanning.Done()
+    CR.spSyncWorkers.Done()
 }
 
+// Tracef records the given msg to the trace log/console
+func (CR *CommunityRepo) Tracef(inFormat string, inArgs ...interface{}) {
+	CR.flow.Log.Tracef(inFormat, inArgs...)
+}
 
-
-
+// Trace records the given msg to the trace log/console
+func (CR *CommunityRepo) Trace(inMsg string) {
+	CR.flow.Log.Trace(inMsg)
+}
 
 
 // DispatchPayload unpacks a decoded txn which is given to be a single/sole segment.
@@ -908,7 +995,6 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
 
     eip.timeStart = plan.Now()
-    
 
     // STEP 1 -- Decrypt the entry header and body using the cited community key ID.
     //var decryptOut *ski.CryptOpOut 
@@ -945,7 +1031,7 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         return err
     }
 
-    var scrap [pdi.URIDBinarySz]byte
+    var scrap [pdi.URIDSz]byte
     actualURID := pdi.URIDFromInfo(scrap[:], eip.Entry.Info.TimeAuthored, packingInfo.Hash)
     if ! bytes.Equal(eip.Entry.URID, actualURID) {
         return plan.Errorf(err, plan.TxnNotConsistent, "txn payload URID was %v but actual is %v", eip.Entry.URID, actualURID)
@@ -994,6 +1080,8 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
 
 // StartMemberSession starts a new session for the given member
 func (CR *CommunityRepo) StartMemberSession(in *SessionReq) (*MemberSession, error) {
+
+    // Sanity check
     if ! bytes.Equal(in.CommunityID, CR.GenesisSeed.StorageEpoch.CommunityID) {
         return nil, plan.Error(nil, plan.AssertFailed, "community ID does not match repo's ID")
     }
@@ -1027,7 +1115,7 @@ func (CR *CommunityRepo) StartMemberSession(in *SessionReq) (*MemberSession, err
         PeerKey: pw,
     })
     if err == nil {
-        CR.communitySKICond.Broadcast()
+        CR.spSyncActivate()
     }
 
     CR.flow.LogErr(err, "error importing community keyring")
@@ -1051,7 +1139,6 @@ func (CR *CommunityRepo) CommitEntryTxns(inEntryURID []byte, inTxns []pdi.RawTxn
         CR.txnsToCommit <- txn
         CR.txnsToWrite  <- txn
     }
-
 }
 
 // LatestCommunityEpoch -- see interface MemberHost
@@ -1068,6 +1155,7 @@ func (CR *CommunityRepo) LatestStorageEpoch() pdi.StorageEpoch {
 func (CR *CommunityRepo) OnSessionEnded(inSession *MemberSession) {
     CR.MemberSessions.OnSessionEnded(inSession)
 }
+
 
 
 
@@ -1124,71 +1212,7 @@ type entryIP struct {
 }
 
 
-
-
 /*
-type entryInProcess struct {
-    CR              *CommunityRepo    
-
-    timeStart       plan.Time
-
-
-    // Txn ID of the last/final segment storage provider txn
-    ParentURID      string
-
-
-    entryTxnIndex   int
-    parentTxnName   []byte
-
-    txnWS           []txnWorkspace
-    entryBatch      []*pdi.EntryCrypt // 
-    entryIndex      int               // This is the index number into entryBatch that is currently being processed
-    entryTxn        pdi.StorageTxn 
-
-    entryHash       []byte
-    EntryInfo     pdi.EntryInfo
-    EntryCrypt      pdi.EntryCrypt
-    entryBody       plan.Block
-    
-    authorEpoch     pdi.MemberEpoch
-
-    skiSession      ski.Session
-
-
-    skiProvider     ski.Provider
-
-    accessCh        *ChannelStore
-    accessChFlags   LoadChannelStoreFlags
-
-    targetCh        *ChannelStore
-    targetChFlags   LoadChannelStoreFlags
-
-}
-
-
-
-type EpochID uint64
-
-
-type Channel interface {
-    LookupEpoch(inEpochID EpochID) (*pdi.ChannelEpoch, error)
-}
-
-
-
-type AccessChannel interface {
-
-
-}
-
-
-
-type GeneralChannel interface {
-
-
-}
-
-
 func (eip *entryInProcess) prepChannelAccess() error {
 
     plan.Assert( eip.targetChFlags == 0 &&  eip.accessChFlags == 0, "channel store lock flags not reset" )
@@ -1305,92 +1329,3 @@ func (eip *entryInProcess) prepChannelAccess() error {
 
 
 
-    /*
-    // TODO: choose different encoder based on spInfo
-    decoder := ds.NewTxnDecoder()
-
-    resumeReadingFrom := int64(0)
-
-    CR.flow.Log.Infof("Seeking to time %v", resumeReadingFrom)
-
-    spQuery, qerr := CR.spClient.Query(
-        CR.spContext,
-        &pdi.TxnQuery{
-            TimestampMin: resumeReadingFrom,
-            TimestampMax: plan.DistantFuture,
-        },
-        nil,
-    )
-
-    if qerr != nil {
-        // TODO??
-    }
-
-    for {
-        txnBundle, connErr := spQuery.Recv()
-        if connErr != nil {
-            break
-        }
-
-        txnCount := 0 
-        for _, txn := range txnBundle.Txns {
-            txnCount++
-            
-            var txnInfo pdi.TxnInfo
-            var txnSeg pdi.TxnSegment
-
-            CR.flow.Log.Infof("Received txn %v", txn.URID)
-            err = decoder.DecodeRawTxn(
-                txn.RawTxn,
-                &txnInfo,
-                &txnSeg,
-            )
-            if err != nil {
-                log.Fatal(err)
-            }
-            n := txnReplayStart + txnCount -1
-            if bytes.Compare(txnSeg.SegData, testPayloads[n]) == 0 {
-                log.Infof("%d of %d checked!", txnCount, txnsToExpectBack)
-            } else {
-                log.Fatalf("failed check #%d", i)
-            }
-        }
-
-
-                conn, connErr := pn.SP.Query(ctx, &pdi.TxnQuery{
-                    TimestampMin: queryStartTime,
-                    TimestampMax: queryStartTime + int64(txnsToExpectBack),
-                })
-
-                for i := 0; connErr == nil; i++ {
-                    txnBundle, connErr := conn.Recv()
-                    if connErr != nil {      // io.EOF
-                        break
-                    }
-
-                    txnCount := 0 
-                    for _, txn := range txnBundle.Txns {
-                        txnCount++
-                        
-                        var txnInfo pdi.TxnInfo
-                        var txnSeg pdi.TxnSegment
-
-                        log.Infof("Recieved txn URID %v", txn.URID)
-                        err = decoder.DecodeRawTxn(
-                            txn.RawTxn,
-                            &txnInfo,
-                            &txnSeg,
-                        )
-                        if err != nil {
-                            log.Fatal(err)
-                        }
-                        n := txnReplayStart + txnCount -1
-                        if bytes.Compare(txnSeg.SegData, testPayloads[n]) == 0 {
-                            log.Infof("%d of %d checked!", txnCount, txnsToExpectBack)
-                        } else {
-                            log.Fatalf("failed check #%d", i)
-                        }
-                    }
-                }
-
-    */

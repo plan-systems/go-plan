@@ -16,6 +16,7 @@ import (
     //"encoding/json"
     //"encoding/base64"
     //"encoding/binary"
+    "sync/atomic"
 
     //"github.com/plan-systems/go-plan/pcore"
     "github.com/plan-systems/go-plan/pdi"
@@ -37,22 +38,35 @@ const (
     chCitedAsAccessChannel  chStoreFlags = 0x10
 )
 
+
+// revalMsg tells a channel what entries need revalidation.
+//
+// This can be more sophisticated in the future for explicit entries
+type revalMsg struct {
+    chID                    plan.ChannelID
+    revalAfter              int64
+}
+
+
+
 // ChMgr is the top level interface for a community's channels.
 type ChMgr struct {
     flow                    plan.Flow
 
     HomePath                string
 
+    nextSessionID           uint32                  
+
+
     //db                      *badger.DB
-    //State                   ChMgrState
+    State                   ChMgrState
 
     //fsNameEncoding          *base64.Encoding
 
 
+    revalQueue              chan revalidateMsg
     lookupMutex             sync.RWMutex
     hotChannels             map[plan.ChannelID]ChAgent
-
-    chSessionsActive        sync.WaitGroup
 
 }
 
@@ -72,6 +86,7 @@ func NewChMgr(
     chMgr := &ChMgr{
         hotChannels: make(map[plan.ChannelID]ChAgent),
         HomePath: path.Join(inHomeDir, "ChMgr"),
+        nextSessionID: 0,
         //fsNameEncoding: plan.Base64
     }
 
@@ -95,6 +110,10 @@ func (chMgr *ChMgr) Startup(
 }
 
 
+type revalidateMsg struct {
+    chID        plan.ChannelID
+    after       int64
+}
 
 
 
@@ -129,53 +148,61 @@ func (chMgr *ChMgr) onInternalStartup() error {
         dbTxn.Discard()
     }*/
 
+
+    //
+    //
+    //
+    //
+    // channel (re)validator
+    //
+    chMgr.channelsToRevalidate = make(chan plan.ChannelID, 20)
+    chMgr.flow.ShutdownComplete.Add(1)
+    go func() {
+
+        for chID := range chMgr.channelsToRevalidate {
+            ch, err := chMgr.FetchChannel(chID, nil)
+            if err != nil {
+                chMgr.flow.LogErr(err, "error fetching channel for revalidation")
+                continue
+            }
+
+            chMgr.Revalidate()
+        }
+
+        chMgr.flow.ShutdownComplete.Done()
+    }()
+
+
     return nil
 }
-
+  
 
 func (chMgr *ChMgr) onInternalShutdown() {
 
-    // TODO me
-    {}
-
-    chMgr.chSessionsActive.Wait()
+    close(chMgr.channelsToRevalidate)
 
 }
 
 
-/*
-func (chMgr *ChMgr) InscribeGenesis(inSeed *RepoSeed) error {
 
-    _, err := chMgr.FetchChannel(plan.RootACChannelID[:], inSeed.GenesisAccEpoch)
-    if err != nil {
-        return err
-    }
+func (chEntry *ChEntryInfo) AssignFromDecrytedEntry(
+    inEntryInfo *pdi.EntryInfo,
+    inAuthorSig []byte,
+) {
 
-    _, err = chMgr.FetchChannel(plan.MemberRegistryChannelID[:], inSeed.GenesisRegistryEpoch)
-    if err != nil {
-        return err
-    }
+    chEntry.TimeAuthored        = inEntryInfo.TimeAuthored
+    chEntry.TimeAuthoredFrac    = inEntryInfo.TimeAuthoredFrac
+    chEntry.EntryOp             = inEntryInfo.EntryOp
+    chEntry.ChannelEpochID      = inEntryInfo.ChannelEpochID
+    chEntry.ACCEpochID          = inEntryInfo.ACCEpochID
+    chEntry.AuthorMemberID      = inEntryInfo.AuthorMemberID
+    chEntry.AuthorMemberEpoch   = inEntryInfo.AuthorMemberEpoch
+    chEntry.BodyEncoding        = inEntryInfo.BodyEncoding
+    chEntry.AuthorSig           = inAuthorSig
+    chEntry.Status              = ChEntryStatus_AWAITING_MERGE
+    chEntry.Flags               = 1 << byte(ChEntryFlag_WELL_FORMED)
 
-    //chSt.MergeEntry()
-
-
-    return nil
 }
-*/
-
-
-
-/*
-func (chMgr *ChMgr) AuthenticateEntry(
-    inEntry *pdi.EntryInfo,
-    inSignerKey []byte,
-) error {
-
-
-
-
-
-}*/
 
 
 // MissingFlag returns true if the given flag is NOT set
@@ -243,6 +270,8 @@ func (chEntry *ChEntryInfo) IsWellFormed() bool {
     return (chEntry.Flags & (1 << byte(ChEntryFlag_WELL_FORMED))) != 0
 }
 
+
+/*
 // ChEntryFlagsLiveFlags reppresent the conditions needed for a channel entry to be considered live.
 const ChEntryFlagsLiveFlags = 
     (1 << byte(ChEntryFlag_AUTHOR_VALIDATED)) |
@@ -250,6 +279,10 @@ const ChEntryFlagsLiveFlags =
     (1 << byte(ChEntryFlag_ACC_VALIDATED)) | 
     (1 << byte(ChEntryFlag_AGENT_VALIDATED)) |
     (1 << byte(ChEntryFlag_WELL_FORMED))
+*/
+
+
+
 
 // MergeEntry is called when an entry arrives to a repo and must be merged into the repo.
 func (chMgr *ChMgr) MergeEntry(
@@ -262,9 +295,7 @@ func (chMgr *ChMgr) MergeEntry(
         chGenesis *pdi.ChannelEpoch
     )
 
-    if ioEntry.ChEntry.HasFlags(ChEntryFlag_IS_GENESIS_ENTRY, ChEntryFlag_WELL_FORMED) {
-        ioEntry.ChEntry.Flags |= ChEntryFlagsLiveFlags
-    }
+
 
     switch ioEntry.Info.EntryOp {
         
@@ -273,6 +304,8 @@ func (chMgr *ChMgr) MergeEntry(
             if entryErr := chGenesis.Unmarshal(ioEntry.Body); entryErr != nil {
                 entryErr = plan.Error(entryErr, plan.ChEntryIsMalformed, "error unmarshalling NEW_CHANNEL_EPOCH")
                 ioEntry.ChEntry.ThrowMalformed(entryErr)
+            } else {
+                ioEntry.ChEntry.DepKey = chGenesis.EpochID
             }
         }
     }
@@ -282,23 +315,24 @@ func (chMgr *ChMgr) MergeEntry(
         if entryErr != nil {
             ioEntry.ChEntry.Defer(entryErr)
         } else {
-            ch.ValidateEntry(ioEntry.URID, &ioEntry.ChEntry, chMgr)
+            entryErr, processErr = chMgr.ValidateEntry(ch, &ioEntry.ChEntry, true) //ioEntry.URID
         }
     }
 
-    // TODO: IF deferred or malformed already, stop processing
-    { }
+    // TODO: IF deferred or malformed already, stop processing 
+    if ch == nil {
 
-    {
+    } else {
         chTxn := ch.Store().StartMerge()
 
         switch ioEntry.Info.EntryOp {
             
             case pdi.EntryOp_POST_CONTENT:
-                entryErr, processErr = ch.PostNewEntry(chTxn, ioEntry)
+                entryErr, processErr = ch.PostEntry(chTxn, ioEntry)
                 if entryErr != nil {
                     ioEntry.ChEntry.ThrowMalformed(entryErr)
                 }
+            
         }
 
         if entryErr == nil && processErr == nil {
@@ -311,6 +345,18 @@ func (chMgr *ChMgr) MergeEntry(
 
         if processErr == nil {
             processErr = chTxn.Commit()
+
+            
+            if ioEntry.ChEntry.Status == ChEntryStatus_LIVE {
+
+                if ioEntry.ChannelID() == plan.MemberRegistryChannelID {
+
+                } else {
+
+                    // Are there channels awaiting this entry?
+                    ch.RevalidateDependencies(entryChID, &ioEntry.ChEntry)
+
+                }
         } else {
             chTxn.Discard()
         }
@@ -324,6 +370,100 @@ func (chMgr *ChMgr) MergeEntry(
 
 
 
+
+
+
+func (chMgr *ChMgr) ValidateEntry(
+    ch ChAgent,
+    ioEntry *ChEntryInfo,
+    inWriteDependencies bool,
+) (entryErr error, processErr error) {
+
+
+    var (
+        accID uint64
+        authURID []byte
+        entryChID plan.ChannelID
+        //err error
+        //authorEpoch *pdi.MemberEpoch
+    )
+
+    status := ChEntryStatus_LIVE
+
+    if ! inChEntry.ChEntry.HasFlags(ChEntryFlag_IS_GENESIS_ENTRY, ChEntryFlag_WELL_FORMED) {
+        
+        if inWriteDependencies {
+            entryChID = ch.Store().State.ChannelID
+        }
+
+        // 1 -- Check community membership records
+        {
+            registry, err := chMgr.FetchMemberRegistry()
+            if err != nil {
+                processErr = err
+            } else {
+                err = registry.ValidateAuthor(inChEntry)
+
+                // TODO: handle when member registry returns an werr
+                if inWriteDependencies {
+                    processErr = registry.AddDependency(ChDependencyType_BY_AUTHOR, entryChID, ioEntry)
+                }
+            }
+            if err != nil {
+                status = ChEntryStatus_DEFERRED
+            }
+        }
+
+        // 2 -- Check entry's parent channel governing epoch
+        {
+            chEpoch, err := ch.CanAcceptEntry(*ioEntry)
+            if err != nil {
+                processErr = err
+
+                status = ChEntryStatus_DEFERRED
+
+            } else {
+
+                // Note: no dependency is created here b/c if/when a channel entry is overturned, all subsequent entries in that channel undergo revalidation,
+                accID = chEpoch.AccessChannelID
+            }
+                            
+            if inWriteDependencies {
+                processErr = ch.AddDependency(ChDependencyType_BY_CHANNEL, entryChID, ioEntry)
+            }
+        }
+
+        // 3 -- Check parent ACC
+        {
+            acc, err := chMgr.FetchACC(accID)
+            if err == nil {
+                err = acc.IsEntryAuthorized(inChEntry)
+                if inWriteDependencies {
+                    processErr = acc.AddDependency(ChDependencyType_BY_ACC, entryChID, ioEntry)
+                }
+            } 
+            
+            if err != nil {
+                status = ChEntryStatus_DEFERRED
+            }
+        }
+    }
+
+    if ioEntry.Status != status {
+        ioEntry.Status = status
+    }
+
+    return processErr
+}
+
+
+func (chMgr *ChMgr) revalidateChannel(
+    chID plan.ChannelID,
+) { 
+
+
+
+}
 
 
 func (chMgr *ChMgr) FetchACC(
@@ -375,33 +515,39 @@ func (chMgr *ChMgr) FetchChannel(
         err error
     )
 
+    chMgr.lookupMutex.RLock()
+    ch := chMgr.hotChannels[inChannelID]
+    chMgr.lookupMutex.RUnlock()
+
+    if ch != nil {
+        return ch, nil
+    }
+
     chMgr.lookupMutex.Lock()
     defer chMgr.lookupMutex.Unlock()
-    chSt := chMgr.hotChannels[inChannelID]
+    
+    // Recheck to handle race condition
+    ch = chMgr.hotChannels[inChannelID]
 
     // TODO: channel genesis dupes?
 
     // If the ch store isn't already loaded, try to load it.
     // To do that, we need to need to lookup it's ChStoreID
-    if chSt == nil { 
-        chSt, err = chMgr.loadChannel(inChannelID, inGenesisEpoch)
+    if ch == nil { 
+        ch, err = chMgr.loadChannel(inChannelID, inGenesisEpoch)
+
+        // We've already mutexed for this write condition (above)
         if err == nil {
-
- 
-        }
-
-
-        if err == nil {
-            chMgr.hotChannels[inChannelID] = chSt
+            chMgr.hotChannels[inChannelID] = ch
         }  
     }
     
-    // TODO: rebuild channel if db load fails
+    // TODO: rebuild channel if db load fails?
     if err != nil {
-        chSt = nil
+        ch = nil
     }
 
-    return chSt, err
+    return ch, err
 }
 
 
@@ -418,7 +564,7 @@ func (chMgr *ChMgr) loadChannel(
     opts := badger.DefaultOptions
     opts.Dir = path.Join(
         chMgr.HomePath,
-        fmt.Sprintf("%04d/%06d", memberID, issuedID),
+        fmt.Sprintf("%04d/%05d", memberID, issuedID),
     )
     opts.ValueDir = opts.Dir
 
@@ -493,22 +639,32 @@ func (chMgr *ChMgr) loadChannel(
 
 
 
-func (chEntry *ChEntryInfo) AssignFromDecrytedEntry(
-    inEntryInfo *pdi.EntryInfo,
-    inAuthorSig []byte,
-) {
 
-    chEntry.TimeAuthored        = inEntryInfo.TimeAuthored
-    chEntry.TimeAuthoredFrac    = inEntryInfo.TimeAuthoredFrac
-    chEntry.EntryOp             = inEntryInfo.EntryOp
-    chEntry.ChannelEpochID      = inEntryInfo.ChannelEpochID
-    chEntry.AuthorMemberID      = inEntryInfo.AuthorMemberID
-    chEntry.AuthorMemberEpoch   = inEntryInfo.AuthorMemberEpoch
-    chEntry.BodyEncoding        = inEntryInfo.BodyEncoding
-    chEntry.AuthorSig           = inAuthorSig
-    chEntry.Status              = ChEntryStatus_AWAITING_MERGE
-    chEntry.Flags               = 1 << byte(ChEntryFlag_WELL_FORMED)
 
+// OpenChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
+func (chMgr *ChMgr) OpenChannelSession(
+    inInvocation *ChInvocation, 
+    inOutlet Repo_OpenChannelSessionServer,
+) (*ChSession, error) {
+
+    ch, err := chMgr.FetchChannel(plan.ChannelID(inInvocation.ChID), nil)
+    if err != nil {
+        return nil, err
+    }
+
+    chSession := &ChSession{
+        SessionID: atomic.AddUint32(&chMgr.nextSessionID, 1),
+        ChAgent: ch,
+        msgInbox: make(chan *ChMsg, 1),
+        outlet: inOutlet,
+    }
+
+    err = chSession.Startup(inInvocation)
+    if err != nil {
+        return nil, err
+    }
+
+    return chSession, err
 }
 
 
@@ -516,9 +672,12 @@ func (chEntry *ChEntryInfo) AssignFromDecrytedEntry(
 
 
 type ChSession struct {
-    SessionID           int32
+
+    SessionID           uint32
 
     MemeberSession      *MemberSession
+
+    ChAgent             ChAgent
 
     //ChStore             *ChStore
 
@@ -529,13 +688,22 @@ type ChSession struct {
 
     // Close the Inbox to end the channel session.
     // When closure is complete, the sessions msg outbox will be closed.
-    ChMsgInbox          chan *plan.Block 
+    msgInbox            chan *ChMsg
  
-    ChMsgOutbox         chan *plan.Block
+    //msgOutbox           chan *ChMsg
+    outlet              Repo_OpenChannelSessionServer
 
     log                 *log.Logger
 }
 
+
+func (cs *ChSession) Startup(
+    inInvocation *ChInvocation,
+) error {
+
+    //cs.ChAgent.
+    return nil
+} 
 
 
 
@@ -624,15 +792,6 @@ channels:
 - entry key name:  chID + entry URID 
 - entry status:  posted, removed, replaced (with entry URID)
 
-
-CR (repo-wide) dbs:
-
-
-Each channel has these dbs:
-   - body db: URID => protobuf output from the ChannelProtocolClerk (allowing searching to be easier, etc)
-        - optional -- allows the channel protocol to decide what it wants to keep around
-    - entry db: URID => ChEntry
-        - track entry status in a channel
 */
 
 
