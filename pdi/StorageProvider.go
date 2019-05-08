@@ -126,3 +126,12 @@ func (epoch *StorageEpoch) CommunityKeyringName() []byte {
     return epoch.CommunityID
 }
 
+// FormSuggestedDirName forms a file system friendly name that identifies this community to humans.
+func (epoch *StorageEpoch) FormSuggestedDirName() string {
+    str := plan.MakeFSFriendly(
+        epoch.Name,
+        epoch.CommunityID[0:2],
+    )
+
+    return str
+}
