@@ -31,7 +31,7 @@ func (seg *DecodedTxn) DecodeRawTxn(
 		return err
 	}
 
-    if len(seg.Info.URID) < URIDBinarySz {
+    if len(seg.Info.URID) < URIDSz {
         return plan.Errorf(nil, plan.TxnFailedToDecode, "invalid txn URID") 
     }
     

@@ -170,7 +170,7 @@ func (enc *dsEncoder) EncodeToTxns(
                 plan.Encoding_TxnPayloadSegment,
                 scrap[:headerSz],
                 inPayload[pos:pos+seg.SegSz],
-                pdi.URIDBinarySz,
+                pdi.URIDSz,
                 &packingInfo,
             )
             if err != nil {

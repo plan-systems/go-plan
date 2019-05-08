@@ -140,7 +140,7 @@ func (enc *dsEncoder) EncodeToTxns(
             }
 
 			// Do one alloc for all out needs.  Add a lil extra for sig and len bytes.
-			buf := make([]byte, 200 + seg.Size() + int(seg.SegSz) + pdi.URIDBinarySz + hashKit.HashSz)
+			buf := make([]byte, 200 + seg.Size() + int(seg.SegSz) + pdi.URIDSz + hashKit.HashSz)
 
 			// 1) Append the TxnInfo
 			infoLen, merr := seg.MarshalTo(buf[2:])
@@ -161,7 +161,7 @@ func (enc *dsEncoder) EncodeToTxns(
 			hashKit.Hasher.Write(buf[:txnLen])
 
             // Use the extra we allocated to store the hashname and URID
-            j := len(buf) - hashKit.HashSz - pdi.URIDBinarySz
+            j := len(buf) - hashKit.HashSz - pdi.URIDSz
 			seg.TxnHashname = hashKit.Hasher.Sum(buf[j:j])
             j += hashKit.HashSz
             seg.URID = pdi.URIDFromInfo(buf[j:j], seg.TimeSealed, seg.TxnHashname)

@@ -296,7 +296,7 @@ type ScanJob struct {
 // SendJob represents a pending SendTxns) calls to a StorageProvider
 type SendJob struct {
     URIDs      [][]byte
-    Outlet     pdi.StorageProvider_SendTxnsServer
+    Outlet     pdi.StorageProvider_FetchTxnsServer
     OnComplete chan error
 }
 
@@ -708,18 +708,18 @@ func (St *Store) doScanJob(job ScanJob) error {
 
     const (
         batchMax = 50
-        batchBufSz = batchMax * pdi.URIDBinarySz
+        batchBufSz = batchMax * pdi.URIDSz
     )
     var (
-        URIDbuf [batchMax * pdi.URIDBinarySz]byte
+        URIDbuf [batchMax * pdi.URIDSz]byte
         URIDs [batchMax][]byte
     )
     statuses := make([]byte, batchMax)
     for i := 0; i < batchMax; i++ {
         statuses[i] = byte(pdi.TxnStatus_FINALIZED)
 
-        pos := i * pdi.URIDBinarySz
-        URIDs[i] = URIDbuf[pos:pos + pdi.URIDBinarySz]
+        pos := i * pdi.URIDSz
+        URIDs[i] = URIDbuf[pos:pos + pdi.URIDSz]
     }
 
     heartbeat := time.NewTicker(time.Second * 28)
@@ -739,8 +739,8 @@ func (St *Store) doScanJob(job ScanJob) error {
 
         var (
             scanDir int
-            stopKeyBuf [pdi.URIDBinarySz]byte
-            seekKeyBuf [pdi.URIDBinarySz]byte
+            stopKeyBuf [pdi.URIDSz]byte
+            seekKeyBuf [pdi.URIDSz]byte
         )
 
         seekKey := pdi.URIDFromInfo(seekKeyBuf[:0], job.TxnScan.TimestampStart, nil)
@@ -783,8 +783,8 @@ func (St *Store) doScanJob(job ScanJob) error {
                         break
                     }
 
-                    if len(itemKey) != pdi.URIDBinarySz {
-                        St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDBinarySz)
+                    if len(itemKey) != pdi.URIDSz {
+                        St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDSz)
                         continue
                     }
 
@@ -837,7 +837,7 @@ func (St *Store) doScanJob(job ScanJob) error {
 
                     select {
                         case txnUpdate := <- job.txnUpdates:
-                            if len(txnUpdate.URID) == pdi.URIDBinarySz {
+                            if len(txnUpdate.URID) == pdi.URIDSz {
                                 copy(URIDs[batchCount], txnUpdate.URID)
                                 statuses[batchCount] = byte(txnUpdate.TxnStatus)
                                 batchCount++

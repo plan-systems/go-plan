@@ -97,7 +97,7 @@ func (dec *dsDecoder) DecodeRawTxn(
         }
 
         // Use a single allocation for the URID backing buf and the hash digest buf
-        miscBuf := make([]byte, 0, pdi.URIDBinarySz + hashKit.HashSz)
+        miscBuf := make([]byte, 0, pdi.URIDSz + hashKit.HashSz)
 
         // 5) Calculate the hash digest and thus URID of the raw txn
         hashKit.Hasher.Reset()
