@@ -126,17 +126,22 @@ func (F *Flow) IsRunning() bool {
 // THREADSAFE
 func (F *Flow) InitiateShutdown(
     inReason string,
-) {
+) bool {
+
+    initiated := false
 
     F.shutdownMutex.Lock()
     if F.IsRunning() && F.ctxCancel != nil {
         F.ShutdownReason = inReason
-        F.Log.Infof("stopping %s: %s", F.Desc, F.ShutdownReason)
+        F.Log.Infof("Initiating shutdown for %s: %s", F.Desc, F.ShutdownReason)
         F.ctxCancel()
         F.ctxCancel = nil
+        initiated = true
     }
     F.shutdownMutex.Unlock()
 
+
+    return initiated
 }
 
 // Shutdown calls InitiateShutdown() and blocks until complete.
@@ -146,9 +151,13 @@ func (F *Flow) Shutdown(
     inReason string,
 ) {
 
-    F.InitiateShutdown(inReason)
+    initiated := F.InitiateShutdown(inReason)
 
     F.ShutdownComplete.Wait()
+
+    if initiated {
+        F.Log.Infof("Shutdown complete for %s", F.Desc)
+    }
 }
 
 
@@ -184,7 +193,13 @@ func (F *Flow) FilterFault(inErr error) error {
     return inErr
 }
 
-
+// LogErr logs a warning for the given error with the given description.  
+// If inErr == nil, this function has no effect
+func (F *Flow) LogErr(inErr error, inDesc string) {
+    if inErr != nil {
+        F.Log.WithError(inErr).Warn(inDesc)
+    }
+}
 
 
 
@@ -201,7 +216,7 @@ func GetCommunityID(in []byte) CommunityID {
 	return out
 }
 
-
+/*
 // GetChannelID returns the channel ID for the given buffer
 func GetChannelID(in []byte) ChannelID {
 	var out ChannelID
@@ -209,6 +224,60 @@ func GetChannelID(in []byte) ChannelID {
 	copy(out[:], in)
 	return out
 }
+*/
+
+
+
+
+// Multiplex interleaves the bits of A and B such that a composite uint64 is formed.
+//
+// Generally, A and B are "counting-like" numbers that are associated with a unique issuance
+// number (and are generally human readable).  
+// This ensures that the composite uint64 is also small and can be looked at by a human easily
+// and can also be easily stored compressed.  
+// In PLAN, channel epoch IDs are generated from a memberID and their own self-issued ID value,
+//     ensuring that epoch IDs can never collide (without having to use 20+ byte channel and epoch IDs).
+func Multiplex(A, B uint32) uint64 {
+
+    ax := uint64(A)
+    bx := uint64(B) << 1
+
+    place := byte(0)
+    x := uint64(0)
+
+    for (ax | bx) > 0 {
+        x |= ((ax & 1) + (bx & 2)) << place
+        ax >>= 1
+        bx >>= 1
+	    place += 2
+    }
+
+    return x
+}
+
+// Unplex is the inverse of Multiplex().
+func Unplex(x uint64) (uint32, uint32) {
+
+    xa := x
+    xb := x >> 1
+
+    place := byte(0)
+    A := uint32(0)
+    B := uint32(0)
+    for xa > 0 {
+        A |= uint32(xa & 1) << place
+        B |= uint32(xb & 1) << place
+        xa >>= 2
+        xb >>= 2
+        place++
+    }
+
+    return A, B
+}
+
+
+
+
 
 
 // UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
@@ -238,8 +307,9 @@ func UseLocalDir(inSubDir string) (string, error) {
 
 // CreateNewDir creates the specified dir (and returns an error if the dir already exists)
 // 
-// If inPath is absolute then inBasePath is ignored.
-func CreateNewDir(inBasePath, inPath string) error {
+// If inPath is absolute then inBasePath is ignored. 
+// Returns the effective pathname.
+func CreateNewDir(inBasePath, inPath string) (string, error) {
 
     var pathname string
 
@@ -250,14 +320,17 @@ func CreateNewDir(inBasePath, inPath string) error {
     }
 
     if _, err := os.Stat(pathname); ! os.IsNotExist(err) {
-        return Errorf(nil, FailedToAccessPath, "for safety, the path '%s' must not already exist", pathname)
+        return "", Errorf(nil, FailedToAccessPath, "for safety, the path '%s' must not already exist", pathname)
     }
 
-    err := os.MkdirAll(pathname, DefaultFileMode)
-    if err != nil { return err }
+    if err := os.MkdirAll(pathname, DefaultFileMode); err != nil {
+        return "", err
+    }
 
-    return nil
+    return pathname, nil
 }
+
+
 
 
 var remapCharset = map[rune]rune{
