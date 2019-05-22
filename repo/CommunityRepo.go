@@ -36,10 +36,7 @@ import (
 // TODO: where do these settings go?  StorageEpoch 
 type Config struct {
 
-    // Max number of seconds that any two community peers could have different clock readings.
-    // This value implies a dependency time "slop" for validation.  That is, no entry can be dependent on another
-    //     entry that is more than this value in the future.  Beyond this, this is a causality inconsistency.
-    MaxPeerClockDelta       int64               `json:"max_peer_clock_delta"`
+
 
     // Number of storage provider faults/errors before this repo disconnects and requires manual override
     MaxStorageProviderFaults int32              `json:"max_storage_provider_faults"`   
@@ -197,6 +194,7 @@ func NewCommunityRepo(
     }
 
     if err == nil {
+        CR.chMgr.StorageEpoch = *CR.GenesisSeed.StorageEpoch
         CR.MemberSessions.Host = CR
         CR.CommunityKeyringName = CR.GenesisSeed.StorageEpoch.CommunityKeyringName()
     }
@@ -309,7 +307,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         for eip := range CR.entriesToMerge {
             err := CR.decryptAndMergeEntry(eip)
-            CR.flow.Log.WithError(err).Warn("entry failed to process")
+            CR.flow.LogErr(err, "entry failed to process")
         }
 
         CR.chMgr.flow.Shutdown(CR.flow.ShutdownReason)
@@ -394,6 +392,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
                 {}
             }
 
+// TODO: only write txn when it's been merged .
+// Use txnCollater to keep txn in memory.  this way, a repo that doesn't shut down properly results in non-merged txns to fatched again (vs corrupt bookeeping) 
             if err == nil {
                 CR.txnsToWrite <- txnIn
             }
@@ -976,12 +976,14 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
     switch txn.Info.PayloadEncoding {
 
         case plan.Encoding_Pb_EntryCrypt:
-            eip := &entryIP{}   // TODO: use sync.Pool
+            eip := &entryIP{
+                entry: chEntryAlloc(),
+            }
             err := eip.EntryCrypt.Unmarshal(txn.PayloadSeg)
             if err != nil {
                 return plan.Errorf(nil, plan.CannotExtractTxnPayload, "failed to unmarshal EntryCrypt from txn payload")
             }
-            eip.Entry.URID = txn.Info.PayloadName
+            eip.txnPayloadName = txn.Info.PayloadName
             CR.entriesToMerge <- eip
 
         default:
@@ -1024,18 +1026,21 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         return err
     }
 
-    eip.Entry.Body = packingInfo.Body
+    eip.entry.Body = packingInfo.Body
 
-    err = eip.Entry.Info.Unmarshal(packingInfo.Header)
+    err = eip.EntryInfo.Unmarshal(packingInfo.Header)
     if err != nil {
         return err
     }
 
+
+
     var scrap [pdi.URIDSz]byte
-    actualURID := pdi.URIDFromInfo(scrap[:], eip.Entry.Info.TimeAuthored, packingInfo.Hash)
-    if ! bytes.Equal(eip.Entry.URID, actualURID) {
-        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload URID was %v but actual is %v", eip.Entry.URID, actualURID)
+    entryURID := pdi.URIDFromInfo(scrap[:], eip.EntryInfo.TimeAuthored(), packingInfo.Hash)
+    if ! bytes.Equal(eip.txnPayloadName, entryURID) {
+        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload URID was %v but actual is %v", eip.txnPayloadName, entryURID)
     }
+
 
     /* TODO: perform timestamp sanity checks
     if eip.EntryInfo.TimeAuthored < eip.CR.Info.TimeCreated.UnixSecs {
@@ -1050,27 +1055,39 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         - the member epoch that contains the member's signing pub key (member reg channel, entry ID, time index)
         - */
 
-    eip.Entry.ChEntry.AssignFromDecrytedEntry(&eip.Entry.Info, packingInfo.Signer.PubKey)
+    entry := eip.entry
 
-    // Verify that the entry is actually a genesis entry
-    if eip.Entry.Info.IsGenesisEntry {
-        found := false
-        for _, URID := range CR.GenesisSeed.StorageEpoch.GenesisURIDs {
-            if bytes.Equal(URID, eip.Entry.URID) {
-                eip.Entry.ChEntry.AddFlags(ChEntryFlag_IS_GENESIS_ENTRY)
-                found = true
-                break
+    entry.AssignFromDecrytedEntry(&eip.EntryInfo, packingInfo.Signer.PubKey)
+
+    numTIDs := len(entry.Info.TIDs) / plan.TIDSz
+    if numTIDs < 1 {
+        entry.ThrowMalformed(plan.Error(nil, plan.ChEntryIsMalformed, "entry missing required TIDs"))
+
+    } else {
+
+        // The entry ID's latter bytes are rightmost bytes of the entry hashname.
+        entry.Info.EntryID().SetHash(packingInfo.Hash)
+   
+        // If we're lacking the normal entries, the presumption is that this is a genesis entry, in which case we see if it is.
+        if entry.Info.RequiresGenesisAuthority() {
+
+            found := false
+            for _, URID := range CR.GenesisSeed.StorageEpoch.GenesisURIDs {
+                if bytes.Equal(URID, entryURID) {
+                    entry.AddFlags(ChEntryFlag_GENESIS_ENTRY_VERIFIED)
+                    found = true
+                    break
+                }
             }
-        }
-        if ! found {
-            eip.Entry.ChEntry.ThrowMalformed(
-                plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", eip.Entry.URID),
-            )
+            if ! found {
+                entry.ThrowMalformed(
+                    plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryURID),
+                )
+            }
         }
     }
 
-
-    CR.chMgr.MergeEntry(&eip.Entry)
+    CR.chMgr.QueueEntryForMerge(eip.EntryInfo.ChannelID, entry)
  
     // At this point, the PDI entry's signature has been verified
     return err
@@ -1158,24 +1175,18 @@ func (CR *CommunityRepo) OnSessionEnded(inSession *MemberSession) {
 
 
 
-
-type DecryptedEntry struct {
-    Info            pdi.EntryInfo
-    URID            []byte
-    Body            []byte
-    ChEntry         ChEntryInfo
-    ChAgentAsset    []byte
-}
-
+/*
 // ChannelID returns this entry's destination channnel ID.
-func (entry *DecryptedEntry) ChannelID() plan.ChannelID {
+func (entry *chEntry) ChannelID() plan.ChannelID {
     return plan.ChannelID(entry.Info.ChannelID)
 }
-
+*/
 
 type entryIP struct {
 
-    timeStart       plan.Time
+    txnPayloadName  []byte
+
+    timeStart       int64
 
     // Txn ID of the last/final segment storage provider txn
    // ParentURID      string
@@ -1189,9 +1200,10 @@ type entryIP struct {
     entryIndex      int               // This is the index number into entryBatch that is currently being processed
     entryTxn        pdi.StorageTxn */
 
-    Entry           DecryptedEntry
+    entry           *chEntry
 
     EntryCrypt      pdi.EntryCrypt
+    EntryInfo       pdi.EntryInfo
 
 
     //ChannelEpoch    *pdi.ChannelEpoch

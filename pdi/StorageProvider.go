@@ -94,6 +94,27 @@ func (epoch *StorageEpoch) StorageKeyringName() []byte {
     return keyInfo.PubKey[:sz]
 }
 
+// CommunityChID returns the ChID of the requested community-global channel.
+func (epoch *StorageEpoch) CommunityChID(inCommunityChID CommunityChID) plan.ChID {
+    pos := inCommunityChID * plan.ChIDSz
+    return epoch.CommunityChIDs[pos:pos+plan.ChIDSz]
+}
+
+// RootACC returns the ChID of the community's root ACC
+func (epoch *StorageEpoch) RootACC() plan.ChID {
+    return epoch.CommunityChID(CommunityChID_RootACC)
+}
+
+// MemberRegistry returns the ChID of the community's member registry channel.
+func (epoch *StorageEpoch) MemberRegistry() plan.ChID {
+    return epoch.CommunityChID(CommunityChID_MemberRegistry)
+}
+
+// CommunityEpochHistory returns the ChID of the community's CommunityEpoch history channel
+func (epoch *StorageEpoch) CommunityEpochHistory() plan.ChID {
+    return epoch.CommunityChID(CommunityChID_EpochHistory)
+}
+
 // GenerateNewAddr generates a new signing key on the given SKI session for this StorageEpoch,
 //    returning the newly generated pub key (used as an address on a StorageProvider network). 
 func (epoch *StorageEpoch) GenerateNewAddr(
