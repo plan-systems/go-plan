@@ -89,37 +89,28 @@ func (block *Block) GetBlockWithLabel(inLabel string) *Block {
 	return nil
 }
 
-// GetBlockWithCodec returns the first-appearing Block with a matching codec string
+// GetBlockWithCodec returns the first-appearing Block with a matching codec string (self and shallow search only)
 func (block *Block) GetBlockWithCodec(inCodec string, inCodecCode uint32) *Block {
 
-	if len(inCodec) > 0 {
+    checkCodecStr := len(inCodec) > 0
 
-		if (inCodecCode != 0 && inCodecCode == block.CodecCode) || inCodec == block.Codec {
-			return block
-		}
+    // Start w/ the "self" block
+    b := block
+    
+    N := len(block.Subs)
+    for i := -1; i < N; i++ {
+        if i >= 0 {
+            b = block.Subs[i]
+        }
 
-		for _, sub := range block.Subs {
-			if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || sub.Codec == inCodec {
-				return sub
-			}
-		}
+        if (inCodecCode != 0 && inCodecCode == b.CodecCode) || (checkCodecStr && inCodec == b.Codec) {
+            return b
+        }
+    }
 
-	} else {
-
-		if inCodecCode != 0 && inCodecCode == block.CodecCode {
-			return block
-		}
-
-		for _, sub := range block.Subs {
-			if inCodecCode != 0 && inCodecCode == sub.CodecCode {
-				return sub
-			}
-		}
-
-	}
-
-	return nil
+    return nil
 }
+
 
 // GetContentWithLabel returns the content of the first-appearing Block with a matching label/name
 func (block *Block) GetContentWithLabel(inLabel string) []byte {
@@ -166,9 +157,9 @@ func (block *Block) AddContentWithCodec(inContent []byte, inCodec string) {
 
 
 
-// FindBlocksWithCodec traverses all Blocks with a matching codec.  
-// If/when an error is encountered, iteration stops and the error is returned.
-func (block *Block) FindBlocksWithCodec(
+// InvokeBlocksWithCodec performs a self and shallow search for matching Blocks.
+// If an error is encountered, iteration stops and the error is returned.
+func (block *Block) InvokeBlocksWithCodec(
     inCodec string,
     inCodecCode uint32,
     inCallback func(inMatch *Block) error,
@@ -179,16 +170,16 @@ func (block *Block) FindBlocksWithCodec(
     var err error
 
     // Start w/ the "self" block
-    sub := block
+    b := block
     
     N := len(block.Subs)
     for i := -1; i < N && err == nil; i++ {
         if i >= 0 {
-            sub = block.Subs[i]
+            b = block.Subs[i]
         }
 
-        if (inCodecCode != 0 && inCodecCode == sub.CodecCode) || (checkCodecStr && inCodec == sub.Codec) {
-            err = inCallback(sub)
+        if (inCodecCode != 0 && inCodecCode == b.CodecCode) || (checkCodecStr && inCodec == b.Codec) {
+            err = inCallback(b)
         }
     } 
 
