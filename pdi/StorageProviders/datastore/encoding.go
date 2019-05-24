@@ -34,7 +34,8 @@ func NewStorageEpoch(
         CommunityID: inCommunity.CommunityID,
         TxnHashKit: ski.HashKitID_LegacyKeccak_256,
         Name: inCommunity.CommunityName,
-        TxnMaxSize: 1000,
+        TxnMaxSize: 32000,
+        CommunityChIDs: make([]byte, pdi.CommunityChID_NumChannels * plan.ChIDSz),
     }
 
     var err error
@@ -134,7 +135,7 @@ func (enc *dsEncoder) EncodeToTxns(
 
     // Use the same time stamp for the entire batch
     if timeSealed == 0 {
-        timeSealed = plan.Now().UnixSecs
+        timeSealed = plan.Now()
     }
 
     {
