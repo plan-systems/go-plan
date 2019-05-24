@@ -9,13 +9,11 @@ import (
     "io/ioutil"
     "fmt"
     "sync"
-    //"time"
+    "time"
     "net"
     crand "crypto/rand"
     //"encoding/hex"
     "encoding/json"
-
-    log "github.com/sirupsen/logrus"
 
     "github.com/plan-systems/go-plan/pcore"
     "github.com/plan-systems/go-plan/plan"
@@ -210,11 +208,11 @@ func (sn *Snode) onInternalShutdown() {
     }
 
     if sn.grpcServer != nil {
-        log.Info("initiating grpc graceful stop")
+        sn.flow.Log.Info("Stopping StorageProvider grpc service")
         sn.grpcServer.GracefulStop()
 
         _, _ = <- sn.grpcDone
-        log.Info("grpc server done")
+        sn.flow.Log.Debug("StorageProvider stopped")
     }
 
     storesRunning.Wait()
@@ -321,6 +319,9 @@ func (sn *Snode) CreateNewStore(
         }
     }
 
+    // Sleep a little so the log messages show up in a nice order for such an important occasion!
+    time.Sleep(100 * time.Millisecond)
+
     St.Shutdown("creation complete")
 
     return nil
@@ -352,10 +353,10 @@ func (sn *Snode) startServer() error {
 
     sn.grpcDone = make(chan struct{})
 
-    log.Infof("starting StorageProvider service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+    sn.flow.Log.Infof("starting StorageProvider service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     listener, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     if err != nil {
-        return plan.Error(err, plan.NetworkNotReady, "failed to start StorageProvider")
+        return err
     }
 
     // TODO: turn off compression since we're dealing w/ encrypted data
@@ -367,7 +368,7 @@ func (sn *Snode) startServer() error {
     go func() {
 
         if err := sn.grpcServer.Serve(listener); err != nil {
-            log.WithError(err).Warn("grpcServer.Serve()")
+            sn.flow.LogErr(err, "grpc Serve() failed")
         }
         
         listener.Close()
@@ -442,8 +443,8 @@ func (sn *Snode) Scan(inScanPB *pdi.TxnScan, inOutlet pdi.StorageProvider_ScanSe
     return err
 }
 
-// SendTxns -- see service StorageProvider in pdi.proto
-func (sn *Snode) SendTxns(inTxnList *pdi.TxnList, inOutlet pdi.StorageProvider_SendTxnsServer) error {
+// FetchTxns -- see service StorageProvider in pdi.proto
+func (sn *Snode) FetchTxns(inTxnList *pdi.TxnList, inOutlet pdi.StorageProvider_FetchTxnsServer) error {
     St, err := sn.FetchSessionStore(inOutlet.Context())
     if err != nil {
         return err
