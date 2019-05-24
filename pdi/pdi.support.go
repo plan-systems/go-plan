@@ -5,7 +5,7 @@ package pdi
 import (
 
     "io"
-    crand "crypto/rand"
+    "strconv"
 
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
@@ -19,172 +19,9 @@ import (
 )
 
 
+
 // StorageEpochFilename is the default file name used to store the latest StorageEpoch
 const StorageEpochFilename = "StorageEpoch.json"
-
-// EntryVersionMask is a bit mask on EntryCrypt.CryptInfo to extract pdi.EntryVersion
-//const EntryVersionMask = 0xFF
-
-/*
-// GetEntryVersion returns the version of this entry (should match EntryVersion1)
-func (entry *EntryCrypt) GetEntryVersion() EntryVersion {
-	return EntryVersion(entry.CryptInfo & EntryVersionMask)
-}
-
-// ComputeDigest hashes all fields of psi.EntryCrypt (except .EntrySig)
-func (entry *EntryCrypt) ComputeDigest() []byte {
-
-	hw := sha3.NewLegacyKeccak256()
-
-	var scrap [16]byte
-
-	pos := 0
-	pos = encodeVarintPdi(scrap[:], pos, entry.CryptInfo)
-
-	hw.Write(scrap[:pos])
-	hw.Write(entry.CommunityPubKey)
-	hw.Write(entry.InfoCrypt)
-	hw.Write(entry.BodyCrypt)
-
-	return hw.Sum(nil)
-
-}
-
-// MarshalToBlock marshals this EntryCrypt into a generic plan.Block
-func (entry *EntryCrypt) MarshalToBlock() *plan.Block {
-
-    block := &plan.Block{
-        CodecCode: plan.CodecCodeForEntryCrypt,
-    }
-
-    var err error
-    block.Content, err = entry.Marshal()
-    if err != nil {
-        panic(err)
-    }
-
-    return block
-}*/
-
-/*****************************************************
-** Utils
-**/
-
-/*
-// MarshalForOptionalBody marshals txn so that it can be deserializaed via UnmarshalWithOptionalBody().
-func (txn *StorageTxn) MarshalForOptionalBody(dAtA []byte) ([]byte, error) {
-
-	// Store the body in a different segment so can load it optionally
-	body := txn.Body
-	txn.Body = nil
-
-	// Make a scrap buffer big enough to hold StorageTxn (w/o a body) and the body  -- TODO: use a buffer pool
-	headerSz := txn.Size()
-	bodySz := body.Size()
-
-	szNeeded := headerSz + bodySz + 32
-	szAvail := cap(dAtA)
-	if szAvail < szNeeded {
-		dAtA = make([]byte, szNeeded+32000)
-	} else {
-		dAtA = dAtA[:szAvail]
-	}
-
-	var err error
-
-	// Marshal the header, prepend the header byte length
-	headerSz, err = txn.MarshalTo(dAtA[2:])
-	dAtA[0] = byte((headerSz >> 1) & 0xFF)
-	dAtA[1] = byte((headerSz) & 0xFF)
-	if err == nil {
-		bodySz, err = body.MarshalTo(dAtA[2+headerSz:])
-		finalSz := 2 + headerSz + bodySz
-		if finalSz < len(dAtA) {
-			dAtA = dAtA[:finalSz]
-		} else {
-			err = plan.Error(err, plan.FailedToMarshal, "StorageTxn.MarshalWithOptionalBody() assert failed")
-		}
-	}
-
-	return dAtA, err
-}
-
-// UnmarshalWithOptionalBody allows the caller to not unmarshal the body, saving on allocation and cycles
-func (txn *StorageTxn) UnmarshalWithOptionalBody(dAtA []byte, inUnmarshalBody bool) error {
-	dataLen := len(dAtA)
-	if dataLen < 8 {
-		return plan.Error(nil, plan.FailedToUnmarshal, "StorageTxn.UnmarshalWithOptionalBody() failed")
-	}
-
-	var headerSz uint
-	headerSz = uint(dAtA[0]<<1) | uint(dAtA[1])
-	err := txn.Unmarshal(dAtA[2 : 2+headerSz])
-	if err != nil {
-		return err
-	}
-	if inUnmarshalBody {
-		if txn.Body == nil {
-			txn.Body = &plan.Block{}
-		}
-		err = txn.Body.Unmarshal(dAtA[2+headerSz:])
-	}
-
-	return err
-
-}
-
-
-
-// UnmarshalEntries unmarshals txn.Body (created via MarshalEntries) into the EntryCrypts contained within it 
-func (txn *StorageTxn) UnmarshalEntries(ioBatch []*EntryCrypt) ([]*EntryCrypt, error) {
-
-    var err error
-
-    N := len(txn.Body.Subs)
-
-    for i := -1; i < N && err != nil ; i++ {
-
-        var block *plan.Block
-        if i == -1 {
-            block = txn.Body
-        } else {
-            block = txn.Body.Subs[i]
-        }
-        if block.CodecCode == plan.CodecCodeForEntryCrypt {
-            entry := &EntryCrypt{}
-            err = entry.Unmarshal(block.Content)
-            if err != nil {
-                break
-            }
-            ioBatch = append(ioBatch, entry)
-        }
-    }
-
-    return ioBatch, err
-}
-
-
-// MarshalEntries marshals the given batch of entries into a single plan.Block
-func MarshalEntries(inBatch []*EntryCrypt) *plan.Block {
-    N := len(inBatch)
-
-    var head *plan.Block
-
-    if N == 1 {
-        head = inBatch[0].MarshalToBlock()
-    } else if N > 1 {
-        
-        head := &plan.Block{
-            Subs: make([]*plan.Block, N),
-        }
-        for i := range inBatch {
-            head.Subs[i] = inBatch[i].MarshalToBlock()
-        }
-    }
-
-    return head
-}
-*/
 
 // WriteVarInt appends the given integer in variable length format
 func WriteVarInt(dAtA []byte, offset int, v uint64) int {
@@ -255,54 +92,6 @@ func ReadVarBuf(dAtA []byte, offset int) (int, []byte, error) {
 ** Support
 **/
 
-/*
-var storageMsgPool = sync.Pool{
-    New: func() interface{} {
-        return new(StorageMsg)
-    },
-}
-
-// RecycleStorageMsg effectively deallocates the item and makes it available for reuse
-func RecycleStorageMsg(inMsg *StorageMsg) {
-    for _, txn := range inMsg.Txns {
-        txn.Body = nil  // TODO: recycle plan.Blocks too
-    }
-    storageMsgPool.Put(inMsg)
-}
-
-// NewStorageMsg allocates a new StorageMsg
-func NewStorageMsg() *StorageMsg {
-
-    msg := storageMsgPool.Get().(*StorageMsg)
-    if msg == nil {
-        msg = &StorageMsg{}
-    } else {
-        msg.Txns = msg.Txns[:0]
-        msg.AlertCode = 0
-        msg.AlertMsg = ""
-    }
-
-    return msg
-}
-
-// NewStorageAlert creates a new storage msg with the given alert params
-func NewStorageAlert(
-    inAlertCode AlertCode, 
-    inAlertMsg string,
-    ) *StorageMsg {
-
-    msg := NewStorageMsg()
-    msg.AlertCode = inAlertCode
-    msg.AlertMsg = inAlertMsg
-
-    return msg 
-
-}
-
-
-*/
-
-
 
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
@@ -341,7 +130,7 @@ func SegmentIntoTxns(
 		seg.SegTotal = uint32(N)
 	}
 
-    plan.Assert(bytesRemain == 0, "assertion failed in SegmentIntoTxns {N:%d, bytesRemain:%d}", N, bytesRemain)
+    plan.Assert(bytesRemain == 0, "bytesRemain != 0")
 
 	return segs, nil
 
@@ -370,17 +159,17 @@ const (
     // This is also chosen to be a multiple of 3 such that the encoded txn hashname falls on base64 digit boundaries. 
     URIDTxnIDSz = 27
 
-    // URIDBinarySz is the total bytesize of a decoded URID.
+    // URIDSz is the total bytesize of a decoded URID.
     // URID aka "Universal Transaction Identifier", an ASCII string that encodes 33 bytes using pdi.Base64: 
     //     6 bytes (rightmost BIG-endian bytes of TimeSealed) 
     //  + 27 bytes (rightmost-bytes of hash digest of this txn) ==> *33* bytes (total) ==> *44* chars (pdi.Base64 encoded)
-    URIDBinarySz = URIDTxnIDSz + URIDTimestampSz
+    URIDSz = URIDTxnIDSz + URIDTimestampSz
 
     // URIDTimestampStrLen is the base64 char len of an encoded timestamp.  To the right of this position, the txn hashname begins.
     URIDTimestampStrLen = 8 * URIDTimestampSz / 6
 
     // URIDStrLen is the ASCII char length of an encoded URID (44 chars)
-    URIDStrLen = 8 * URIDBinarySz / 6
+    URIDStrLen = 8 * URIDSz / 6
 
 )
 
@@ -400,7 +189,7 @@ func (utid URID) String() string {
     var str [URIDStrLen]byte
 
     sz := len(utid)
-    if sz == URIDBinarySz {
+    if sz == URIDSz {
         sz = URIDStrLen
     } else if sz == URIDTimestampSz {
         sz = URIDTimestampStrLen
@@ -410,6 +199,20 @@ func (utid URID) String() string {
         
     Base64.Encode(str[:], utid)
 	return string(str[:sz])  
+}
+
+
+// ExtractTime extracts the time index bourne by this URID
+func ExtractTime(inURID []byte) int64 {
+
+    t := int64(inURID[0]) 
+    t = (t << 8) | int64(inURID[1]) 
+    t = (t << 8) | int64(inURID[2]) 
+    t = (t << 8) | int64(inURID[3]) 
+    t = (t << 8) | int64(inURID[4]) 
+    t = (t << 8) | int64(inURID[5]) 
+
+    return t
 }
 
 
@@ -514,7 +317,6 @@ func (epoch *CommunityEpoch) CommunityKeyRef() ski.KeyRef {
 }
 
 
-
 // FormGenesisKeyringName returns the name of the keyring name that stores keys created during community genesis.
 func (epoch *CommunityEpoch) FormGenesisKeyringName() []byte {
 
@@ -526,8 +328,6 @@ func (epoch *CommunityEpoch) FormGenesisKeyringName() []byte {
     return krName
 
 }
-
-
 
 // RegenMemberKeys generates new keys for the given member.
 func (epoch *MemberEpoch) RegenMemberKeys(
@@ -562,42 +362,10 @@ func (epoch *MemberEpoch) RegenMemberKeys(
 
 
 
-
-
-
-// FormMemberStrID returns a Base64 representation of this MemberID
+// FormMemberStrID returns a base 10 string of the member ID associated with this MemeberEpoch
 func (epoch *MemberEpoch) FormMemberStrID() string {
-
-    var raw [plan.MemberIDSz]byte
-    
-    memberID := epoch.MemberID
-
-    for i := 0; i < plan.MemberIDSz; i++ {
-        raw[i] = byte(memberID)
-        memberID >>= 8
-    }
-    
-    return Base64.EncodeToString(raw[:])
+    return strconv.FormatUint(uint64(epoch.MemberID), 10)
 }
-
-
-
-
-
-// GenerateNewMemberID generates a random member ID
-func (epoch *MemberEpoch) GenerateNewMemberID() {
-
-    memberID := uint64(0)
-  
-    var buf [plan.MemberIDSz]byte
-    crand.Read(buf[:])
-    for i := 0; i < 8; i++ {
-        memberID = (memberID << 8) | uint64(buf[i])
-    }
-
-    epoch.MemberID = memberID
-}
-
 
 
 
@@ -624,7 +392,6 @@ func (epoch *MemberEpoch) FormSigningKeyringName(
     return krName
 }
 
-
 // FormSendingKeyringName forms the sending keyring name (ski.Keyring.KeyringName) for this member.
 func (epoch *MemberEpoch) FormSendingKeyringName(
     inCommunityID []byte,
@@ -634,4 +401,35 @@ func (epoch *MemberEpoch) FormSendingKeyringName(
     krName[0] = byte(krName[0] + 1)
 
     return krName
+}
+
+// GetTID returns a slice to requested EntryTID
+func (entry *EntryInfo) GetTID(inID EntryTID) plan.TID {
+    pos := inID * plan.TIDSz
+    return entry.TIDs[pos:pos+plan.TIDSz]
+}
+
+// EntryID returns the entry TID for this entry.
+//
+// Note: if this entry is in the process of being authored/formed, the hash portion of the TID is undefined since
+// the hashname of the entry is not yet known.
+func (entry *EntryInfo) EntryID() plan.TID {
+    return entry.GetTID(EntryTID_EntryID)
+}
+
+// TimeAuthoredFS returns a unix timestamp (in 1<<16 seconds) of when is entry was authored.
+func (entry *EntryInfo) TimeAuthoredFS() plan.TimeFS {
+    entryTID := entry.GetTID(EntryTID_EntryID)
+    return entryTID.ExtractTimeFS()
+}
+
+// TimeAuthored returns a unix timestamp (in seconds) of when is entry was authored.
+func (entry *EntryInfo) TimeAuthored() int64 {
+    entryTID := entry.GetTID(EntryTID_EntryID)
+    return entryTID.ExtractTime()
+}
+
+// IsChannelGenesis returns true if this channel epoch implies the creation/genesis of a new channel
+func (epoch *ChannelEpoch) IsChannelGenesis() bool {
+    return len(epoch.PrevEpochTID) == 0;
 }
