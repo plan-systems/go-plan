@@ -27,7 +27,7 @@ type Action func(inParam interface{}, inErr error)
 
 const (
 
-	// CommunityIDSz is the number of bytes PLAN uses for a community ID.
+	// CommunityIDSz is the number of bytes used to to identify a PLAN community ID.
 	// Background on probability of hash collision: http://preshing.com/20110504/hash-collision-probabilities/
 	// Should this be smaller or larger?  Philosophically, this value expresses the size of the hash universe,
 	//    where nodes can "safely" generate hashnames alongside peers.  2^192 outta be enough for anybody.
@@ -37,8 +37,20 @@ const (
 	// It's "modest-sized" since a newly generated keys must pass collision checks before being put into use.
 	SymmetricPubKeySz = 16
 
-	// ChannelIDSz specifies the byte size of a ChannelID
-    ChannelIDSz = 8
+	// WorkstationIDSz is the number of bytes used to to identify a PLAN workstation ID.
+    WorkstationIDSz = 16
+
+	// ChIDSz specifies the byte size of a PLAN channel ID
+    ChIDSz = 18
+
+    // TIDSz is the number of bytes for a TID.
+    // The basis of 28 is that, minus the 8 timestamp bytes, a 20 hash bytes is as strong as Ethereum and Bitcoin's address system.
+    //
+    // Byte layout is designed so that TIDs are sortable by an embedded timestamp:
+    //    0:6   - Standard UTC timestamp in unix seconds (BE)
+    //    6:8   - Timestamp fraction (BE)
+    //    8:28  - Signature/hash bytes
+    TIDSz = 28
 
     // MemberIDSz is the byte size of a MemberID
     MemberIDSz = 4
@@ -76,40 +88,21 @@ type StorageID uint16
 //    scheme makes the member ID recoverable from human memory, even if there is no network access.
 type MemberAlias string
 
-// PeerUUID is a peer-generated ID, formed via Multiplex(memberID, memberIssueNum)
-type PeerUUID uint64
 
-// ChannelID identifies a specific PLAN channel where PDI entries are posted to (for a given a community ID).
-type ChannelID PeerUUID
+// TID identifies a specific PLAN channel, channel entry, or anything else labeled via plan.GenerateIID()
+type TID []byte
 
+// TIDBlob is a fixed-length buffer that contains a TID
+type TIDBlob [TIDSz]byte
 
-const (
+// ChID identifies a PLAN channel.
+type ChID []byte
 
-    // RootACChannelID is the community's root access-level channel, meaning this channel effectively
-	//    specifies which community members are "community admins".  All other channels and access channels
-	//    are ultimately controlled by the community members listed in this root channel.  This means
-	//    the hierarchy of access channels is rooted in this channel.
-	// Note that the parent access channel is set to itself by default.
-	RootACChannelID = ChannelID(1)
-    
-    // MemberRegistryChannelID is the community's master (community-public) member registry.  Each entry specifies a
-	//    each community member's member ID, latest public keys, and member info (e.g. home ChannelID).  This allows each of the
-	//    community's pnodes to verify member signatures and enable the passing of secrets to other members or groups
-	//    via asymmetric encryption. Naturally, this channel is controlled by an access channel that is controlled only
-	//    by community admins and is set to RootAccessChannel by default.  Since each entry in this channel represents
-	//    an official community record (that only a community admin can edit), entries can also contain additional
-	//    information desired that community admins wish (or require) to be publicly available (and unforgeable).
-	// Note how a member's ID can always be remapped to any number of deterministically generated channel IDs.  For
-	//    example, by convention, a member's /plan/member "home channel" is implicitly specified by virtue of knowing
-	//    a member's community member ID (since a community member ID never changes)
-	MemberRegistryChannelID = ChannelID(2)
+// ChIDBlob is a fixed-length buffer that contains a ChID
+type ChIDBlob [ChIDSz]byte
 
-)
 
 var (
-
-
-
 
     // DefaultFileMode is used to express the default mode of file creation.
     DefaultFileMode = os.FileMode(0775)
@@ -122,25 +115,32 @@ var (
     
 )
 
-// Time specifies a second and accompanying nanosecond count.   63 bit second timstamps are used, ensuring that clockflipping
-//     won't occur until the year 292,471,210,648 CE.  I wonder for-profit orgs will still dominate the OS space.
-// Note: if a nanosecond precision is not available or n/a, then the best available precision should be used (or 0).
-type Time struct {
-	UnixSecs int64  `json:"unix"` // UnixSecs is the UTC in seconds elapsed since Jan 1, 1970.  This number can be zero or negative.
-	FracSecs uint16 `json:"frac"` // FracSecs is 16 bit fraction from 0 to 0xFFFF
-}
+// TimeFS is the UTC in 1/1<<16 seconds elapsed since Jan 1, 1970 UTC ("FS" = fractional seconds)   
+//
+// Shifting this right 16 bits will yield stanard Unix time.
+// This means there are 47 bits dedicated for seconds, implying max timestamp of 4.4 million years.  
+//
+// Note: if a precision deeper than one seconds is not available or n/a, then the best available precision should be used (or 0).
+type TimeFS int64
 
-// Now returns PLAN's standard time struct set to the time index of the present moment.
-func Now() Time {
+// NowFS returns the current time (a standard unix UTC timestamp in 1/1<<16 seconds)
+func NowFS() TimeFS {
 	t := time.Now()
 
-	return Time{
-		UnixSecs: t.Unix(),
-		FracSecs: uint16((2199 * (uint32(t.Nanosecond()) >> 10)) >> 15),
-	}
+    timeFS := t.Unix() << 16
+    frac := uint16((2199 * (uint32(t.Nanosecond()) >> 10)) >> 15)
+    return TimeFS(timeFS | int64(frac))
+}
+
+// Now returns the current time as a standard unix UTC timestamp.
+func Now() int64 {
+	return time.Now().Unix()
 }
 
 const (
+
+    // TimeFSMax is the largest possible TimeFS value
+    TimeFSMax = TimeFS(DistantFuture)
 
 	// DistantFuture is a const used to express the "distant future" in unix time.
 	DistantFuture int64 = (1 << 63) - 1
@@ -148,8 +148,3 @@ const (
 	// DistantPast is a const used to express the "distant past" in unix time.
 	DistantPast int64 = -DistantFuture
 )
-
-// Unplex decomposes a ChannelID into the orginator member ID and issue ID.
-func (chID ChannelID) Unplex() (memberID, issueID uint32) {
-    return Unplex(uint64(chID))
-}

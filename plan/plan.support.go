@@ -9,12 +9,146 @@ import (
     "strings"
     "encoding/hex"
     "sync"
-    //"math/big"
+
+    //crand "crypto/rand" 
 
     log "github.com/sirupsen/logrus"
 
     //"github.com/ethereum/go-ethereum/common/math"
 )
+
+// Blob is a convenience function that forms a ChID byte array from a ChID byte slice. 
+func (chID ChID) Blob() ChIDBlob {
+
+    var blob ChIDBlob
+    copy(blob[:], chID)
+
+    return blob
+}
+
+
+func (chID ChID) String() string {
+    return Base64.EncodeToString(chID)
+}
+
+// AssignFromTID copies from the right-part of the given TID
+func (chID ChID) AssignFromTID(tid TID) {
+    copy(chID, tid[TIDSz - ChIDSz:])
+}
+
+
+// Blob is a convenience function that forms a TID byte array from a TID byte slice. 
+func (tid TID) Blob() TIDBlob {
+
+    var blob TIDBlob
+    copy(blob[:], tid)
+
+    return blob
+}
+
+func (tid TID) String() string {
+    return Base64.EncodeToString(tid)
+}
+
+// SetTimeAndHash writes the given timestamp and the right-most part of inSig into this TID.
+//
+// Byte layout is designed so that TIDs can be sorted by its leading embedded timestamp:
+//    0:6   - Standard UTC timestamp in unix seconds (BE)
+//    6:8   - Timestamp fraction (BE)
+//    8:27  - Hash bytes 
+func (tid TID) SetTimeAndHash(inTime TimeFS, inHash []byte) {
+
+    tid.SetTimeFS(inTime)
+    tid.SetHash(inHash)
+}
+
+// SetHash set the sig/hash portion of this ID
+func (tid TID) SetHash(inHash []byte) {
+
+    const TIDHashSz = TIDSz - 8
+    pos := len(inHash) - TIDHashSz
+    if pos >= 0 {
+        copy(tid[8:], inHash[pos:])
+    } else {
+        for i := 8; i < TIDSz; i++ {
+            tid[i] = 0
+        }
+    }
+}
+
+// SetTimeFS writes the given timestamp into this TIS
+func (tid TID) SetTimeFS(inTime TimeFS) {
+
+    tid[0] = byte(inTime >> 56)
+    tid[1] = byte(inTime >> 48)
+    tid[2] = byte(inTime >> 40)
+    tid[3] = byte(inTime >> 32)
+    tid[4] = byte(inTime >> 24)
+    tid[5] = byte(inTime >> 16)
+    tid[6] = byte(inTime >>  8)
+    tid[7] = byte(inTime)
+
+}
+
+// ExtractTimeFS returns the unix timestamp embedded in this TID (a unix timestamp in 1<<16 seconds UTC)
+func (tid TID) ExtractTimeFS() TimeFS {
+
+    t := int64(tid[0]) 
+    t = (t << 8) | int64(tid[1]) 
+    t = (t << 8) | int64(tid[2]) 
+    t = (t << 8) | int64(tid[3]) 
+    t = (t << 8) | int64(tid[4]) 
+    t = (t << 8) | int64(tid[5]) 
+    t = (t << 8) | int64(tid[6]) 
+    t = (t << 8) | int64(tid[7])
+
+    return TimeFS(t)
+}
+
+
+// ExtractTime returns the unix timestamp embedded in this TID (a unix timestamp in seconds UTC)
+func (tid TID) ExtractTime() int64 {
+
+    t := int64(tid[0]) 
+    t = (t << 8) | int64(tid[1]) 
+    t = (t << 8) | int64(tid[2]) 
+    t = (t << 8) | int64(tid[3]) 
+    t = (t << 8) | int64(tid[4]) 
+    t = (t << 8) | int64(tid[5]) 
+
+    return t
+}
+
+// SelectEarlier looks in inTime and if it is later than the time embedded in ioURID, then this function has no effect and returns false.
+// If inTime is earlier than the embedded time, then ioURID is initialized to inTime (and zeroed out) and returns true.
+func (tid TID) SelectEarlier(inTime TimeFS) bool {
+
+    t := tid.ExtractTimeFS()
+    
+    // Timestamp value of 0 is reserved and should only reflect an invalid/uninitialized TID.
+    if t < 1 {
+        inTime = TimeFS(1)
+    }
+
+    if inTime < t || t < 1 {
+        tid[0] = byte(inTime >> 56)
+        tid[1] = byte(inTime >> 48)
+        tid[2] = byte(inTime >> 40)
+        tid[3] = byte(inTime >> 32)
+        tid[4] = byte(inTime >> 24)
+        tid[5] = byte(inTime >> 16)
+        tid[6] = byte(inTime >>  8)
+        tid[7] = byte(inTime)
+
+        for i := 8; i < len(tid); i++ {
+            tid[i] = 0
+        }
+        return true
+    }
+
+    return false
+}
+
 
 // Flow is a service helper.
 type Flow struct {
@@ -101,7 +235,7 @@ func (F *Flow) CheckStatus() error {
 }
 
 
-// IsRunning returns true if this Context has not shutdown or shutting down.
+// IsRunning returns true if this Context has not yet been shutdown.
 //
 // THREADSAFE
 func (F *Flow) IsRunning() bool {
@@ -165,7 +299,7 @@ func (F *Flow) Shutdown(
 // FilterFault is called when the given error has occurred an represents an unexpected fault that alone doesn't
 // justify an emergency condition. (e.g. a db error while accessing a record).  Call this on unexpected errors.
 //
-// if inErr == nil, this is equivalent to calling CheckStatus()
+// if inErr is nil, this is equivalent to calling CheckStatus()
 //
 // Returns non-nil if the caller should abort whatever it's doing and anticipate a shutdown.
 //
@@ -227,7 +361,7 @@ func GetChannelID(in []byte) ChannelID {
 */
 
 
-
+/*
 
 // Multiplex interleaves the bits of A and B such that a composite uint64 is formed.
 //
@@ -275,7 +409,7 @@ func Unplex(x uint64) (uint32, uint32) {
     return A, B
 }
 
-
+*/
 
 
 
