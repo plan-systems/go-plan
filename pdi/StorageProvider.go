@@ -110,8 +110,8 @@ func (epoch *StorageEpoch) MemberRegistry() plan.ChID {
     return epoch.CommunityChID(CommunityChID_MemberRegistry)
 }
 
-// CommunityEpochHistory returns the ChID of the community's CommunityEpoch history channel
-func (epoch *StorageEpoch) CommunityEpochHistory() plan.ChID {
+// CommunityEpochs returns the ChID of the community's CommunityEpoch history channel
+func (epoch *StorageEpoch) CommunityEpochs() plan.ChID {
     return epoch.CommunityChID(CommunityChID_EpochHistory)
 }
 
