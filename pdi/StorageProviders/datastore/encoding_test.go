@@ -30,7 +30,7 @@ func TestVarAppendBuf(t *testing.T) {
 
 	gTesting = t
 
-	seed := plan.Now().UnixSecs
+	seed := plan.Now()
 	gTesting.Logf("Using seed: %d", seed)
 	rand.Seed(seed)
 
@@ -137,7 +137,7 @@ func TestTxnEncoding(t *testing.T) {
 
 func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 
-    seed := plan.Now().UnixSecs
+    seed := plan.Now()
     //seed = int64(1550730342)
     gTesting.Logf("using seed %d", seed)
 
@@ -166,7 +166,7 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
         collator := pdi.NewTxnCollater()
 
 		for i := 0; i < 1000; i++ {
-            testTime := plan.Now().UnixSecs
+            testTime := plan.Now()
 
 			payloadLen := int(1 + rand.Int31n(int32(stEpoch.TxnMaxSize) * 25))
 

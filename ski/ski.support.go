@@ -584,7 +584,7 @@ func (tome *KeyTome) GenerateFork(
 
 	tome.Rev++
 
-	timeCreated := plan.Now().UnixSecs
+	timeCreated := plan.Now()
 
 	var kit *CryptoKit
 	var err error

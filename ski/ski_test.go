@@ -23,7 +23,7 @@ func TestKeyTome(t *testing.T) {
 
     gTesting = t
 
-    seed := plan.Now().UnixSecs
+    seed := plan.Now()
     seed = int64(1550730342)
     gTesting.Logf("using seed %d", seed)
 
