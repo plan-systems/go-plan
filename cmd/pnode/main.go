@@ -4,7 +4,6 @@ package main
 import (
     //"fmt"
     "flag"
-    "io/ioutil"
     "os"
 
     log "github.com/sirupsen/logrus"
@@ -19,7 +18,7 @@ import (
 	//_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
     //"encoding/hex"
 
-    "github.com/plan-systems/go-plan/repo"
+    //"github.com/plan-systems/go-plan/repo"
 
     "github.com/plan-systems/go-plan/plan"
     //"github.com/plan-systems/go-plan/ski"
@@ -34,6 +33,8 @@ import (
 
     //"github.com/plan-systems/go-plan/ski/Providers/filesys"
 
+    //github.com/dgraph-io/badger"
+
 )
 
 
@@ -41,9 +42,7 @@ func main() {
 
     basePath    := flag.String( "path",         "",         "Directory for all files associated with this repo" )
     init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh repo" )
-    seed        := flag.String( "seed",         "",         "Reads the given member invite and reflates repo and account")
-
-
+    //seed        := flag.String( "seed",         "",         "Reads the given member invite and reflates repo and account")
 
     flag.Parse()
 
@@ -52,26 +51,11 @@ func main() {
         log.Fatal(err)
     }
 
-    // Seed a new repo?
-    if len(*seed) > 0 {
-        buf, err := ioutil.ReadFile(*seed)
-        if err != nil {
-            log.Fatal(err)
-        }
-
-        seed := &repo.MemberSeed{}
-        if err = seed.Unmarshal(buf); err != nil {
-            log.Fatal(err)
-        }
-
-        if err = pn.SeedRepo(seed.RepoSeed); err != nil {
-            log.WithError(err).Fatalf("seed failed from %v", *seed)
-        }
-    }
-
     {
         intr, intrCtx := plan.SetupInterruptHandler(context.Background())
         defer intr.Close()
+
+        //intrCtx, _ := context.WithTimeout(context.Background(), 10 * time.Second)
         
         pnCtx, err := pn.Startup(intrCtx)
         if err != nil {
