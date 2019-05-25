@@ -150,7 +150,9 @@ type CommunityRepo struct {
 
 
 
-// NewCommunityRepo creates a CommunityRepo for use
+// NewCommunityRepo creates a CommunityRepo for use.
+//
+// If inSeed is set, this repo is being instantiated for the first time
 func NewCommunityRepo(
     inHomePath string,
     inSeed *RepoSeed,
@@ -201,6 +203,12 @@ func NewCommunityRepo(
 
     return CR, err
 }
+
+func (CR *CommunityRepo) doChannelGenesis() {
+
+
+}
+
 
 
 func (CR *CommunityRepo) LoadGenesisSeed(inSeedPathname string) error {
@@ -313,9 +321,6 @@ func (CR *CommunityRepo) onInternalStartup() error {
         CR.chMgr.flow.Shutdown(CR.flow.ShutdownReason)
 
         CR.flushState()
-
-        // TODO: shutdown channel subsystem here
-        {}
 
         CR.txnDB.Close()
         CR.txnDB = nil
@@ -997,17 +1002,25 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
 
     eip.timeStart = plan.Now()
+    var err error
+
+    communityEpoch := CR.FetchCommunityEpoch(eip.EntryCrypt.CommunityEpochID)
+    
+    if communityEpoch == nil {
+        return plan.Error(nil, plan.CommunityEpochNotFound, "community epoch not found")
+    }
 
     // STEP 1 -- Decrypt the entry header and body using the cited community key ID.
     //var decryptOut *ski.CryptOpOut 
-    decryptOut, err := CR.communitySKI.DoCryptOp(&ski.CryptOpArgs{
+    decryptOut, cryptErr := CR.communitySKI.DoCryptOp(&ski.CryptOpArgs{
         CryptOp: ski.CryptOp_DECRYPT_SYM,
         OpKey: &ski.KeyRef{
             KeyringName: CR.CommunityKeyringName,
-            PubKey: eip.EntryCrypt.CommunityPubKey,
+            PubKey: communityEpoch.KeyInfo.PubKey,
         },
         BufIn: eip.EntryCrypt.PackedEntry,
     })
+    err = cryptErr
     if plan.IsError(err, plan.KeyringNotFound, plan.KeyEntryNotFound) {
         // TODO: append txn URID onto a list for later processing
         // Status info stored w/ txns:
@@ -1026,13 +1039,10 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         return err
     }
 
-    eip.entry.Body = packingInfo.Body
-
     err = eip.EntryInfo.Unmarshal(packingInfo.Header)
     if err != nil {
         return err
     }
-
 
 
     var scrap [pdi.URIDSz]byte
@@ -1050,40 +1060,36 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future")
     }*/
 
-    /*
-    Every entry has dependencies:
-        - the member epoch that contains the member's signing pub key (member reg channel, entry ID, time index)
-        - */
-
+    // chEntry is our main workhorse structure
     entry := eip.entry
-
     entry.AssignFromDecrytedEntry(&eip.EntryInfo, packingInfo.Signer.PubKey)
+    eip.entry.Body = append(eip.entry.Body[:0], packingInfo.Body...)
 
     numTIDs := len(entry.Info.TIDs) / plan.TIDSz
-    if numTIDs < 1 {
+    if numTIDs < int(pdi.EntryTID_NormalNumTIDs) {
         entry.ThrowMalformed(plan.Error(nil, plan.ChEntryIsMalformed, "entry missing required TIDs"))
-
     } else {
 
         // The entry ID's latter bytes are rightmost bytes of the entry hashname.
         entry.Info.EntryID().SetHash(packingInfo.Hash)
-   
-        // If we're lacking the normal entries, the presumption is that this is a genesis entry, in which case we see if it is.
-        if entry.Info.RequiresGenesisAuthority() {
+    }
 
-            found := false
-            for _, URID := range CR.GenesisSeed.StorageEpoch.GenesisURIDs {
-                if bytes.Equal(URID, entryURID) {
-                    entry.AddFlags(ChEntryFlag_GENESIS_ENTRY_VERIFIED)
-                    found = true
-                    break
-                }
+    // If this entry appears to be a genesis entry, we def want to verify that.  :)
+    isGenesisEntry := len(eip.EntryCrypt.CommunityEpochID) == 0
+    if entry.IsWellFormed() && isGenesisEntry {
+
+        found := false
+        for _, URID := range CR.GenesisSeed.StorageEpoch.GenesisURIDs {
+            if bytes.Equal(URID, entryURID) {
+                entry.AddFlags(ChEntryFlag_GENESIS_ENTRY_VERIFIED)
+                found = true
+                break
             }
-            if ! found {
-                entry.ThrowMalformed(
-                    plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryURID),
-                )
-            }
+        }
+        if ! found {
+            entry.ThrowMalformed(
+                plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryURID),
+            )
         }
     }
 
@@ -1159,8 +1165,13 @@ func (CR *CommunityRepo) CommitEntryTxns(inEntryURID []byte, inTxns []pdi.RawTxn
 }
 
 // LatestCommunityEpoch -- see interface MemberHost
-func (CR *CommunityRepo) LatestCommunityEpoch() pdi.CommunityEpoch {
-    return *CR.GenesisSeed.CommunityEpoch       // TODO: fix me when community epochs are implemented
+func (CR *CommunityRepo) LatestCommunityEpoch() *pdi.CommunityEpoch {
+    chCE := CR.chMgr.FetchCommunityEpochsChannel()
+    if chCE != nil {
+        return chCE.LatestCommunityEpoch()
+    } 
+
+    return CR.GenesisSeed.CommunityEpoch
 }
 
 // LatestStorageEpoch -- see interface MemberHost
@@ -1173,6 +1184,20 @@ func (CR *CommunityRepo) OnSessionEnded(inSession *MemberSession) {
     CR.MemberSessions.OnSessionEnded(inSession)
 }
 
+
+// FetchCommunityEpoch returns the CommunityEpoch with the matching epoch ID
+func (CR *CommunityRepo) FetchCommunityEpoch(inEpochID []byte) *pdi.CommunityEpoch {
+
+    if len(inEpochID) == plan.TIDSz {
+        chCE := CR.chMgr.FetchCommunityEpochsChannel()
+        if chCE != nil {
+            return chCE.FetchCommunityEpoch(inEpochID)
+        }
+    }
+
+    // If inEpochID is nil, then the genesis epoch is assumed
+    return CR.GenesisSeed.CommunityEpoch
+}
 
 
 /*

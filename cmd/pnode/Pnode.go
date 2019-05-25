@@ -59,7 +59,7 @@ func (config *PnodeConfig) ApplyDefaults() {
 
     config.DefaultFileMode = plan.DefaultFileMode
     config.GrpcNetworkName = "tcp"
-    config.GrpcNetworkAddr = ":50080"
+    config.GrpcNetworkAddr = ":50081"
     config.Version = 1
 
 }
@@ -252,7 +252,6 @@ func (pn *Pnode) Shutdown(inReason string) {
     pn.flow.Shutdown(inReason)
 
 }
-
 
 
 // seedRepo adds a new repo (if it doesn't already exist)

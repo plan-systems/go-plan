@@ -7,7 +7,7 @@ import (
     //"io/ioutil"
     //"strings"
     "sync"
-    "time"
+    //"time"
     //"sort"
     //"encoding/hex"
     //"encoding/json"
@@ -113,7 +113,7 @@ func (MS *MemberSessions) StartSession(
     // TODO: close inSKI if an error is returned
     var err error
 
-    if len(inSessReq.WorkstationID) > 0 && len(inSessReq.WorkstationID) != plan.CommunityIDSz {
+    if len(inSessReq.WorkstationID) > 0 && len(inSessReq.WorkstationID) != plan.WorkstationIDSz {
         return nil, plan.Error(nil, plan.AssertFailed, "invalid workstation ID")
     }
 
@@ -141,7 +141,7 @@ func (MS *MemberSessions) StartSession(
         PersonalSKI: inSKI,
         WorkstationID: inSessReq.WorkstationID,
         MemberEpoch: *inSessReq.MemberEpoch,
-        CommunityEpoch: MS.Host.LatestCommunityEpoch(),
+        CommunityEpoch: *MS.Host.LatestCommunityEpoch(),
     }
 
     ms.communityKey = ms.CommunityEpoch.CommunityKeyRef()
@@ -191,23 +191,33 @@ type MemberTerminal struct {
 
 */
 
+
+type ChSessionPB struct {
+    Invocation          ChInvocation 
+    Outlet              Repo_OpenChannelSessionServer
+}
+
+
 // MemberHost is a context for a MemberSession to operate wthin.
 type MemberHost interface {
 
     // Returns an encapsulating context
     Context() context.Context
 
-    // Commits the newly authored txn
-    CommitAuthoredTxn(inTxn pdi.RawTxn)
+    // Commits the newly authored entry (as final encoded StorageProvider txns)
+    CommitEntryTxns(inEntryURID []byte, inTxns []pdi.RawTxn)
 
     // Returns the latest community epoch
-    LatestCommunityEpoch() pdi.CommunityEpoch
+    LatestCommunityEpoch() *pdi.CommunityEpoch
 
     // Returns the latest storage epoch.
     LatestStorageEpoch() pdi.StorageEpoch
 
     // The given session is ending
     OnSessionEnded(inSession *MemberSession)
+
+    // Starts a new channel session
+    //OpenChannelSession(inPB ChSessionPB) (*ChSession, error) 
 }
 
 
@@ -262,23 +272,14 @@ type MemberSession struct {
     //communitySKI    ski.Session // TODO
     communityKey    ski.KeyRef
 
-    ChSessions      sync.WaitGroup
+    ChSessionsCount sync.WaitGroup
 
+    ChSessionsMutex sync.RWMutex
+    ChSessionsByID  map[uint32]*ChSession
 
 
 }
 
-
-
-
-func (ms *MemberSession) StartChSession(
-    chID          plan.ChannelID,
-    chAdapterDesc string,
-) (ChSession, error) {
-
-
-    return ChSession{}, nil
-}
 
 
 
@@ -324,17 +325,15 @@ func (ms *MemberSession) onInternalStartup() error {
     go func() {
         for entryIP := range ms.EntriesToCommit {
 
-            txns, err := ms.EncryptAndEncodeEntry(&entryIP.Entry.Info, entryIP.Entry.Body)
+            txns, entryURID, err := ms.EncryptAndEncodeEntry(&entryIP.EntryInfo, entryIP.entry.Body)
             if err != nil {
                 ms.flow.FilterFault(err)
                 continue
             }
 
-            for _, txn := range txns {
-                ms.flow.Log.Infof("encoded    txn %v", ski.BinDesc(txn.URID))
+            ms.flow.Log.Infof("encoded  entry %v", ski.BinDesc(entryURID))
 
-                ms.Host.CommitAuthoredTxn(txn)
-            }
+            ms.Host.CommitEntryTxns(entryURID, txns)
         }
 
         ms.PersonalSKI.EndSession(ms.flow.ShutdownReason)
@@ -349,7 +348,8 @@ func (ms *MemberSession) onInternalStartup() error {
 func (ms *MemberSession) onInternalShutdown() {
 
     // TODO: shutdown all channel activity for this member session
-    ms.ChSessions.Wait()
+    { }
+//ms.ChSessions.Wait()
 
     // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
     if ms.EntriesToCommit != nil {
@@ -434,23 +434,16 @@ func (sess *MemberSession) SignDigest(
 func (ms *MemberSession) EncryptAndEncodeEntry(
     ioInfo *pdi.EntryInfo,
     inBody []byte,
-) ([]pdi.RawTxn, error) {
+) ([]pdi.RawTxn, []byte, error) {
 
     var err error
 
-    if ioInfo.TimeAuthored == 0 {
-        t := plan.Now()
-        ioInfo.TimeAuthored     = t.UnixSecs
-        ioInfo.TimeAuthoredFrac = uint32(t.FracSecs)
-    }
 
-    // TODO: allow multiple entries to be put into a plan.Block
 
-    entryCrypt := pdi.EntryCrypt{
-        CommunityPubKey: ms.communityKey.PubKey,
-    }
+    // TODO: allow multiple entries to be put into a txn?
 
-// TODO: use scrap buf
+
+    // TODO: use scrap buf
     headerBuf, err := ioInfo.Marshal()
 
     // Have the member sign the header
@@ -462,51 +455,122 @@ func (ms *MemberSession) EncryptAndEncodeEntry(
         0,
         &packingInfo,
     )
+
+    entryCrypt := pdi.EntryCrypt{
+        CommunityEpochID: ms.CommunityEpoch.EpochTID,
+    }
     entryCrypt.PackedEntry, err = ms.CommunityEncrypt(packingInfo.SignedBuf)
 
-// TODO: use scrap buf
+    // TODO: use scrap buf
     entryBuf, err := entryCrypt.Marshal()
 
-    var scrap [pdi.URIDBinarySz]byte
-    entryURID := pdi.URIDFromInfo(scrap[:], ioInfo.TimeAuthored, packingInfo.Hash)
+    // Should the txn timestamp be the entry author time or should it be its own time?  
+    timeAuthored := ioInfo.TimeAuthored()
+
+    var scrap [pdi.URIDSz]byte
+    entryURID := pdi.URIDFromInfo(scrap[:], timeAuthored, packingInfo.Hash)
     txns, err := ms.TxnEncoder.EncodeToTxns(
         entryBuf,
         entryURID,
         plan.Encoding_Pb_EntryCrypt,
         nil,
-        ioInfo.TimeAuthored,
+        timeAuthored,
     )
 
     if err != nil {
-        return nil, err
+        return nil, nil, err
     }
+
+    // With the entry sealed, we can now form its TID
+    ioInfo.EntryID().SetHash(packingInfo.Hash)
     
-    return txns, nil
+    return txns, entryURID, nil
+}
+
+
+
+// CheckStatus -- see Flow.CheckStatus()
+func (ms *MemberSession) CheckStatus() error {
+    return ms.flow.CheckStatus()
 }
 
 
 
 
-var gTestBuf = "May PLAN empower organizations and individuals, and may it be an instrument of productivity and self-organization."
+// OpenChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
+func (ms *MemberSession) OpenChannelSession(
+    inInvocation *ChInvocation, 
+    inOutlet Repo_OpenChannelSessionServer,
+) (*ChSession, error) {
 
-func (ms *MemberSession) GetItWorking() {
-
-    for i := 0; i < 100 && ms.flow.IsRunning(); i++ {
-
-        cheese := fmt.Sprintf("#%d: %s", i, gTestBuf)
-
-
-        ms.EntriesToCommit <- &entryIP{
-            Entry: DecryptedEntry{
-                Info: pdi.EntryInfo{
-                    EntryOp: pdi.EntryOp_POST_CONTENT,
-                    ChannelID: 123,
-                    AuthorMemberID: ms.MemberEpoch.MemberID,
-                    AuthorMemberEpoch: ms.MemberEpoch.EpochNum },
-                Body: []byte(cheese),
-            },
-        }
-        
-        time.Sleep(10 * time.Second)
+    CR, _ := ms.Host.(*CommunityRepo)
+    if CR == nil {
+        return nil, plan.Error(nil, plan.AssertFailed, "expected *CommunityRepo")
     }
+
+    chSession, err := CR.chMgr.OpenChannelSession(inInvocation, inOutlet)
+    if err != nil {
+        return nil, err
+    }
+
+    ms.ChSessionsMutex.Lock()
+    ms.ChSessionsByID[chSession.SessionID] = chSession
+    ms.ChSessionsMutex.Unlock()
+
+    return chSession, err
+}
+
+
+func (ms *MemberSession) ManageChSessionPipe(inPipe Repo_ChSessionPipeServer) error {
+
+    go func() {
+        for ms.flow.IsRunning() {
+            chMsg, err := inPipe.Recv()
+            if err != nil {
+                break
+            }
+
+            ms.ChSessionsMutex.RLock()
+            cs := ms.ChSessionsByID[chMsg.ChSessionID]
+            ms.ChSessionsMutex.RUnlock()
+
+            if cs == nil {
+                ms.flow.Log.Warnf("channel session %d not found", chMsg.ChSessionID)
+            } else {
+                switch chMsg.Op {
+                    case ChMsgOp_NO_OP:
+                    case ChMsgOp_CLOSE_CHANNEL:
+                        ms.ChSessionsMutex.Lock()
+                        delete(ms.ChSessionsByID, chMsg.ChSessionID)
+                        ms.ChSessionsMutex.Unlock() 
+                        //cs.
+                    default:
+                        cs.msgInbox <- chMsg
+                }
+            }
+        }
+    }()
+
+
+/*
+    go func() {
+        for ms.flow.IsRunning() {
+            chMsg, _ := <- cs.msgOutbox
+
+            if chMsg {
+            chMsg, err := inPipe.Send(content)
+            if err != nil {
+                break
+            }
+
+            ms.ChSessionsMutex.RLock()
+            cs := ms.ChSessionsByID[chMsg.ChSessionID]
+            ms.ChSessionsMutex.RUnlock()
+
+            cs.msgInbox <- chMsg.Content
+        }
+    }()
+*/
+
+    return nil
 }
