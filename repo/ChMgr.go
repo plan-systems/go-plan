@@ -948,6 +948,7 @@ func (cs *ChSession) Startup(
     inInvocation *ChInvocation,
 ) error {
 
+    go func()
     //cs.ChAgent.
     return nil
 } 
