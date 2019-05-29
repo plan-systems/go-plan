@@ -434,15 +434,12 @@ func (pn *Pnode) OpenChannelSession(
         return err
     }
 
-    _, err = ms.OpenChannelSession(inInvocation, io)
+    chSession, err := ms.OpenChannelSession(inInvocation, io)
     if err != nil {
         return err
     }
 
-    ctx := io.Context()
-    <- ctx.Done()
-
-    return nil
+    return <- chSession.OnComplete
 }
 
 // ChSessionPipe -- see service Repo in repo.proto.
