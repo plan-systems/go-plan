@@ -499,7 +499,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
             if err != nil {
                 err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
             } else {
-                St.flow.Log.Infof("committed txn %v", job.Txn.URID)
+                St.flow.Log.Infof("committed txn %v", job.Txn.URIDstring())
             }
 
             batch.Finish(err)
@@ -519,7 +519,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
             }
 
             St.flow.Log.WithFields(log.Fields{
-                "URID": job.Txn.URID,
+                "URID": job.Txn.URIDstring(),
             }).WithError(err).Warn("CommitJob error")
         
             err = perr
@@ -743,8 +743,8 @@ func (St *Store) doScanJob(job ScanJob) error {
             seekKeyBuf [pdi.URIDSz]byte
         )
 
-        seekKey := pdi.URIDFromInfo(seekKeyBuf[:0], job.TxnScan.TimestampStart, nil)
-        stopKey := pdi.URIDFromInfo(stopKeyBuf[:0], job.TxnScan.TimestampStop,  nil)
+        seekKey := pdi.URIDFromInfo(seekKeyBuf[:], job.TxnScan.TimestampStart, nil)
+        stopKey := pdi.URIDFromInfo(stopKeyBuf[:], job.TxnScan.TimestampStop,  nil)
 
         if opts.Reverse {
             scanDir = -1
@@ -754,7 +754,7 @@ func (St *Store) doScanJob(job ScanJob) error {
 
         totalCount := int32(0)
 
-
+        // Loop and send batches of txn IDs and interleave and txn updates.
         for  err == nil && (scanDir != 0 || job.TxnScan.SendTxnUpdates) {
 
             if scanDir != 0 {
@@ -821,6 +821,7 @@ func (St *Store) doScanJob(job ScanJob) error {
 
             }
 
+            // At this point, we've sent a healthy batch of scanned txn IDs and we need to also send any pending txn status updates.
             {
                 batchCount := int32(0)
                 sent := false
