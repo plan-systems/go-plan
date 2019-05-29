@@ -2,6 +2,7 @@ package plan
 
 
 import (
+    "bytes"
     "context"
     "os"
 	"os/user"
@@ -17,6 +18,7 @@ import (
     //"github.com/ethereum/go-ethereum/common/math"
 )
 
+
 // Blob is a convenience function that forms a ChID byte array from a ChID byte slice. 
 func (chID ChID) Blob() ChIDBlob {
 
@@ -26,8 +28,8 @@ func (chID ChID) Blob() ChIDBlob {
     return blob
 }
 
-
-func (chID ChID) String() string {
+// Str returns this channel ID in plan.Base64 form.
+func (chID ChID) Str() string {
     return Base64.EncodeToString(chID)
 }
 
@@ -36,6 +38,18 @@ func (chID ChID) AssignFromTID(tid TID) {
     copy(chID, tid[TIDSz - ChIDSz:])
 }
 
+// IsNil returns true if this TID length is 0 or is equal to NilTID
+func (tid TID) IsNil() bool {
+    if len(tid) != TIDSz {
+        return false
+    }
+
+    if bytes.Equal(tid, NilTID[:]) {
+        return false
+    }
+
+    return true
+}
 
 // Blob is a convenience function that forms a TID byte array from a TID byte slice. 
 func (tid TID) Blob() TIDBlob {
@@ -46,7 +60,8 @@ func (tid TID) Blob() TIDBlob {
     return blob
 }
 
-func (tid TID) String() string {
+// Str returns this TID in plan.Base64 form.
+func (tid TID) Str() string {
     return Base64.EncodeToString(tid)
 }
 
@@ -126,11 +141,11 @@ func (tid TID) SelectEarlier(inTime TimeFS) bool {
     t := tid.ExtractTimeFS()
     
     // Timestamp value of 0 is reserved and should only reflect an invalid/uninitialized TID.
-    if t < 1 {
-        inTime = TimeFS(1)
+    if inTime < 0 {
+        inTime = 0
     }
 
-    if inTime < t || t < 1 {
+    if inTime < t || inTime == 0 {
         tid[0] = byte(inTime >> 56)
         tid[1] = byte(inTime >> 48)
         tid[2] = byte(inTime >> 40)

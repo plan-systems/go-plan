@@ -164,7 +164,7 @@ func (enc *dsEncoder) EncodeToTxns(
             j := len(buf) - hashKit.HashSz - pdi.URIDSz
 			seg.TxnHashname = hashKit.Hasher.Sum(buf[j:j])
             j += hashKit.HashSz
-            seg.URID = pdi.URIDFromInfo(buf[j:j], seg.TimeSealed, seg.TxnHashname)
+            seg.URID = pdi.URIDFromInfo(buf[j:], seg.TimeSealed, seg.TxnHashname)
 
 			if len(seg.TxnHashname) != hashKit.Hasher.Size() {
 				return nil, plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")

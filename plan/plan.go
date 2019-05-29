@@ -40,17 +40,17 @@ const (
 	// WorkstationIDSz is the number of bytes used to to identify a PLAN workstation ID.
     WorkstationIDSz = 16
 
-	// ChIDSz specifies the byte size of a PLAN channel ID
+	// ChIDSz specifies the byte size of a PLAN channel ID (and is the right-most bytes of a TID.
     ChIDSz = 18
 
-    // TIDSz is the number of bytes for a TID.
-    // The basis of 28 is that, minus the 8 timestamp bytes, a 20 hash bytes is as strong as Ethereum and Bitcoin's address system.
+    // TIDSz is the number of bytes for a TID ("time ID")
+    // Having 20 hash bytes is as strong as Ethereum and Bitcoin's address system.
     //
     // Byte layout is designed so that TIDs are sortable by an embedded timestamp:
     //    0:6   - Standard UTC timestamp in unix seconds (BE)
     //    6:8   - Timestamp fraction (BE)
-    //    8:28  - Signature/hash bytes
-    TIDSz = 28
+    //    8:27  - Signature/hash bytes
+    TIDSz = 27
 
     // MemberIDSz is the byte size of a MemberID
     MemberIDSz = 4
@@ -148,3 +148,10 @@ const (
 	// DistantPast is a const used to express the "distant past" in unix time.
 	DistantPast int64 = -DistantFuture
 )
+
+// NilTID is a reserved TID that denotes a void/nil/zero value of a TID
+var NilTID = TIDBlob{
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+}

@@ -7,6 +7,7 @@ import (
     "io"
     "strconv"
 
+
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
 	//"github.com/plan-systems/go-plan/pdi"
@@ -96,7 +97,7 @@ func ReadVarBuf(dAtA []byte, offset int) (int, []byte, error) {
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
 	inPayload         []byte,
-    inPayloadName     []byte,
+    inPayloadID       []byte,
     inPayloadEnc      plan.Encoding, 
 	inMaxSegmentSize uint32,
 ) ([]*TxnInfo, error) {
@@ -117,7 +118,7 @@ func SegmentIntoTxns(
 
 		segs = append(segs, &TxnInfo{
             PayloadEncoding: inPayloadEnc,
-            PayloadName: inPayloadName,
+            PayloadID: inPayloadID,
             SegSz: segSz,
 		})
 
@@ -184,11 +185,23 @@ func Encode64(in []byte) string {
 // The purpose of a URID is that it can be easily compared with others and easily sorted chronologically.
 type URID []byte
 
+// URIDBlob is an array buf version of URID
+type URIDBlob [URIDSz]byte
+
+// Blob is a convenience function that forms a URID byte array from a URID byte slice. 
+func (id URID) Blob() URIDBlob {
+
+    var blob URIDBlob
+    copy(blob[:], id)
+
+    return blob
+}
+
 // String converts a binary URID into its pdi.Base64 ASCII string representation.
-func (utid URID) String() string {
+func (id URID) String() string {
     var str [URIDStrLen]byte
 
-    sz := len(utid)
+    sz := len(id)
     if sz == URIDSz {
         sz = URIDStrLen
     } else if sz == URIDTimestampSz {
@@ -197,7 +210,7 @@ func (utid URID) String() string {
         return ""
     }
         
-    Base64.Encode(str[:], utid)
+    Base64.Encode(str[:], id)
 	return string(str[:sz])  
 }
 
@@ -217,6 +230,8 @@ func ExtractTime(inURID []byte) int64 {
 
 
 // URIDFromInfo returns the binary/base256 form of a binary URID aka "Universal Transaction Identifier"
+//
+// If in is set, the new URID written starting at pos 0 (assuming it has the capacity), otherwise a new buf is allocated.
 func URIDFromInfo(in []byte, inTimestamp int64, inID []byte) URID {
 
     idSz := len(inID)
@@ -231,10 +246,8 @@ func URIDFromInfo(in []byte, inTimestamp int64, inID []byte) URID {
 
     var raw []byte
     {
-        sz := len(in)
-        needed := sz + utidLen
-        if cap(in) >= needed {
-            raw = in[sz:needed]
+        if cap(in) >= utidLen {
+            raw = in[:utidLen]
         } else {
             raw = make([]byte, utidLen)
         }
@@ -403,10 +416,20 @@ func (epoch *MemberEpoch) FormSendingKeyringName(
     return krName
 }
 
+// ChID returns the channel ID for this entry.
+func (entry *EntryInfo) ChID() plan.ChID {
+    return plan.ChID(entry.ChannelID)
+}
+
 // GetTID returns a slice to requested EntryTID
 func (entry *EntryInfo) GetTID(inID EntryTID) plan.TID {
-    pos := inID * plan.TIDSz
-    return entry.TIDs[pos:pos+plan.TIDSz]
+    pos := int(inID) * plan.TIDSz
+    end := pos + plan.TIDSz
+    if end > len(entry.TIDs) {
+        return nil
+    }
+
+    return entry.TIDs[pos:end]
 }
 
 // EntryID returns the entry TID for this entry.
@@ -429,7 +452,28 @@ func (entry *EntryInfo) TimeAuthored() int64 {
     return entryTID.ExtractTime()
 }
 
+// SetTimeAuthored sets the time in this entry's TID, initializing as necessary.
+func (entry *EntryInfo) SetTimeAuthored(inTimeFS plan.TimeFS) {
+    
+    if inTimeFS <= 0 {
+        inTimeFS = plan.NowFS()
+    }
+
+    N := int(EntryTID_NormalNumTIDs) * plan.TIDSz
+    if cap(entry.TIDs) < N {
+        entry.TIDs = make([]byte, N)
+    } else {
+        entry.TIDs = entry.TIDs[:N]
+    }
+    
+    entry.EntryID().SetTimeFS(inTimeFS)
+}
+
 // IsChannelGenesis returns true if this channel epoch implies the creation/genesis of a new channel
 func (epoch *ChannelEpoch) IsChannelGenesis() bool {
     return len(epoch.PrevEpochTID) == 0;
+}
+// HasACC returns true if this ChannelEpoch has a non-nil ACC set
+func (epoch *ChannelEpoch) HasACC() bool {
+    return ! plan.TID(epoch.ACC).IsNil()
 }

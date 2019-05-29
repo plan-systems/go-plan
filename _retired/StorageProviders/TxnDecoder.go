@@ -103,7 +103,7 @@ func (dec *dsDecoder) DecodeRawTxn(
         hashKit.Hasher.Reset()
         hashKit.Hasher.Write(rawTxn[:txnLen])
         txnInfo.TxnHashname = hashKit.Hasher.Sum(miscBuf)
-        txnInfo.URID = pdi.URIDFromInfo(miscBuf[hashKit.HashSz:hashKit.HashSz], txnInfo.TimeSealed, txnInfo.TxnHashname)
+        txnInfo.URID = pdi.URIDFromInfo(miscBuf[hashKit.HashSz:], txnInfo.TimeSealed, txnInfo.TxnHashname)
     }
     
     if dec.theadsafe {
