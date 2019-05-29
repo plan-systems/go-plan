@@ -112,23 +112,35 @@ func (enc *dsEncoder) ResetSigner(
 // EncodeToTxns -- See StorageProviderAgent.EncodeToTxns()
 func (enc *dsEncoder) EncodeToTxns(
 	inPayload         []byte,
-    inPayloadName     []byte,
+    inPayloadID       []byte,
 	inPayloadEnc      plan.Encoding,
 	inTransfers       []*pdi.Transfer,
     timeSealed        int64,
-) ([]pdi.RawTxn, error) {
+    outTxns           *pdi.PayloadTxns,
+) error {
 
 	segs, err := pdi.SegmentIntoTxns(
 		inPayload,
-        inPayloadName,
+        inPayloadID,
 		inPayloadEnc,
 		enc.StorageEpoch.TxnMaxSize,
 	)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	txns := make([]pdi.RawTxn, len(segs))
+
+    outTxns.PayloadEncoding = inPayloadEnc
+    outTxns.PayloadID       = nil
+    outTxns.NewlyAuthored   = true
+
+    payloadIDLen := len(inPayloadID)
+
+    if cap(outTxns.Txns) < len(segs) {
+	    outTxns.Txns = make([]pdi.RawTxn, len(segs))
+    } else {
+	    outTxns.Txns = outTxns.Txns[:len(segs)]
+    }
 
     // Put the transfers in the last segment
     segs[len(segs)-1].Transfers = inTransfers
@@ -153,7 +165,7 @@ func (enc *dsEncoder) EncodeToTxns(
             // Set the rest of the txn fields
             seg.TimeSealed = timeSealed
             if i > 0 {
-                seg.PrevURID = txns[i-1].URID
+                seg.PrevURID = outTxns.Txns[i-1].URID
             }
 
             headerSz := seg.Size()
@@ -163,7 +175,7 @@ func (enc *dsEncoder) EncodeToTxns(
             }
             headerSz, err = seg.MarshalTo(scrap)
             if err != nil {
-                return nil, plan.Error(nil, plan.MarshalFailed, "failed to marshal txn info")
+                return plan.Error(nil, plan.MarshalFailed, "failed to marshal txn info")
             }
 
             packingInfo := ski.PackingInfo{}
@@ -171,15 +183,21 @@ func (enc *dsEncoder) EncodeToTxns(
                 plan.Encoding_TxnPayloadSegment,
                 scrap[:headerSz],
                 inPayload[pos:pos+seg.SegSz],
-                pdi.URIDSz,
+                pdi.URIDSz + payloadIDLen,
                 &packingInfo,
             )
             if err != nil {
-                return nil, err
+                return err
             }
 
-            txns[i].Bytes = packingInfo.SignedBuf
-            txns[i].URID = pdi.URIDFromInfo(packingInfo.Extra, seg.TimeSealed, packingInfo.Hash)
+            outTxns.Txns[i].Bytes = packingInfo.SignedBuf
+            outTxns.Txns[i].URID = pdi.URIDFromInfo(packingInfo.Extra, seg.TimeSealed, packingInfo.Hash)
+
+            // Allocate bytes for the the payload ID so we don't have to do an additional alloc -- but do it only once.
+            if payloadIDLen > 0 {
+                outTxns.PayloadID = append(packingInfo.Extra[pdi.URIDSz:pdi.URIDSz], inPayloadID...)
+                payloadIDLen = 0
+            }
 
             pos += seg.SegSz
         }
@@ -189,11 +207,11 @@ func (enc *dsEncoder) EncodeToTxns(
         }
 
         if int(pos) != len(inPayload) {
-			return nil, plan.Error(nil, plan.AssertFailed, "payload size failed check")
+			return plan.Error(nil, plan.AssertFailed, "payload size failed check")
 		}
 	}
 
-	return txns, nil
+	return nil
 }
 
 
