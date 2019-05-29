@@ -43,11 +43,12 @@ type TxnEncoder interface {
 	// Pre: ResetSigner() must be successfully called.
 	EncodeToTxns(
 		inPayloadData     []byte,
-        inPayloadName     []byte,
+        inPayloadID       []byte,
 		inPayloadEncoding plan.Encoding,
 		inTransfers       []*Transfer,
 		inTimeSealed      int64, // If non-zero, this is used in place of the current time
-	) ([]RawTxn, error)
+        outTxns           *PayloadTxns,
+	) error
 
 	// Generates a txn that destroys the given address from committing any further txns.
 	//EncodeDestruct(from ski.PubKey) (*Txn, error)
