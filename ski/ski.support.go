@@ -1067,7 +1067,7 @@ func (P *PayloadPacker) PackAndSign(
     }
 
     extra := inExtraAlloc + P.hashKit.HashSz
-    bufSz := 2 + hdr.Size() + int(hdr.HeaderSz) + int(hdr.BodySz) + 256 + extra
+    bufSz := 2 + hdr.Size() + int(hdr.HeaderSz) + int(hdr.BodySz) + 100 + extra
     buf := make([]byte, bufSz)
 
     // 1) Marshal the SigHeader and write its length
@@ -1097,6 +1097,7 @@ func (P *PayloadPacker) PackAndSign(
     P.hashKit.Hasher.Write(buf[:pos])
     extraPos := bufSz - extra
     out.Hash = P.hashKit.Hasher.Sum(buf[extraPos:extraPos])
+    out.Extra = buf[extraPos+P.hashKit.HashSz:]
     
     if P.threadsafe {
         P.mutex.Unlock()
@@ -1105,8 +1106,6 @@ func (P *PayloadPacker) PackAndSign(
     if len(out.Hash) != P.hashKit.HashSz {
         return plan.Error(nil, plan.AssertFailed, "hasher returned bad digest length")
     }
-
-    out.Extra = out.Hash[len(out.Hash):]
 
     // 5) Sign the hash
     signOut, err := P.signSession.DoCryptOp(&CryptOpArgs{
