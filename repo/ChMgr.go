@@ -50,10 +50,10 @@ type ChMgr struct {
 
     nextSessionID           uint32
     StorageEpoch            pdi.StorageEpoch               
-
+    CR                      *CommunityRepo
 
     //db                      *badger.DB
-    State                   ChMgrState
+    //State                   ChMgrState
 
     //fsNameEncoding          *base64.Encoding
 
@@ -75,12 +75,15 @@ var (
 
 func NewChMgr(
     inHomeDir string,
+    CR *CommunityRepo,
 ) *ChMgr {
 
     chMgr := &ChMgr{
         chLoaded: make(map[plan.ChIDBlob]ChAgent),
         HomePath: path.Join(inHomeDir, "ChMgr"),
         nextSessionID: 0,
+        StorageEpoch: *CR.GenesisSeed.StorageEpoch,
+        CR: CR,
         //fsNameEncoding: plan.Base64
     }
 
@@ -168,7 +171,6 @@ func (chMgr *ChMgr) onInternalStartup() error {
 
 func (chMgr *ChMgr) onInternalShutdown() {
 
-
     // The assumption at this point is that no new entries are being sent to channels to be merged.
     // This means that we can close each channel's entriesToMerge to proceed with shutdown
     var waitingOn []*ChStore
@@ -208,7 +210,7 @@ func (chMgr *ChMgr) onInternalShutdown() {
         // At this point, nothing is running (so no futher calls to FetchChannel() should/will be made), so now we can fully shutdown each channel.
         shutdown.Add(len(waitingOn))
         for _, chSt := range waitingOn {
-            chMgr.detachChannel(chSt.ChannelID())
+            chMgr.detachChannel(chSt.ChID())
             go chSt.Shutdown(shutdown)
         }
 
@@ -248,8 +250,35 @@ func (chMgr *ChMgr) rebootChannel(
 }
 
 
-
 /*
+var eipPool = sync.Pool{
+    New: func() interface{} {
+		return new(txnSet)
+	},
+}
+
+
+func entryIPAlloc() *entryIP {
+    eip := eipPool.Get().(*entryIP)
+
+    eip.txnsAuthored = false
+    
+    eip.EntryCrypt.CommunityEpoch   = eip.EntryCrypt.CommunityEpoch[:0]
+    eip.EntryCrypt.PackedEntry      = eip.EntryCrypt.PackedEntry[:0]
+
+    eip.EntryInfo.EntryOp = 0
+    eip.EntryInfo.EntrySubOp = 0
+    eip.EntryInfo.ChannelID = eip.EntryInfo.ChannelID[:0]
+    eip.EntryInfo.SupersedesEntryID = eip.EntryInfo.SupersedesEntryID[:0]
+    eip.EntryInfo.Extensions = nil
+
+    return entry
+}
+
+*/
+/*
+
+
 type chEntryFlags int32
 const (
 
@@ -257,23 +286,79 @@ const (
     writeEntryState  
 )
 */
+
+type chEntryOrigin int32
+const (
+    entryUseAnonymous chEntryOrigin = iota
+	entryFromStorageProvider
+    entryRevalidating
+    entryWasAuthored 
+)
+
+
+
+var entryPool = sync.Pool{
+	New: func() interface{} {
+		return new(chEntry)
+	},
+}
+
+func chEntryAlloc(inOrigin chEntryOrigin) *chEntry {
+    entry := entryPool.Get().(*chEntry)
+    entry.Reuse()
+
+    entry.origin = inOrigin
+
+    return entry
+}
+
+
+type chEntryPartStatus int32
+const (
+    partNotLoaded chEntryPartStatus = iota
+	partLoaded
+    partTouched
+)
+
+
 type chEntry struct {
     Body                []byte
     
     Info                ChEntryInfo
     State               ChEntryState
     StatePrev           ChEntryState
-    
+
+    PayloadTxns         *pdi.PayloadTxns
+
+    origin              chEntryOrigin
     scrap               []byte
     
     //Asset               pcore.Marshaller
     //newChEpoch          *pdi.ChannelEpoch
-    flushState          bool
-    flushBody           bool
-    //txn                 *badger.Txn
-    //scrap               []byte
+    stateStatus          chEntryPartStatus
+    bodyStatus           chEntryPartStatus
+
+    onMergeComplete     func(entry *chEntry, ch ChAgent, inErr error)
+
+    // Used for packing and unpacking (not used for validation)
+    tmpCrypt            pdi.EntryCrypt
+    tmpInfo             pdi.EntryInfo
+
 
 }
+
+
+
+func (entry *chEntry) Reuse() {
+
+    entry.Info.EntrySubOp = 0
+    entry.Info.SupersedesEntryID = entry.Info.SupersedesEntryID[:0]
+    entry.Info.Extensions = nil
+    entry.Body = entry.Body[:0]
+    entry.State.LiveIDs = entry.State.LiveIDs[:0]
+    entry.onMergeComplete = nil
+}
+
 
 
 
@@ -292,8 +377,9 @@ func (entry *chEntry) AssignFromDecrytedEntry(
 ) {
 
     entry.Info.EntryOp              = inEntryInfo.EntryOp
+    entry.Info.EntrySubOp           = inEntryInfo.EntrySubOp
     entry.Info.TIDs                 = append(entry.Info.TIDs[:0], inEntryInfo.TIDs...)
-    entry.Info.AuthorMemberID       = inEntryInfo.AuthorMemberID
+    entry.Info.AuthorMemberID       = 0
     entry.Info.SupersedesEntryID    = append(entry.Info.SupersedesEntryID[:0], inEntryInfo.SupersedesEntryID...)
     entry.Info.AuthorSig            = append(entry.Info.AuthorSig[:0], inAuthorSig...)
     entry.Info.Extensions           = inEntryInfo.Extensions
@@ -303,18 +389,8 @@ func (entry *chEntry) AssignFromDecrytedEntry(
     entry.State.LiveIDs             = entry.State.LiveIDs[:0]
 
     entry.StatePrev                 = entry.State
-    entry.flushState                = true
-    entry.flushBody                 = true
-
-}
-
-
-func (entry *chEntry) Reuse() {
-
-    entry.Info.SupersedesEntryID = entry.Info.SupersedesEntryID[:0]
-    entry.Info.Extensions = nil
-    entry.Body = entry.Body[:0]
-    entry.State.LiveIDs = entry.State.LiveIDs[:0]
+    entry.stateStatus               = partTouched
+    entry.bodyStatus                = partTouched
 
 }
 
@@ -331,7 +407,7 @@ func (entry *chEntry) ClearFlag(inFlag ChEntryFlag) {
     flag := uint32(1) << byte(inFlag)
     if entry.State.Flags & flag != 0 {
         entry.State.Flags ^= flag
-        entry.Touch()
+        entry.TouchState()
     }
 }
 
@@ -368,7 +444,7 @@ func (entry *chEntry) AddFlags(inFlags...ChEntryFlag) {
 
     if entry.State.Flags != chFlags {
         entry.State.Flags = chFlags
-        entry.Touch()
+        entry.TouchState()
     }
 }
 
@@ -382,18 +458,20 @@ func (entry *chEntry) ThrowMalformed(inErr error) {
 func (entry *chEntry) SetStatus(inStatus ChEntryStatus) {
     if entry.State.Status != inStatus {
         entry.State.Status = inStatus
-        entry.Touch()
+        entry.TouchState()
     }
 }
 
-// Defer marks this entry as deferred for the given reason/error.
+/*
+// Defer marks this entry as deferred for the given reason/error but never overwrites a ChEntryStatus_DISBARRED status.
 func (entry *chEntry) Defer(inErr error) {
+    if ntry.State.Status != ChEntryStatus_DISBARRED
     entry.SetStatus(ChEntryStatus_DEFERRED)
-}
+}*/
 
-// Touch increments .Rev to reflect that this entry has been modified
-func (entry *chEntry) Touch() {
-    entry.flushState = true
+// TouchState marks for entry.State to be flushed to the channel db
+func (entry *chEntry) TouchState() {
+    entry.stateStatus = partTouched
 }
 
 // IsWellFormed returns true if ChEntryFlag_WELL_FORMED is set for this entry.
@@ -443,21 +521,9 @@ func (entryInfo *ChEntryInfo) TimeAuthored() int64 {
 
 
 
-/*
-// ChEntryFlagsLiveFlags reppresent the conditions needed for a channel entry to be considered live.
-const ChEntryFlagsLiveFlags = 
-    (1 << byte(ChEntryFlag_AUTHOR_VALIDATED)) |
-    (1 << byte(ChEntryFlag_CHANNEL_EPOCH_VALIDATED)) | 
-    (1 << byte(ChEntryFlag_ACC_VALIDATED)) | 
-    (1 << byte(ChEntryFlag_AGENT_VALIDATED)) |
-    (1 << byte(ChEntryFlag_WELL_FORMED))
-*/
-
-
 
 // QueueEntryForMerge is called when an entry arrives to a repo and must be merged into the repo.
 func (chMgr *ChMgr) QueueEntryForMerge(
-    chID plan.ChID,
     entry *chEntry,
 ) {
 
@@ -465,8 +531,9 @@ func (chMgr *ChMgr) QueueEntryForMerge(
         ch ChAgent
         chGenesisEpoch *pdi.ChannelEpoch
         err error
-        //isChGenesis bool
     )
+
+    chID := plan.ChID(entry.tmpInfo.ChannelID)
 
     switch entry.Info.EntryOp {
         
@@ -477,12 +544,17 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                 entry.ThrowMalformed(err)
             } else {
                 chEpoch.EpochTID = entry.Info.EntryID()
-                //entry.newChEpoch = chEpoch
+                chEpoch.CommunityEpochID = entry.tmpCrypt.CommunityEpochID
+
+                // Having set critical fields, remarshal the body
+                // TODO: use scrap
+                entry.Body, _ = chEpoch.Marshal()
     
                 // Is the the channel genesis epoch?  If so, the channel ID derives from the channel ID.
                 if chEpoch.IsChannelGenesis() {
                     chID = chEpoch.EpochTID[plan.TIDSz - plan.ChIDSz:]
                     chGenesisEpoch = chEpoch
+                    entry.AddFlags(ChEntryFlag_IS_CHANNEL_GENESIS) 
                 }
             }
         }
@@ -569,23 +641,23 @@ func (chMgr *ChMgr) Log(inErr error, inMsg string) {
 // FetchACC returns the given channel known/presumed to be an ACC.
 func (chMgr *ChMgr) FetchACC(
     inChID plan.ChID,
-) (*ChACC, error) {
+) (ChAgent, error) {
 
-    var acc *ChACC
+    ch, err := chMgr.ChannelExists(inChID)
 
-    ch, err := chMgr.FetchChannel(inChID)
+    /*
     if ch != nil {
         acc, _ := ch.(*ChACC)
         if acc == nil {
             err = plan.Errorf(nil, plan.NotAnACC, "cited channel %v is not an access control channel", inChID)
         }
-    }
+    }*/
 
     if err != nil {
         return nil, err
     }
 
-    return acc, nil
+    return ch, nil
 }
 
 
@@ -593,7 +665,7 @@ func (chMgr *ChMgr) FetchACC(
 func (chMgr *ChMgr) FetchMemberRegistry() (*ChMemberRegistry, error) {
 
     ch, err := chMgr.FetchChannel(chMgr.StorageEpoch.MemberRegistry())
-    if err == nil {
+    if err != nil {
         return nil, err
     }
 
@@ -644,6 +716,14 @@ func (chMgr *ChMgr) rebootChannel(
 }
 */
 
+// ChannelExists returns the given channel, loading it if necessary.  If the channel is not found, then it isn not autho
+func (chMgr *ChMgr) ChannelExists(
+    inChID plan.ChID,
+) (ChAgent, error) {
+
+    return chMgr.fetchChannel(inChID, false, nil)
+}
+
 
 // FetchChannel returns the owning ChAgent for the given channel ID.
 // If inGenesisEpoch is set, channel genesis is performed. 
@@ -674,7 +754,7 @@ func (chMgr *ChMgr) fetchChannel(
     chMgr.chMutex.RUnlock()
 
 
-    if ch != nil || ! inAutoCreate {
+    if ch != nil {
         return ch, nil
     }
 
@@ -690,7 +770,7 @@ func (chMgr *ChMgr) fetchChannel(
 
     // If the ch store isn't already loaded, try to load it.
     if ch == nil { 
-        ch, err = chMgr.loadChannel(inChID, inChGenesis)
+        ch, err = chMgr.loadChannel(inChID, inAutoCreate, inChGenesis)
 
         // We've already mutexed for this write condition (above)
         if err == nil {
@@ -726,15 +806,22 @@ func (chMgr *ChMgr) detachChannel(
 
 func (chMgr *ChMgr) loadChannel(
     inChID plan.ChID,
+    inAutoCreate bool,
     inChGenesis *pdi.ChannelEpoch,
 ) (ChAgent, error) {
 
     opts := badger.DefaultOptions
     opts.Dir = path.Join(
         chMgr.HomePath,
-        inChID.String(),
+        inChID.Str(),
     )
     opts.ValueDir = opts.Dir
+
+    if ! inAutoCreate {
+        if _, err := os.Stat(opts.Dir); os.IsNotExist(err) {
+            return nil, plan.Error(nil, plan.ChannelNotFound, "channel not found")
+        }
+    }
 
     if err := os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
         return nil, plan.Error(err, plan.FailedToLoadChannel, "failed to create channel dir")
@@ -824,7 +911,6 @@ func (chMgr *ChMgr) NewChAgent(
 
         chSt.chMgr = chMgr
         chSt.entriesToMerge = make(chan *chEntry, 2)
-        chSt.epochCache = map[plan.TIDBlob]*pdi.ChannelEpoch{}
 
         // If we're loading the channel and discover that merge has never been enabled, reset the validation bookmark.
         if ! chSt.State.MergeEnabled && mergeEnabled {
@@ -890,26 +976,64 @@ func (chMgr *ChMgr) NewChAgent(
 
 // OpenChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
 func (chMgr *ChMgr) OpenChannelSession(
+    inMemberSession *MemberSession,
     inInvocation *ChInvocation, 
     inOutlet Repo_OpenChannelSessionServer,
 ) (*ChSession, error) {
 
-    ch, err := chMgr.FetchChannel(inInvocation.ChID)
+    var (
+        err error
+        ch ChAgent
+    )
+
+    if inInvocation.ChannelGenesis == nil {
+        ch, err = chMgr.FetchChannel(inInvocation.ChID)
+    } else {
+        if ! inInvocation.ChannelGenesis.IsChannelGenesis() {
+            err = plan.Error(nil, plan.ParamMissing, "genesis channel epoch has prev epoch ID set")
+        }
+    }
     if err != nil {
         return nil, err
     }
+    
 
     chSession := &ChSession{
+        MemberSession: inMemberSession,
         SessionID: atomic.AddUint32(&chMgr.nextSessionID, 1),
         ChAgent: ch,
         msgInbox: make(chan *ChMsg, 1),
         outlet: inOutlet,
+        OnComplete: make(chan error),
     }
 
     err = chSession.Startup(inInvocation)
     if err != nil {
         return nil, err
     }
+
+    if ch == nil {
+        if inInvocation.ChannelGenesis == nil {
+            err = plan.Error(nil, plan.ParamMissing, "ChSession has no channel agent")
+        } else {
+
+            // This will get filled in when the entry is merged after unpacking
+            inInvocation.ChannelGenesis.CommunityEpochID = nil
+
+            body, _ := inInvocation.ChannelGenesis.Marshal()
+            chMsg := &ChMsg{
+                Op: ChMsgOp_CH_NEW_ENTRY,
+                SessionID: chSession.SessionID,
+                ChEntry: &ChEntryMsg{
+                    EntryOp: pdi.EntryOp_NEW_CHANNEL_EPOCH,
+                    Body: body,
+                },
+            }
+
+            chSession.msgInbox <- chMsg
+        }
+    } 
+ 
 
     return chSession, err
 }
@@ -922,13 +1046,14 @@ type ChSession struct {
 
     SessionID           uint32
 
-    MemeberSession      *MemberSession
+    MemberSession       *MemberSession
 
     ChAgent             ChAgent
 
-    //ChStore             *ChStore
+    OnComplete          chan error
+    isComplete          bool
 
-    //ChAdapter           ChAdapter
+    closed              bool
 
     // The currently open pipes 
     //Pipe                pservice.CommunityRepo_ChSessionPipeServer
@@ -948,76 +1073,128 @@ func (cs *ChSession) Startup(
     inInvocation *ChInvocation,
 ) error {
 
-    go func()
-    //cs.ChAgent.
+    go func() {
+
+        var (
+            ctxErr error
+        )
+
+        for ! cs.isComplete { 
+            select {
+                case <- cs.outlet.Context().Done():
+                    ctxErr = cs.outlet.Context().Err()
+                    cs.CloseSession("ChSession context closed")
+                case chMsg := <- cs.msgInbox:
+                    if chMsg == nil {
+                        if ! cs.isComplete {
+                            cs.MemberSession.detachChSession(cs)
+                            cs.isComplete = true
+                            cs.OnComplete <- ctxErr
+                        }
+                    } else {
+                        switch chMsg.Op {                            
+                            case ChMsgOp_CH_NEW_ENTRY:
+                                cs.AuthorNewEntry(chMsg)
+                        } 
+                    }  
+            }
+        }
+    }()
+
     return nil
 } 
 
 
-
-/*
-
-\
-
-
-func (ch *ChCustodian) Startup() error {
-
-    return ch.internalStatup()
-
-}
-func (ch *ChCustodian) internalStatup() error {
-
-
-    {
-        opts := badger.DefaultOptions
-        opts.Dir = path.Join(ch.HomePath, "chDB")
-        opts.ValueDir = opts.Dir
-
-        var err error
-        if ch.chDB, err = badger.Open(opts); err != nil {
-            return plan.Error(err, plan.StorageNotReady, "channel db failure")
-        }
+func (cs *ChSession) CloseSession(inReason string) {
+    if ! cs.closed {
+        cs.closed = true
+        close(cs.msgInbox)
     }
-    //
-    //
-    //
-    //
-    go func() {
-        for eip := range ch.entryInbox {
-            if ! bytes.Equal(ch.ChannelID[:], eip.EntryInfo.ChannelId) {
-                panic("channel entry sent to wrong channel")
-            }
-            dbTxn := ch.chDB.NewTransaction(true)
-            dbErr := dbTxn.Set([]byte(eip.EntryInfo.URID), nil)//txn.Bytes)
-            if dbErr == nil {
-                dbErr = dbTxn.Commit()
-            } else {
-                dbTxn.Discard()
-            }
-
-        }
-
-
-    }()
-
-
-    return nil
 }
 
 
-
-
-
-func (ch *ChCustodian) PostEntry(
-    inInfo *pdi.EntryInfo,
-    inBody []byte,
+func (cs *ChSession) AuthorNewEntry(
+    chMsg *ChMsg,
 ) error {
 
+    var (
+        err error
+        chSt *ChStore
+        chGenesis bool
+    )
 
-    return nil
+    entry := chEntryAlloc(entryWasAuthored)
+    
+    info := &entry.tmpInfo
+    
+    entry.Body = append(entry.Body[:0], chMsg.ChEntry.Body...)
+
+    info.SetTimeAuthored(0)
+    info.EntryOp = chMsg.ChEntry.EntryOp
+    info.EntrySubOp = chMsg.ChEntry.EntrySubOp
+    info.SupersedesEntryID = info.SupersedesEntryID[:0]
+    info.Extensions = nil
+
+    // Fill in the authoring secion
+    copy(info.GetTID(pdi.EntryTID_AuthorEntryID), cs.MemberSession.MemberEpoch.EpochTID)
+
+    if chMsg.ChEntry.EntryOp == pdi.EntryOp_NEW_CHANNEL_EPOCH {
+        var chEpoch pdi.ChannelEpoch
+
+        err := chEpoch.Unmarshal(chMsg.ChEntry.Body)
+        if err == nil {
+            chGenesis = chEpoch.IsChannelGenesis() 
+        }
+    }
+
+
+    if cs.ChAgent != nil {
+        chSt = cs.ChAgent.Store()
+        info.ChannelID = append(info.ChannelID[:0], chSt.ChID()...)
+
+        err = chSt.FetchAuthoringTIDs(
+            info.GetTID(pdi.EntryTID_ChannelEpochEntryID),
+            info.GetTID(pdi.EntryTID_ACCEntryID),
+        )
+
+    } else if chGenesis {
+        info.ChannelID = info.ChannelID[:0]
+
+        entry.onMergeComplete = func(entry *chEntry, ch ChAgent, err error) {
+            if err == nil {
+                cs.ChAgent = ch
+
+                reply := &ChMsg{
+                    Op: ChMsgOp_CH_GENESIS_COMPLETE,
+                    MsgID: chMsg.MsgID,
+                    SessionID: cs.SessionID,
+                    BUF0: ch.Store().ChID(),
+                    ChEntry: &ChEntryMsg{
+                        TIDs: append([]byte{}, entry.Info.TIDs...),
+                        EntryOp: entry.Info.EntryOp,
+                        EntrySubOp: entry.Info.EntrySubOp,
+                        AuthorMemberID: entry.Info.AuthorMemberID,
+                        Status: entry.State.Status,
+                        Body: append([]byte{}, entry.Body...),
+                    },
+                }
+                cs.outlet.Send(reply)
+            } else {
+                // TODO
+            }
+        }
+    } else {
+        err = plan.Error(nil, plan.AssertFailed, "ch session has no ChAgent")
+    }
+
+    if err == nil {
+        cs.MemberSession.entriesOutbound <- entry
+    }
+
+    return err
 }
 
-*/
+
 
 
 

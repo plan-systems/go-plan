@@ -11,7 +11,7 @@ import (
     //"sync/atomic"
     //"context"
     "fmt"
-    //"sort"
+    "sort"
    //"reflect"
     //"encoding/hex"
     //"encoding/json"
@@ -181,6 +181,7 @@ const (
     chEntryBodyKey
     chEntryDepsKey
 
+    chEpochKeySz        = 4 + plan.TIDSz    // len(chEpochsPrefix) + len(epochTID)
     chEntryKeySz        = plan.TIDSz + 1
     chEntryTypePos      = plan.TIDSz
     chEntryDepKeySz     = chEntryKeySz + plan.ChIDSz
@@ -188,9 +189,10 @@ const (
 
 
 var (
-    chStatePrefix   = []byte{0, 0, 0, 0, 0, 0, 0, 0}
-    chBootstrapKey  = append(chStatePrefix, 0x00)
-    chStateKey      = append(chStatePrefix, 0x01)
+    chStatePrefix   = []byte{0, 0, 0,}
+    chBootstrapKey  = append(chStatePrefix, 0x01)
+    chStateKey      = append(chStatePrefix, 0x02)
+    chEpochsPrefix  = append(chStatePrefix, 0xFF)
 
     chEntryStart    = []byte{0, 0, 1, 0, 0, 0, 0, 0}
 )
@@ -202,9 +204,13 @@ ChStore.db
     + chBootstrapKey                            => ChStoreBootstrap
     |
     + chStateKey                                => ChStoreState
-    +
-    + chAgentAssetKey + chAgentAssetID A        => entry.Body, custom, etc
-    |                 + chAgentAssetID B        => entry.Body, custom, etc
+    |
+    + chEpochsPrefix + epoch TID 1
+    |                + epoch TID 2
+    |                ...
+    | 
+    + chAgentAssetKey + chAgentAssetID A        => custom...
+    |                 + chAgentAssetID B        => custom...
     |                 ...
     |
     + chEntryStart
@@ -252,8 +258,11 @@ type ChStore struct {
     // ChEntry keyed by entry URID
     db                     *badger.DB
 
-    epochMutex              sync.RWMutex
-    epochCache              map[plan.TIDBlob]*pdi.ChannelEpoch 
+    // ChannelEpochs sorted by epoch TID 
+    chEpochNodes            []*ChEpochNode 
+    chEpochMutex            sync.RWMutex
+
+    //epochCache              map[plan.TIDBlob]*pdi.ChannelEpoch 
     //revalGuide              revalGuide  
 
     chMgr                   *ChMgr
@@ -292,7 +301,7 @@ func (chSt *ChStore) Log(inErr error, inMsg string) {
 
 func (chSt *ChStore) Infof(inFormat string, inArgs ...interface{}) {
     suffix := fmt.Sprintf(inFormat, inArgs...)
-    chSt.chMgr.flow.Log.Infof("ch %s (%s): %s\n", plan.ChID(chSt.State.ChannelID).String(), path.Base(chSt.State.ChProtocol), suffix) 
+    chSt.chMgr.flow.Log.Infof("ch %s (%s): %s\n", chSt.ChID().Str(), path.Base(chSt.State.ChProtocol), suffix) 
 }
 
 // Store -- see ChAgent.Startup()
@@ -300,8 +309,8 @@ func (chSt *ChStore) Store() *ChStore {
     return chSt
 }
 
-// ChannelID returns the channel ID for this ChStore
-func (chSt *ChStore) ChannelID() plan.ChID {
+// ChID returns the channel ID for this ChStore
+func (chSt *ChStore) ChID() plan.ChID {
     return plan.ChID(chSt.State.ChannelID)
 }
 
@@ -405,10 +414,11 @@ func (chSt *ChStore) loadEntry(
 
         // Reset all fields
         outInfo.EntryOp = pdi.EntryOp(0)
+        outInfo.EntrySubOp = 0
+        outInfo.AuthorMemberID = 0
         outInfo.SupersedesEntryID = outInfo.SupersedesEntryID[:0]
         outInfo.Extensions = nil
         outInfo.AuthorSig = outInfo.AuthorSig[:0]
-        outInfo.AuthorMemberID = 0
         
         entryKey[chEntryTypePos] = chEntryInfoKey
         item, err = chTxn.Get(entryKey[:])
@@ -453,16 +463,20 @@ func (chSt *ChStore) loadEntry(
 }
 
 
+
 func (chSt *ChStore) loadNextEntry(
     inTxn *badger.Txn,
     inPrevTID plan.TID,
     entry *chEntry,
-    loadBody func(v []byte) error,
 ) (bool, error) {
 
     var (
         entryKey plan.TIDBlob
     )
+
+    entry.stateStatus = partNotLoaded
+    entry.bodyStatus  = partNotLoaded
+    entry.Body = entry.Body[:0]
 
     chTxn := inTxn
     if chTxn == nil {
@@ -475,21 +489,21 @@ func (chSt *ChStore) loadNextEntry(
         return false, nil
     }
 
+
     entry.Reuse()
     err := chSt.loadEntry(
         entryKey[:], 
         chTxn,
         &entry.Info,
         &entry.State,
-        loadBody,
+        nil,
     )
     if err != nil {
         panic(err)
     }
 
     entry.StatePrev = entry.State
-    entry.flushState = false
-    entry.flushBody = false
+    entry.stateStatus = partLoaded
 
     return true, err
 
@@ -512,7 +526,7 @@ func (chSt *ChStore) seekToNextEntry(
     }
 
     // Increment to the the next entry
-    if len(inPrevTID) == plan.TIDSz {
+    if len(inPrevTID) >= 8 && bytes.Compare(inPrevTID, chEntryStart) > 0 {
         copy(outEntryTID, inPrevTID)
         for j := plan.TIDSz - 1; j > 0; j-- {
             outEntryTID[j]++
@@ -552,7 +566,6 @@ func (chSt *ChStore) loadNextEntryToValidate(entry *chEntry) bool {
         nil, 
         chSt.State.ValidatedUpto,
         entry,
-        nil,
     )
 
     return haveEntry
@@ -560,67 +573,37 @@ func (chSt *ChStore) loadNextEntryToValidate(entry *chEntry) bool {
 }
 
 
-/*
-
-
-    // If we found another entry, validate it 
-    {
-
-        // Load ChEntryInfo
-        item := itr.Item()
-        key := item.Key()
-        if len(key) == chEntryKeySz && key[chEntryTypePos] == chEntryInfoKey {
-            chSt.Log(item.Value(func(v []byte) error {
-                return entry.Info.Unmarshal(v)
-            }), "loading ChEntryInfo")
-        }
-
-        // Load ChEntryState
-        itr.Next()
-        item = itr.Item()
-        key = item.Key()
-        if len(key) == chEntryKeySz && key[chEntryTypePos] == chEntryStateKey {
-            chSt.Log(item.Value(func(v []byte) error {
-                return entry.State.Unmarshal(v)
-            }), "loading ChEntryState")
-        }
-
-        // If the entry is still awaiting merge, it means the entry asset stored is the body and we restore entry as if it's an incoming merge.
-        entry.Body = entry.Body[:0]
-        if entry.State.Status == ChEntryStatus_AWAITING_MERGE {
-            var err error
-
-            // Load body
-            itr.Next()
-            item = itr.Item()
-            key = item.Key()
-            if len(key) == chEntryKeySz && key[chEntryTypePos] == chEntryBodyKey {
-                chSt.Log(item.Value(func(v []byte) error {
-                    entry.Body = append(entry.Body, v...)
-                }), "loading entry body")
-            }
-        }
-    }
-    */
-
-
 func (chSt *ChStore) loadOriginalEntryBody(
     entry *chEntry,
+    outBody pcore.Marshaller,
 ) error {
 
-    chTxn := chSt.db.NewTransaction(false)
-    defer chTxn.Discard()
+    var err error
 
-    err := chSt.loadEntry(
-        entry.Info.EntryID(),
-        chTxn,
-        nil,
-        nil,
-        func(v []byte) error {
-            entry.Body = append(entry.Body[:0], v...)
-            return nil
-        },
-    )
+    // Load the body if it hasn't been already
+    if entry.bodyStatus == partNotLoaded {
+        chTxn := chSt.db.NewTransaction(false)
+        defer chTxn.Discard()
+
+        err = chSt.loadEntry(
+            entry.Info.EntryID(),
+            chTxn,
+            nil,
+            nil,
+            func(v []byte) error {
+                entry.Body = append(entry.Body[:0], v...)
+                return nil
+            },
+        )
+
+        if err == nil {
+            entry.bodyStatus = partLoaded
+        }
+    }
+
+    if outBody != nil && err == nil {
+        err = outBody.Unmarshal(entry.Body)
+    }
 
     return err
 }
@@ -701,31 +684,36 @@ func writeEntryItem(
 
     N := len(entry.scrap)
     if N - n < 1000 {
-        entry.scrap = make([]byte, 2000)
+        N = 2000
+        entry.scrap = make([]byte, N)
         n = 0
     }
 
+    var err error
     if v2 != nil {
-        sz, err := v2.MarshalTo(entry.scrap[n:])
-        valBuf = entry.scrap[n:n+sz]
-        if err == nil {
+        sz := v2.Size()
+        if n + sz < N {
+            sz, err = v2.MarshalTo(entry.scrap[n:])
+            valBuf = entry.scrap[n:n+sz]
             n += sz
         } else {
             valBuf, err = v2.Marshal()
         }
     }
 
-    if entryID == nil {
-        entryID = entry.Info.EntryID()
+    if err == nil {
+        if entryID == nil {
+            entryID = entry.Info.EntryID()
+        }
+
+        keyPos := n
+        n += copy(entry.scrap[n:], entryID)
+        entry.scrap[n] = inKey
+        n++
+
+        err = wb.Set(entry.scrap[keyPos:n], valBuf, 0)
     }
 
-    keyPos := n
-    n += copy(entry.scrap[n:], entryID)
-    entry.scrap[n] = inKey
-    n++
-
-    err := wb.Set(entry.scrap[keyPos:n], valBuf, 0)
-    
     return n, err
 }
 
@@ -735,7 +723,7 @@ func writeEntryItem(
 func (chSt *ChStore) flushEntry(entry *chEntry) error {
 
     // Exit if there's no work to do
-    if ! entry.flushState && ! entry.flushBody && len(entry.Info.SupersedesEntryID) == 0 {
+    if entry.stateStatus != partTouched && entry.bodyStatus != partTouched  && len(entry.Info.SupersedesEntryID) == 0 {
         return nil
     }
 
@@ -749,13 +737,26 @@ func (chSt *ChStore) flushEntry(entry *chEntry) error {
     entryID := entry.Info.EntryID()
 
     // If we're merging, write out info and body entries (they only need to be written once)
-    if entry.flushBody {
+    if entry.bodyStatus == partTouched {
         n, err = writeEntryItem(wb, entry, entryID, chEntryInfoKey, n, nil, &entry.Info)
         chSt.Log(err, "storing ChEntryInfo")
         
         if err == nil {
             n, err = writeEntryItem(wb, entry, entryID, chEntryBodyKey, n, entry.Body, nil)
             chSt.Log(err, "storing entry.Body")
+        }
+
+        // All channel epoch TIDs are stored as as a key only, so epoch history can be easily traversed
+        if entry.Info.EntryOp == pdi.EntryOp_NEW_CHANNEL_EPOCH {
+            keyPos := n
+            n += copy(entry.scrap[n:], chEpochsPrefix)
+            n += copy(entry.scrap[n:], entryID)
+            err = wb.Set(entry.scrap[keyPos:n], nil, 0)
+            chSt.Log(err, "storing entry channel epoch")
+        }
+
+        if err == nil {
+            entry.bodyStatus = partLoaded
         }
     }
 
@@ -783,9 +784,12 @@ func (chSt *ChStore) flushEntry(entry *chEntry) error {
         }
     }
 
-    if entry.flushState && err == nil {
+    if entry.stateStatus == partTouched && err == nil {
         n, err = writeEntryItem(wb, entry, entryID, chEntryStateKey, n, nil, &entry.State)
         chSt.Log(err, "storing ChEntryState")
+        if err == nil {
+            entry.stateStatus = partLoaded
+        }
     }
 
 
@@ -797,58 +801,16 @@ func (chSt *ChStore) flushEntry(entry *chEntry) error {
     }
 
     if err == nil {
-        entry.flushBody = false
-        entry.flushState = false
+        if entry.bodyStatus == partTouched {
+            entry.bodyStatus = partLoaded
+        }
+        if entry.stateStatus == partTouched {
+            entry.stateStatus = partLoaded
+        }
     }
 
     return err
 }
-
-
-
-
-/*
-func (chSt *ChStore) AddDependency(
-    inDepChID []byte,
-    inTime int64,
-    inType ChDependencyType,
-) error {
-
-
-    dbTxn := chSt.db.NewTransaction(true)
-
-    var (
-        scrap [128]byte
-        depKey [kChEntryDepKeySz]byte
-    )
-
-    copy(depKey[:], inEntry.URID)
-    entryKey[kChEntryForkPos] = entryInfo
-
-    sz, err := inentry.Info.MarshalTo(scrap[:])
-    if err != nil {
-        panic("failed to marshal ChEntryInfo")
-    }
-    err = dbTxn.Set(entryKey[:], scrap[:sz])
-
-    if err == nil {
-        entryKey[entryForkPos] = entryAsset
-        if err == nil {
-            err = dbTxn.Set(entryKey[:], inEntryAsset)
-        }
-    }
-
-
-    if err == nil {
-        err = ch.WriteEntryRaw(dbTxn, ioEntry, epochList)
-    }
-
-    if err == nil {
-        err = dbTxn.Commit()
-    } else {
-        dbTxn.Discard()
-    }
-    */
 
 
 
@@ -892,6 +854,45 @@ func (chSt *ChStore) LoadBestEntryBody(
 
 func (chSt *ChStore) FetchChEpoch(
    inEntryID plan.TID,
+) *ChEpochNode {
+
+    N := len(chSt.chEpochNodes)
+
+    pos := sort.Search(N,
+        func(i int) bool {
+            return bytes.Compare(chSt.chEpochNodes[i].Epoch.EpochTID, inEntryID) >= 0
+        },
+    )
+
+	if pos < N {
+		epochNode := chSt.chEpochNodes[pos]
+		if bytes.Equal(epochNode.Epoch.EpochTID, inEntryID) {
+			return epochNode
+		}
+	}
+
+    return nil
+}
+
+
+// GetActiveChEpoch returns the most recent and live channel epoch posted to this channel
+func (chSt *ChStore) GetActiveChEpoch() *ChEpochNode {
+
+    // Start from the most recent
+    for i := len(chSt.chEpochNodes) - 1; i >= 0; i++ {
+    	epochNode := chSt.chEpochNodes[i]
+        if epochNode.Status == ChEntryStatus_LIVE {
+            return epochNode
+        }
+    }
+
+    return nil
+}
+
+/*
+
+func (chSt *ChStore) FetchChEpoch(
+   inEntryID plan.TID,
 ) *pdi.ChannelEpoch {
 
     epochID := inEntryID.Blob()
@@ -923,31 +924,125 @@ func (chSt *ChStore) FetchChEpoch(
     return chEpoch
 
 }
+*/
 
+// FetchAuthoringTIDs fills in the TIDs that a newly authored entry should use.
+func (chSt *ChStore) FetchAuthoringTIDs(
+   outChEpochTID plan.TID,
+   outACCEntryTID plan.TID,
+) error {
 
+    var err error
 
-// CanAcceptEntry -- see ChAgent.CanAcceptEntry
-func (chSt *ChStore) CanAcceptEntry(
-    entryInfo *ChEntryInfo,
-) (*pdi.ChannelEpoch, error) {
-
-    epochID := entryInfo.ChannelEpochID()
-
-    chEpoch := chSt.FetchChEpoch(epochID)
-
-    if chEpoch == nil {
-        return nil, plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v not found", epochID)
+    epochNode := chSt.GetActiveChEpoch()
+    if epochNode == nil {
+        return plan.Error(nil, plan.ChannelEpochNotFound, "failed to find live channel epoch")
     }
 
-    if len(entryInfo.SupersedesEntryID) > 0 && ! chEpoch.EntriesSupersedable {
-        return nil, plan.Errorf(nil, plan.ChannelEpochDisallows, "channel epoch does not allow entries ot be superseded")
+    copy(outChEpochTID, epochNode.Epoch.EpochTID)
+
+    if epochNode.Epoch.HasACC() {
+        acc, fetchErr := chSt.chMgr.FetchACC(epochNode.Epoch.ACC)
+        if err == nil {
+            accEpoch := acc.Store().GetActiveChEpoch()
+            if accEpoch == nil {
+                return plan.Error(nil, plan.ChannelEpochNotFound, "failed to find live ACC epoch")
+            }
+
+            copy(outACCEntryTID, accEpoch.Epoch.EpochTID)
+        } else {
+            err = fetchErr
+        }
+    } else {
+        copy(outACCEntryTID, plan.NilTID[:])
     }
 
-    // TODO: check that entry can post in this epoch, etc.
-
-
-    return chEpoch, nil
+    return err
 }
+
+
+
+// ValidateAgainstEpochHistory checks this channel's ChannelEpoch history to make sure the given entry is valid to go live.
+func (chSt *ChStore) ValidateAgainstEpochHistory(
+    entry *chEntry,
+) (epochNode *ChEpochNode, err error) {
+
+    checkEntry := true
+
+    if entry.Info.EntryOp == pdi.EntryOp_NEW_CHANNEL_EPOCH {
+
+        // If this entry is creating a new channel (and contains the genesis channel epoch), only the genesis entry needs to be validated.
+        // Otherwise, new channel epoch posts still require that the channel accepts it (below).
+        if entry.HasFlag(ChEntryFlag_IS_CHANNEL_GENESIS) {
+            checkEntry = false
+        }
+    }
+
+    // Does this entry comply with this channel's epoch history
+    if checkEntry && err == nil {
+
+        chEpochID := entry.Info.ChannelEpochID()
+
+        epochNode := chSt.FetchChEpoch(chEpochID)
+        if epochNode == nil {
+            return nil, plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v not found", chEpochID)
+        }
+        if epochNode.Status != ChEntryStatus_LIVE {
+            return nil, plan.Errorf(nil, plan.ChannelEpochNotLive, "channel epoch %v is not live", chEpochID)
+        }
+        if len(entry.Info.SupersedesEntryID) > 0 && ! epochNode.Epoch.EntriesSupersedable {
+            return nil, plan.Errorf(nil, plan.ChannelEpochDisallows, "channel epoch does not allow entries ot be superseded")
+        }
+
+        timeAuthored := entry.Info.TimeAuthored()
+
+        // This will be reworked in the future for full correctness, but for now there's placeholder logic to demonstrate what should be checked.
+        for _, next := range epochNode.Next {
+            if next.Status == ChEntryStatus_LIVE {
+                successorTime := plan.TID(next.Epoch.EpochTID).ExtractTime()
+                if timeAuthored > successorTime + next.Epoch.EpochTransitionPeriod {
+                    return nil, plan.Errorf(nil, plan.ChannelEpochExpired, "channel epoch %v has been superseeded by %v", plan.TID(epochNode.Epoch.EpochTID).Str(), plan.TID(next.Epoch.EpochTID).Str())
+                }
+            }
+        }
+    }
+
+    return epochNode, nil
+}
+
+
+// IsEntryAuthorized returns no error only if the cited channel epoch (and implied epoch chain) authorizes this entry.
+func (chSt *ChStore) IsEntryAuthorized(
+    inCitedEpoch plan.TID,
+    entry *chEntry,
+) error {
+
+    //entryStatus := ChEntryStatus_AWAITING_VALIDATION
+
+    epoch := chSt.FetchChEpoch(inCitedEpoch)
+    if epoch == nil {
+        return plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v in acc %v not found", entry.Info.ChannelEpochID, chSt.State.ChannelID)
+    }
+
+    // Normal permissions lookup. boring: do last :\
+    { }
+
+    /*
+    if epoch.Extensions != nil {
+        epoch.Extensions.FindBlocksWithCodec(codecChEntryWhitelistURID, 0, func(inMatch *plan.Block) error {
+            if bytes.Equal(inEntryURID, inMatch.Content) {
+                entryStatus = ChEntryStatus_LIVE
+            }
+            return nil
+        })
+    }*/
+
+
+
+    return nil
+
+}
+
 
 
 // MergePost -- see ChAgent.MergePost
@@ -964,6 +1059,7 @@ func (chSt *ChStore) MergePost(
 func (chSt *ChStore) MergeNewChannelEpoch(
     entry *chEntry,
 ) error {
+
 
     plan.Assert(entry.Info.EntryOp == pdi.EntryOp_NEW_CHANNEL_EPOCH, "expected EntryOp_NEW_CHANNEL_EPOCH")
     
@@ -1073,128 +1169,127 @@ const chEntryScrapSz = 256
 const chEntryStateScrapSz = 32
 const chDepScrapSz = 64
 
-/*
-func (chSt *ChStore) WriteEntryRaw(
-    dbTxn *badger.Txn,
-    entry *chEntry,
-) error {
-    
-    var (
-        scrap [chEntryScrapSz]byte
-        entryKey [chEntryKeySz]byte
-    )
-
-    entryKey[0] = chEntryInfoKey
-    copy(entryKey[1:], inEntry.URID)
-
-    sz, err := inentry.Info.MarshalTo(scrap[:])
-    entryBuf := scrap[:sz]
-    if err != nil {
-        entryBuf, err = inentry.Info.Marshal()
-    }
-    chSt.Log(err, "ChEntry marshal failed")
-
-    err = dbTxn.Set(entryKey[:], entryBuf)
-    chSt.Log(err, "store ChEntry error")
-
-    
-    if err == nil {
-        entryKey[0] = chEntryAssetKey
-        if err == nil && len(inEntry.ChAgentAsset) > 0 {
-            err = dbTxn.Set(entryKey[:], inEntry.ChAgentAsset)
-        }
-    }
-
-    return err
-}
-*/
 
 
 // ValidateEntry checks that the conditions needed for an entry to go live. 
 func (chSt *ChStore) ValidateEntry(
     entry *chEntry,
-) (entryErr error, processErr error) {
+) {
 
 
     var (
-        accID plan.ChID
-        //authURID []byte
-        //err error
-        //authorEpoch *pdi.MemberEpoch
-        writeDeps bool
-        depsWritten int
+        valErr error
     )
 
-    if ! entry.HasFlags(ChEntryFlag_DEPENDENCIES_WRITTEN) {
-        writeDeps = true
-    }
-
-    status := ChEntryStatus_LIVE
 
     if ! entry.HasFlags(ChEntryFlag_GENESIS_ENTRY_VERIFIED, ChEntryFlag_WELL_FORMED) {
     
-        // 1 -- Check community membership records
+        /*****************************************************
+        ** 1 -- Check community membership records
+        **/
         {
             registry, err := chSt.chMgr.FetchMemberRegistry()
-            if err != nil {
-                processErr = err
-            } else {
-                err = registry.ValidateAuthor(&entry.Info)
-
-                // TODO: handle when member registry returns an err
-                if writeDeps {
-                    processErr = registry.AddDependency(chSt.ChannelID(), &entry.Info)
-                    if processErr == nil {
-                        depsWritten++
-                    }
-                }
-            }
-            if err != nil {
-                status = ChEntryStatus_DEFERRED
-            }
-        }
-
-        // 2 -- Check entry's parent channel governing epoch
-        {
-            chEpoch, err := chSt.CanAcceptEntry(&entry.Info)
-            if err != nil {
-                processErr = err
-
-                status = ChEntryStatus_DEFERRED
-
-            } else {
-
-                // Note: no dependency is created here b/c if/when a channel entry is overturned, subsequent entries in that channel always undergo revalidation,
-                accID = chEpoch.ACC
-            }
-        }
-
-        // 3 -- Check parent ACC
-        {
-            acc, err := chSt.chMgr.FetchACC(accID)
             if err == nil {
-                err = acc.IsEntryAuthorized(entry)
-                if writeDeps {
-                    processErr = acc.AddDependency(chSt.ChannelID(), &entry.Info)
-                    if processErr == nil {
-                        depsWritten++
+
+                // Write the dependency so this entry will be revalidated if the dep changes liveness.
+                if ! entry.HasFlags(ChEntryFlag_AUTHOR_DEPENDENCY_WRITTEN) {
+                    err = registry.AddDependency(chSt.ChID(), &entry.Info)
+                    if err == nil {
+                        entry.AddFlags(ChEntryFlag_AUTHOR_DEPENDENCY_WRITTEN)
                     }
                 }
-            } 
-            
+
+                if err == nil {
+                    err = registry.ValidateAuthor(entry)
+                }
+            }
+
+            // If we can't validate the author (including failing to write the dependency), don't allow the entry to go live.
             if err != nil {
-                status = ChEntryStatus_DEFERRED
+                valErr = err
             }
         }
+
+        var epochNode *ChEpochNode
+
+        /*****************************************************
+        ** 2 -- Check entry's cited channel epoch
+        **/
+        if valErr == nil {
+  
+            epochNode, valErr = chSt.ValidateAgainstEpochHistory(entry)
+
+            // Note how no dependency is needed for the referenced channel epoch b/c if/when a channel entry is overturned, 
+            //    all subsequent entries in that channel always undergo revalidation,
+                
+        }
+
+        /*****************************************************
+        ** 3 -- Check that the entry has permission to post
+        **/
+        if valErr == nil {
+            accEntryID := entry.Info.ACCEntryID()
+
+            var err error
+
+            if entry.HasFlag(ChEntryFlag_IS_CHANNEL_GENESIS) {
+
+                // No op during chanel genesis since ACC authority is not used/needed.  
+
+            } else if accEntryID.IsNil() {
+
+                // If the entry does not cite an ACC epoch, then the cited channel epoch is expected to perform authorization.
+                err = chSt.IsEntryAuthorized(entry.Info.ChannelEpochID(), entry)
+            } else { 
+                chEpochHasACC := epochNode != nil && epochNode.Epoch.HasACC()
+
+                // If the entry cites an ACC epoch, then fetch the ACC and use that for authorization.
+                if chEpochHasACC {
+                    var acc ChAgent
+                    acc, err = chSt.chMgr.FetchACC(epochNode.Epoch.ACC)
+                    if err == nil {
+
+                        // Write the ACC dependency so that we know to revalidate this entry if the cited entry changes
+                        if ! entry.HasFlags(ChEntryFlag_ACC_DEPENDENCY_WRITTEN) {
+                            err = acc.Store().AddDependency(chSt.ChID(), &entry.Info)
+                            if err == nil {
+                                entry.AddFlags(ChEntryFlag_AUTHOR_DEPENDENCY_WRITTEN)
+                            }
+                        }
+                        if err == nil {
+                            err = acc.Store().IsEntryAuthorized(accEntryID, entry)
+                        }
+                    } else {
+                        err = plan.Error(err, plan.ACCNotFound, "cited ACC in ch epoch not accessible")
+                    }
+                } else {
+                    err = plan.Error(nil, plan.ChEntryIsMalformed, "entry references ACC epoch but cited channel epoch has no ACC set")
+                    entry.ThrowMalformed(err)
+                }
+            }
+
+            if err != nil {
+                valErr = err
+            }
+        }
+
     }
 
-    if depsWritten == 2 {
-        entry.AddFlags(ChEntryFlag_DEPENDENCIES_WRITTEN)
+    // Entry is deferred by default
+    status := ChEntryStatus_DEFERRED
+    if entry.IsWellFormed() {
+        if valErr == nil {
+            chSt.Infof("entry %v VALIDATED", entry.Info.EntryID().Str())
+            status = ChEntryStatus_LIVE
+        } else {
+            chSt.Infof("entry %v DEFERRED (%v)", entry.Info.EntryID().Str(), valErr)
+        }
+    } else {
+        status = ChEntryStatus_DISBARRED
     }
 
     entry.SetStatus(status)
 
-    return entryErr, processErr
 }
 
 
@@ -1275,73 +1370,6 @@ func (chSt *ChStore) AddDependency(
     return err
 }
 
-/*
-
-func (chSt *ChStore) AddDependency(
-    inAuthURID []byte,
-    inDepChID uint64,
-    inDepTime int64,
-) error {
-
-
-    var (
-        depKey [chEntryDepKeySz]byte
-        chDep ChDependency
-    )
-
-    depKey[0] = chEntryDepKey
-    copy(depKey[1:], inAuthURID)
-
-    binary.BigEndian.PutUint64(depKey[1+pdi.URIDSz:], inDepChID)
-
-    chTxn := chSt.NewWrite()
-
-    writeUpdate := false
-
-    // If there's already a dependency for the referenced URID in the given channel, 
-    //    choose the more restrictive dependency.
-    item, err := chTxn.Get(depKey[:])
-    if err == nil {
-        err = item.Value(func(val []byte) error {
-            return chDep.Unmarshal(val)
-        })
-        if err == nil {
-            if inDepTime < chDep.DepTime {
-                writeUpdate = true
-            }
-        }
-    } else if err == badger.ErrKeyNotFound {
-        err = nil
-        writeUpdate := true
-    }
-
-    if err == nil && writeUpdate {
-        chDep.DepTime = inDepTime
-        var scrap [chDepScrapSz]byte
-        len, err := chDep.MarshalTo(scrap[:])
-        if err != nil {
-            panic(err)
-        }
-
-        err = chTxn.Set(depKey[:], scrap[:])
-        if err != nil {
-            panic(err)
-        }
-
-        // TODO: handle failed commit.  When exactly can commits fail??
-        err = chTxn.Commit()
-        if err != nil {
-            panic(err)
-        }
-
-    } else {
-        chTxn.Discard()
-    }
-
-    return err
-}
-*/
-  
 
 // RevalidateDependencies queues revalidation for all possible dependencies for the given entry.
 //
@@ -1436,8 +1464,10 @@ func (chSt *ChStore) dequeueRevalidation() {
         chSt.State.ValidatedUpto = make([]byte, plan.TIDSz)
     }
 
+    valUpto := plan.TID(chSt.State.ValidatedUpto)
+
     chSt.revalRequestMutex.Lock()
-    if plan.TID(chSt.State.ValidatedUpto).SelectEarlier(chSt.revalAfter) {
+    if valUpto.SelectEarlier(chSt.revalAfter) {
         chSt.Infof("rewinding re-validation head to %v", chSt.revalAfter)
     }
     chSt.revalAfter = plan.TimeFSMax
@@ -1448,19 +1478,6 @@ func (chSt *ChStore) dequeueRevalidation() {
 }
 
 
-var entryPool = sync.Pool{
-	New: func() interface{} {
-		return new(chEntry)
-	},
-}
-
-func chEntryAlloc() *chEntry {
-
-    entry := entryPool.Get().(*chEntry)
-    entry.Reuse()
-
-    return entry
-}
 
 
 
@@ -1499,10 +1516,16 @@ func mergeEntry(
 
 func startupChannel(ch ChAgent) error {
 
-    err := ch.Startup()
+    chSt := ch.Store()
+
+    err := chSt.loadChEpochs()
+    if err != nil {
+        panic("error loading ch epochs")
+    }
+
+    err = ch.Startup()
 
     if err == nil {
-        chSt := ch.Store()
 
         if chSt.processingEntries {
             panic("channel not in startup state")
@@ -1569,7 +1592,6 @@ func chEntryProcessor(ch ChAgent) {
         }
         
         {
-            updateValidationBookmark := false
 
             // Do initial merge or load the ChEntry from the chDB
             if entry != nil {
@@ -1578,21 +1600,20 @@ func chEntryProcessor(ch ChAgent) {
                 moreToValidate = false
             } else {
                 if entryTmp == nil {
-                    entryTmp = chEntryAlloc()
+                    entryTmp = chEntryAlloc(entryRevalidating)
                 }
 
                 chSt.Infof("%s", "loadNextEntryToValidate") 
 
                 if chSt.loadNextEntryToValidate(entryTmp) {
                     entry = entryTmp
-                    updateValidationBookmark = true
                     moreToValidate = true
 
                     // If we still haven't merged yet, we need to load the body, as if it just arrived chSt.entriesToMerge.
                     // Since this only occurs when chSt.State.MergeEnabled == false later turns true, this is rare and does not have to be efficient
                     if entry.State.Status == ChEntryStatus_AWAITING_MERGE {
                         chSt.Infof("%s", "loadOriginalEntryBody")
-                        chSt.loadOriginalEntryBody(entry)
+                        chSt.loadOriginalEntryBody(entry, nil)
                     }
                 } else {
                     chSt.Infof("%s", "moreToValidate = false") 
@@ -1606,7 +1627,7 @@ func chEntryProcessor(ch ChAgent) {
             
             var err error
  
-            chSt.Infof("processing entry %v (op: %v)", entry.Info.EntryID().String(), pdi.EntryOp_name[int32(entry.Info.EntryOp)])
+            chSt.Infof("processing entry %v (op: %v)", entry.Info.EntryID().Str(), pdi.EntryOp_name[int32(entry.Info.EntryOp)])
 
             // Does the entry need to be merged?
             if entry.State.Status == ChEntryStatus_AWAITING_MERGE {
@@ -1620,26 +1641,45 @@ func chEntryProcessor(ch ChAgent) {
                 case ChEntryStatus_LIVE:
                     chSt.Infof("%s", "validating entry")
                     chSt.ValidateEntry(entry)
+
             }
 
             // flush any changes to the entry to the channel db
             err = chSt.flushEntry(entry)
 
+            if entry.onMergeComplete != nil {
+                entry.onMergeComplete(entry, ch, err)
+                entry.onMergeComplete = nil
+            }
+
             if err != nil {
                 err = chSt.chMgr.flow.FilterFault(err)
+
+                // TODO: handle entry.txnSet
+                { }
+
             } else {
 
-                if updateValidationBookmark {
+                if entry.origin == entryFromStorageProvider || entry.origin == entryWasAuthored {
+                    chSt.chMgr.CR.txnsToWrite <- entry.PayloadTxns
+                    entry.PayloadTxns = nil
+                }
+
+                if entry.origin == entryRevalidating {
                     copy(chSt.State.ValidatedUpto, entry.Info.EntryID())
                 }
 
                 // If the status of this entry has changed, revalidate channels that are known to be dependent.
                 if entry.LivenessChanged() {
+                    chSt.onLivenessChangedInternal(entry)
+
                     chSt.RevalidateDependencies(&entry.Info)
 
                     ch.OnLivenessChanged(entry)
                 }
             }
+
+
         }
 
     }
@@ -1648,53 +1688,7 @@ func chEntryProcessor(ch ChAgent) {
 
 }
 
-/*
-func (chSt *ChStore) WriteEntry(
-    dbTxn *badger.Txn,
-    entry *chEntry,
-    inEntryAsset pcore.Marshaller,
-) error {
 
-    var scrap [1024]byte
-
-    sz, err := inEntryAsset.MarshalTo(scrap[:])
-    buf := scrap[:sz]
-    if err != nil {
-        buf, err = inEntryAsset.Marshal()
-    }
-
-    return chSt.WriteEntryRaw(dbTxn, inEntry, buf)
-
-}*/
-
-
-
-/*
-    dbTxn := chSt.db.NewTransaction(true)
-
-    // Setup the entry key
-    var entryKey chEntryKey 
-    entryKey[0] = chDbForkEntries
-    copy(entryKey[1:], inURID)
-
-    sz, err := inChEntry.MarshalTo(scrap[:])
-
-    if err == nil {
-        entryKey[entryForkPos] = entryForkChEntryInfo
-        err = dbTxn.Set(entryKey[:], scrap[:sz])
-    }
-
-    if err == nil {
-        entryKey[entryForkPos] = entryForkChEntryBody
-        err = dbTxn.Set(entryKey[:], inEntryBody)
-    }
-
-    if err == nil {
-        err = dbTxn.Commit()
-    } else {
-        dbTxn.Discard()
-    }*/
-   
 
 func (state *ChEntryState) getLiveIndex(
     inID plan.TID,
@@ -1868,10 +1862,6 @@ type ChACC struct {
 }
 
 
-const (
-    codecChEntryWhitelistURID = ChProtocolACC + "/ChEntryWhitelistID"
-)
-
 
 // MergePost -- see ChAgent.MergePost
 func (acc *ChACC) MergePost(
@@ -1882,35 +1872,6 @@ func (acc *ChACC) MergePost(
 }
 
 
-func (acc *ChACC) IsEntryAuthorized(
-    entry *chEntry,
-) error {
-
-    //entryStatus := ChEntryStatus_AWAITING_VALIDATION
-
-    epoch := acc.FetchChEpoch(entry.Info.ACCEntryID())
-    if epoch == nil {
-        return plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v in acc %v not found", entry.Info.ChannelEpochID, acc.State.ChannelID)
-    }
-
-    // Normal permissions lookup. boring: do last :\
-    { }
-
-    /*
-    if epoch.Extensions != nil {
-        epoch.Extensions.FindBlocksWithCodec(codecChEntryWhitelistURID, 0, func(inMatch *plan.Block) error {
-            if bytes.Equal(inEntryURID, inMatch.Content) {
-                entryStatus = ChEntryStatus_LIVE
-            }
-            return nil
-        })
-    }*/
-
-
-
-    return nil
-
-}
 
 /*
 const (
@@ -1923,11 +1884,6 @@ var (
 
 /* 
 ChMemberRegistry -- ChAgent for ChProtocolMemberRegistry 
-
-Db keys:
-/URID/0: ChEntryInfo
-/URID/1: IntSet (list of memberID epochs set by this entry)  
-/AgentFork/memberID/epochID/URID: pdi.MemberEpoch
 */
 type ChMemberRegistry struct {
     ChStore
@@ -1939,38 +1895,6 @@ type ChMemberRegistry struct {
 
 
 
-
-
-/*
-func (ch *ChMemberRegistry) Startup() error {
-
-    if ch.epochLookup == nil {
-        ch.epochLookup = map[uint64]*pdi.MemberEpoch{}
-    }
-
-
-
-    return nil
-}
-
-
-
-func (ch *ChMemberRegistry) PrepapreToMerge(entry *chEntry) error {
-
-    entry.
-}
-
-
-func (ch *ChMemberRegistry) BuildEntryAsset(entry *chEntry) error {
-
-    memberEpoch := &pdi.MemberEpoch{}
-    err := memberEpoch.Unmarshal(entry.Body)
-
-    memberEpoch.EpochTID = entry.Info.EntryID()
-
-    entry.Asset = memberEpoch
-}
-*/
 
 // MergePost -- see ChAgent.MergePost
 func (ch *ChMemberRegistry) MergePost(entry *chEntry) error {
@@ -1986,25 +1910,22 @@ func (ch *ChMemberRegistry) MergePost(entry *chEntry) error {
 
 
 func (ch *ChMemberRegistry) ValidateAuthor(
-    entryInfo *ChEntryInfo,
+    entry *chEntry,
 ) error {
      
     //registry.AddDependency(inEntry.Info.ChannelID, inEntry.TimeAuthored, BY_AUTHOR)
 
-    memberEpoch := ch.FetchMemberEpoch(entryInfo.AuthorEntryID())
-
-    if memberEpoch != nil {
+    memberEpoch := ch.FetchMemberEpoch(entry.Info.AuthorEntryID())
+    if memberEpoch == nil {
         return plan.Error(nil, plan.MemberEpochNotFound, "member epoch not found")
     }
 
     // TODO: validate entry timestamp
     { }
 
+    entry.Info.AuthorMemberID = memberEpoch.MemberID
 
-    if entryInfo.AuthorMemberID != memberEpoch.MemberID {
-        return plan.Error(nil, plan.FailedToProcessPDIHeader, "author member ID verification failed")
-    }
-    if ! bytes.Equal(memberEpoch.PubSigningKey, entryInfo.AuthorSig) {
+    if ! bytes.Equal(memberEpoch.PubSigningKey, entry.Info.AuthorSig) {
         return plan.Error(nil, plan.FailedToProcessPDIHeader, "author signature verification failed")
     }
 
@@ -2018,31 +1939,141 @@ func (ch *ChMemberRegistry) FetchMemberEpoch(inEntryID plan.TID) *pdi.MemberEpoc
 
     // Is the epoch already loaded?
     ch.lookupMutex.RLock()
-    epoch := ch.epochLookup[entryID]
+    memEpoch := ch.epochLookup[entryID]
     ch.lookupMutex.RUnlock()
 
-    if epoch == nil {
-        epoch = &pdi.MemberEpoch{}
+    if memEpoch == nil {
+        memEpoch = &pdi.MemberEpoch{}
 
-        err := ch.loadLatestEntryBody(nil, inEntryID, nil, epoch)
+        err := ch.loadLatestEntryBody(nil, inEntryID, nil, memEpoch)
 
         if err == nil {
 
             // Alternatively, we could write this when the entry is merged, but why waste space
-            epoch.EpochTID = append(epoch.EpochTID[:0], inEntryID...)
+            memEpoch.EpochTID = append(memEpoch.EpochTID[:0], inEntryID...)
 
             ch.lookupMutex.Lock()
-            ch.epochLookup[entryID] = epoch
+            ch.epochLookup[entryID] = memEpoch
             ch.lookupMutex.Unlock()
         } else {
-            epoch = nil
+            memEpoch = nil
         }
     }
 
-    return epoch
+    return memEpoch
 
 }
 
+
+type ChEpochNode struct {
+
+    Prev    *ChEpochNode
+    Next    []*ChEpochNode
+
+    Epoch   pdi.ChannelEpoch
+    Status  ChEntryStatus
+
+}
+
+
+func (chSt *ChStore) loadChEpochs() error {
+
+    var (
+        err error
+        epochTID plan.TIDBlob
+        entryState ChEntryState
+    )
+
+    chTxn := chSt.db.NewTransaction(false)
+    defer chTxn.Discard()
+
+    opts := badger.IteratorOptions{
+        Prefix: chEpochsPrefix,
+    }
+
+    itr := chTxn.NewIterator(opts)
+    defer itr.Close()
+
+
+    chSt.chEpochNodes = chSt.chEpochNodes[:0]
+
+    for itr.Seek(nil); itr.Valid(); itr.Next() {
+        itemKey := itr.Item().Key()
+        copy(epochTID[:], itemKey[len(chEpochsPrefix):])
+
+        node := &ChEpochNode{}
+
+        err = chSt.loadEntry(
+            epochTID[:], 
+            chTxn,
+            nil, 
+            &entryState,
+            func (v []byte) error {
+                return node.Epoch.Unmarshal(v)
+            },
+        )
+
+        if err == nil {
+            node.Status = entryState.Status
+            chSt.chEpochNodes = append(chSt.chEpochNodes, node)
+        }
+    }
+
+    // Now that all the epochs are loaded (in TID order), link them
+// TODO: put this in a fcn
+    for _, node := range chSt.chEpochNodes {
+        prev := chSt.FetchChEpoch(node.Epoch.PrevEpochTID)
+        if prev != nil {
+            node.Prev = prev
+            prev.Next = append(prev.Next, node)
+        }
+    }
+
+    return nil
+
+}
+
+func (chSt *ChStore) onLivenessChangedInternal(entry *chEntry) {
+
+    if entry.Info.EntryOp == pdi.EntryOp_NEW_CHANNEL_EPOCH {
+
+        node := chSt.FetchChEpoch(entry.Info.EntryID())
+
+        if node != nil {
+            node.Status = entry.State.Status
+        } else {
+
+            node := &ChEpochNode{}
+            err := chSt.loadOriginalEntryBody(entry, &node.Epoch)
+            chSt.Log(err, "failed to load ch epoch")
+
+            if err == nil {
+                node.Status = entry.State.Status
+
+                chSt.chEpochNodes = append(chSt.chEpochNodes, node)
+                sort.Sort(ByEpochTID(chSt.chEpochNodes))
+
+                // Link the newly added node
+// TODO: put this in a fcn
+                prev := chSt.FetchChEpoch(node.Epoch.PrevEpochTID)
+                if prev != nil {
+                    node.Prev = prev
+                    prev.Next = append(prev.Next, node)
+                }
+            }
+        }
+
+    }
+
+}
+
+
+// ByEpochTID implements sort.Interface to sort a slice of ChEpochNodes by TID
+type ByEpochTID []*ChEpochNode
+
+func (a ByEpochTID) Len() int           { return len(a) }
+func (a ByEpochTID) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByEpochTID) Less(i, j int) bool { return bytes.Compare(a[i].Epoch.EpochTID, a[j].Epoch.EpochTID) < 0 }
 
 
 
@@ -2067,21 +2098,29 @@ func (ch *ChCommunityEpochs) Startup() error {
     // Scan all entries from the start
     for {
 
-        commEpoch := &pdi.CommunityEpoch{}
 
         // TODO: handle error
         haveEntry, loadErr := ch.loadNextEntry(
             chTxn,
             entry.Info.EntryID(),
             &entry,
-            func(v []byte) error {
-                return commEpoch.Unmarshal(v)
-            },
         )
 
         if ! haveEntry {
             break
         }
+
+        if entry.State.Status != ChEntryStatus_LIVE {
+            continue
+        }
+
+        if entry.Info.EntryOp != pdi.EntryOp_POST_CONTENT {
+            continue
+        }
+
+        commEpoch := &pdi.CommunityEpoch{}
+
+        ch.loadOriginalEntryBody(&entry, commEpoch)
 
         if loadErr == nil {
             ch.epochHistory = append(ch.epochHistory, commEpoch)
@@ -2090,6 +2129,54 @@ func (ch *ChCommunityEpochs) Startup() error {
 
     return err
 }
+
+
+// OnLivenessChanged -- see ChAgent.OnLivenessChanged
+func (ch *ChCommunityEpochs) OnLivenessChanged(
+    entry *chEntry,
+) error {
+
+    if entry.Info.EntryOp == pdi.EntryOp_POST_CONTENT {
+
+        entryID := entry.Info.EntryID()
+
+        if entry.IsLive() {
+
+            commEpoch := &pdi.CommunityEpoch{}
+
+            err := ch.loadEntry(
+                entryID,
+                nil,
+                nil,
+                nil,
+                func(v []byte) error {
+                    return commEpoch.Unmarshal(v)
+                },
+            )
+
+            if err == nil {
+                ch.epochHistory = append(ch.epochHistory, commEpoch)
+            }
+
+        } else {
+            N := len(ch.epochHistory)
+            for i := 0; i < N; i++ {
+                epoch := ch.epochHistory[i]
+                if bytes.Equal(epoch.EpochTID, entryID) {
+                    N--
+                    ch.epochHistory[i] = ch.epochHistory[N]
+                    ch.epochHistory = ch.epochHistory[:N]
+                }
+            } 
+            
+        }
+    }
+
+    return nil
+
+}
+
+
 
 // MergePost -- see ChAgent.MergePost
 func (ch *ChCommunityEpochs) MergePost(entry *chEntry) error {
@@ -2102,7 +2189,7 @@ func (ch *ChCommunityEpochs) MergePost(entry *chEntry) error {
 
     epoch.EpochTID = entry.Info.EntryID()
     entry.Body, err = epoch.Marshal()
-    entry.flushBody = true
+    entry.bodyStatus = partTouched
     
     return err
 }

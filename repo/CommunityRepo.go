@@ -100,16 +100,16 @@ type CommunityRepo struct {
     unpacker                ski.PayloadUnpacker
 
 
-    txnsToCommit            chan pdi.RawTxn
     txnsToDecode            chan pdi.RawTxn
-    txnsToWrite             chan pdi.RawTxn
+    txnsToWrite             chan *pdi.PayloadTxns
+    txnsToCommit            chan *pdi.PayloadTxns
 
     txnsToFetch             chan *pdi.TxnList         // URIDs to be fetched from the SP (that the repo needs)
     txnCollater             pdi.TxnCollater
 
     txnWorklist             *badger.DB      // Status info by txn URID
 
-    entriesToMerge          chan *entryIP
+    entriesToMerge          chan *chEntry
     CommunityKeyringName    []byte
 
     communitySKI            ski.Session
@@ -149,7 +149,6 @@ type CommunityRepo struct {
 
 
 
-
 // NewCommunityRepo creates a CommunityRepo for use.
 //
 // If inSeed is set, this repo is being instantiated for the first time
@@ -161,19 +160,32 @@ func NewCommunityRepo(
     var err error
 
     CR := &CommunityRepo{
-        //Config: inConfig,
         DefaultFileMode: plan.DefaultFileMode,
-        //txnsToProcess: make(chan txnInProcess),
         unpacker: ski.NewUnpacker(true),
-        chMgr: NewChMgr(inHomePath),
         HomePath: inHomePath,
         spSyncWakeup: make(chan struct{}, 5),
         spSyncActive: false,
         spSyncStatus: spSyncStopped,
     }
-
-    //CR.communitySKICond = sync.NewCond(&CR.communitySKIMutex)
  
+    CR.txnCollater.PayloadHandler = func(inPayload []byte, inPayloadTxns *pdi.PayloadTxns) error {
+        var err error
+
+        switch inPayloadTxns.PayloadEncoding {
+            case plan.Encoding_Pb_EntryCrypt:
+                entry := chEntryAlloc(entryFromStorageProvider)
+                entry.PayloadTxns = inPayloadTxns
+                entry.tmpCrypt.CommunityEpochID = entry.tmpCrypt.CommunityEpochID[:0]
+                entry.tmpCrypt.PackedEntry = entry.tmpCrypt.PackedEntry[:0]
+                err = entry.tmpCrypt.Unmarshal(inPayload)
+                if err == nil {
+                    CR.entriesToMerge <- entry
+                }
+        }
+
+        return err
+    }
+
     seedPathname := CR.GenesisSeedPathname()
 
     // If we're seeding this repo, write out critical files.
@@ -196,7 +208,7 @@ func NewCommunityRepo(
     }
 
     if err == nil {
-        CR.chMgr.StorageEpoch = *CR.GenesisSeed.StorageEpoch
+        CR.chMgr = NewChMgr(inHomePath, CR)
         CR.MemberSessions.Host = CR
         CR.CommunityKeyringName = CR.GenesisSeed.StorageEpoch.CommunityKeyringName()
     }
@@ -302,23 +314,44 @@ func (CR *CommunityRepo) onInternalStartup() error {
         return plan.Error(err, plan.StorageNotReady, "CommunityRepo.txnDB.Open() failed")
     }
 
+
     //
     //
     //
     //
-    // inbound pdi entry processor
+    // txn committer
     //
-    // Processes a new pdi.EntryCrypt and dispatches it to the appropriate channel pipeline
-    CR.entriesToMerge = make(chan *entryIP, 1)
-    CR.flow.ShutdownComplete.Add(1)
+    // Receives txns ready to be committed to the community's storage
+    CR.txnsToCommit = make(chan *pdi.PayloadTxns, 16)
     go func() {
 
-        for eip := range CR.entriesToMerge {
-            err := CR.decryptAndMergeEntry(eip)
-            CR.flow.LogErr(err, "entry failed to process")
-        }
+        for payload := range CR.txnsToCommit {
 
-        CR.chMgr.flow.Shutdown(CR.flow.ShutdownReason)
+            // TODO drop txn gracefully?
+
+            CR.flow.Log.Infof("committing payload %v", payload.PayloadIDStr())
+
+            N := len(payload.Txns)
+            for i := 0; i < N; i++ {
+                _, err := CR.spClient.CommitTxn(CR.spContext, &pdi.RawTxn{Bytes: payload.Txns[i].Bytes})
+                if err != nil {
+                    CR.flow.Log.WithError(err).Warn("got commit err")
+                }
+            }
+
+            // TODO update commit log
+            // mark txn as committed
+            // mark txn as conformed/witnessed when seen later on a scan
+            // All possible txn meta info: 
+            //    - txn authored locally?
+            //    - (if NOT authored locally), when was txn received?
+            //    - (if authored locally), txn successfully committed?
+            //    - (if authored locally and sucessfully committed), txn ID witnessed at a later time?
+            //     - idea: maintain separate table of txns:
+            //          - locally authored txns to be committed, confirmed committed, and confirmed witnessed? (3 lists)
+            //          - txns that have yet to be processed into channels (e.g. post to channel that doesn't exist yet)
+
+        }
 
         CR.flushState()
 
@@ -331,6 +364,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
         }
 
         CR.flow.ShutdownComplete.Done()
+        
+        CR.spSyncStop()        
     }()
     //
     //
@@ -338,30 +373,56 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // txnsToWrite processor
     //
-    // Writes incoming raw txns (that have been validated) to the txn DB
-    CR.txnsToWrite = make(chan pdi.RawTxn, 8)
+    // Writes incoming raw txns to the txn DB
+    CR.txnsToWrite = make(chan *pdi.PayloadTxns, 8)
     go func() {
-    
-        for txn := range CR.txnsToWrite {
-            dbTxn := CR.txnDB.NewTransaction(true)
-            dbErr := dbTxn.Set([]byte(txn.URID), txn.Bytes)
-            if dbErr == nil {
-                dbErr = dbTxn.Commit()
-            } else {
-                dbTxn.Discard()
-            }
+        var err error
 
-            CR.flow.Log.Infof("stored     txn %v", ski.BinDesc(txn.URID))
-            
-            if dbErr != nil {
-                err := plan.Errorf(dbErr, plan.TxnDBNotReady, "failed to write txn %v to db", txn.URID)
-                if CR.flow.FilterFault(err) != nil {
-                    break
+        for payload := range CR.txnsToWrite {
+            wb := CR.txnDB.NewWriteBatch()
+            N := len(payload.Txns)
+            for i := 0; i < N; i++ {
+                err = wb.Set(payload.Txns[i].URID, payload.Txns[i].Bytes, 0)
+                if err != nil {
+                    // TODO log err
                 }
+            }
+            err = wb.Flush()
+            if err != nil {
+                // TODO log err
+            }
+            CR.flow.Log.Infof("stored  payload %v (%d txns)", payload.PayloadIDStr(), N)
+
+            // Commits underlying txns if they've been locally authored
+            if payload.NewlyAuthored {
+                CR.txnsToCommit <- payload
             }
         }
 
-        close(CR.entriesToMerge)
+        close(CR.txnsToCommit)
+    }()
+
+    //
+    //
+    //
+    //
+    // inbound pdi entry processor
+    //
+    // Processes a new pdi.EntryCrypt and dispatches it to the appropriate channel pipeline
+    CR.entriesToMerge = make(chan *chEntry, 1)
+    CR.flow.ShutdownComplete.Add(1)
+    go func() {
+
+        for entry := range CR.entriesToMerge {
+            err := CR.decryptAndMergeEntry(entry)
+            CR.flow.LogErr(err, "entry failed to process")
+        }
+
+        // Now that all entries have been inserted into the chMgr, we can shut that down
+        CR.chMgr.flow.Shutdown(CR.flow.ShutdownReason)
+
+        close(CR.txnsToWrite)
+
     }()
     //
     //
@@ -369,9 +430,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // txnsToDecode processor
     //
-    // Decodes incoming raw txns and fans each out to:
-    //    - the txn DB write queue
-    //    - txn payload handling
+    // Decodes incoming raw txns and inserts them into the collator, which performs callbacks to merge payloads (entries)
     CR.txnsToDecode = make(chan pdi.RawTxn, 1)
     go func() {
 
@@ -380,47 +439,13 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         for txnIn := range CR.txnsToDecode {
 
-            // TODO: use sync.Pool
-            seg := &pdi.DecodedTxn{
-                RawTxn: txnIn.Bytes,
-            }
-
-            err := seg.DecodeRawTxn(txnDecoder)
+            err = CR.txnCollater.DecodeAndCollateTxn(txnDecoder, &txnIn)
             if err != nil {
-                err = plan.Error(err, plan.TxnDecodeFailed, "txn decode failed")
-            } else {
-                txnIn.URID = seg.Info.URID
-            }
-
-            // TODO: (DoS security) check that the SP isn't handing back wrong/unrequested txns
-            if err == nil {
-                {}
-            }
-
-// TODO: only write txn when it's been merged .
-// Use txnCollater to keep txn in memory.  this way, a repo that doesn't shut down properly results in non-merged txns to fatched again (vs corrupt bookeeping) 
-            if err == nil {
-                CR.txnsToWrite <- txnIn
-            }
-
-            URID := seg.URID
-
-            if err == nil {
-                var solo *pdi.DecodedTxn
-                solo, err = CR.txnCollater.Desegment(seg)
-
-                if solo != nil && err == nil {
-                    URID = seg.URID
-                    err = CR.DispatchPayload(solo)
-                }
-            }
-
-            if err != nil {
-                CR.flow.Log.WithError(err).Warnf("err processing txn %v", URID)
+                CR.flow.Log.WithError(err).Warnf("err processing txn %v", txnIn.URID)
             }
         }
 
-        close(CR.txnsToWrite)
+        close(CR.entriesToMerge)
     }()
     //
     //
@@ -431,11 +456,6 @@ func (CR *CommunityRepo) onInternalStartup() error {
     // Dispatches txn ID requests to the community's (remote) StorageProvider(s), managing connections etc.
     CR.txnsToFetch = make(chan *pdi.TxnList, 16)
     go func() {
-
-        /*var (
-            err error
-            spReader pdi.StorageProvider_SendTxnsClient
-        )*/
 
         for txnList := range CR.txnsToFetch {
             
@@ -459,112 +479,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         close(CR.txnsToDecode)
     }()
-    //
-    //
-    //
-    //
-    // txn committer
-    //
-    // Receives txns ready to be committed to the community's storage
-    CR.txnsToCommit = make(chan pdi.RawTxn, 16)
-    go func() {
-
-        for txn := range CR.txnsToCommit {
-
-            // TODO drop txn gracefully?
-
-            CR.flow.Log.Infof("committing txn %v", ski.BinDesc(txn.URID))
 
 
-            // TODO: use stream input and output so that commit details can be reported?
-            _, err := CR.spClient.CommitTxn(CR.spContext, &pdi.RawTxn{Bytes: txn.Bytes})
-            if err != nil {
-                CR.flow.Log.WithError(err).Warn("got commit err")
-            } else {
-                // TODO: mark txn as committed
-                // TODO: mark txn as conformed/witnessed when seen later on a scan
-                // All possible txn meta info: 
-                //    - txn authored locally?
-                //    - (if NOT authored locally), when was txn received?
-                //    - (if authored locally), txn successfully committed?
-                //    - (if authored locally and sucessfully committed), txn ID witnessed at a later time?
-                //     - idea: maintain separate table of txns:
-                //          - locally authored txns to be committed, confirmed committed, and confirmed witnessed? (3 lists)
-                //          - txns that have yet to be processed into channels (e.g. post to channel that doesn't exist yet)
-            }
-        }
-
-        CR.spSyncStop()        
-
-        close(CR.txnsToFetch)
-    }()
-    //
-    //
-    //
-    //
-    // txn update monitor
-    /*
-        var URIDs []byte
-
-        for {
-
-            // In the futurtre
-            URIDs, err := CR.scanForTxns(URIDs)
-            if err == nil && len(URIDs) > 0 {
-                URIDs, err = CR.filterMissingTxns(URIDs)
-            }
-
-            if txnBatch != nil {
-                
-                for CR.opState == repoStarting || CR.opState == repoRunning {
-                    var err error
-                    txnBatch.URIDs, err = CR.filterMissingTxns(txnBatch.URIDs)
-                    if CR.RetryCriticalOp(err) {
-                        continue
-                    }
-
-                    // Request whatever txns we're missing
-                    if len(txnBatch.URIDs) > 0 {
-                        CR.txnsToFetch <- txnBatch 
-                    }
-                }
-            }
-            if recvErr != nil {
-                CR.flow.Log.WithError(recvErr).Warn("scanForMissingTxns recvErr")
-            }
-        }
-
-        CR.flow.Log.Debug("missingTxnScanner() exiting")
-        CR.partsRunning.Done()
-    
-
-    
-
-            if CR.spCommitTxns == nil {
-
-                if err != nil {
-                    // TODO err?
-                }
-                
-                // Receive txn status info on another thread
-                go func() {
-                    for CR.CheckState() != nil {
-                        metaInfo, err := CR.spCommitTxns.Recv()
-                        if err != nil {
-                            break
-                        }
-                        if metaInfo.TxnStatus == pdi.TxnStatus_COMMITTED {
-                            // TODO: remove txn from worklist
-                        }
-                    }
-                }
-            }
-
-            err = CR.spCommitTxns.Send(&pdi.RawTxn{txn.RawTxn})
-            if err != nil {
-                // TODO err?
-            }
-        }*/
 
     if err = CR.chMgr.Startup(CR.flow.Ctx); err != nil {
         return err
@@ -579,12 +495,12 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
 func (CR *CommunityRepo) onInternalShutdown() {
 
-    // First, end all member sessions
-    CR.MemberSessions.Shutdown("parent repo shutting down", nil)
+    // First, end all member sessions (and channel sessions)
+    CR.MemberSessions.Shutdown(CR.flow.ShutdownReason, nil)
 
-    // This initiates a close-cascade
-    if CR.txnsToCommit != nil {
-        close(CR.txnsToCommit)
+    // This will cause the fetch, then decode, then merge routines to stop
+    if CR.txnsToFetch != nil {
+        close(CR.txnsToFetch)
     }
 
 }
@@ -970,7 +886,7 @@ func (CR *CommunityRepo) Trace(inMsg string) {
 	CR.flow.Log.Trace(inMsg)
 }
 
-
+/*
 // DispatchPayload unpacks a decoded txn which is given to be a single/sole segment.
 func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 
@@ -997,15 +913,23 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 
     return nil
 }
+*/
 
+func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
 
-func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
+    var (
+        err error
+        communityEpoch *pdi.CommunityEpoch
+    )
 
-    eip.timeStart = plan.Now()
-    var err error
+    isGenesisEntry := len(entry.tmpCrypt.CommunityEpochID) == 0
+    if isGenesisEntry {
+        communityEpoch = CR.GenesisSeed.CommunityEpoch
+        entry.tmpCrypt.CommunityEpochID = append(entry.tmpCrypt.CommunityEpochID[:0], communityEpoch.EpochTID...)
+    } else {
+        communityEpoch = CR.FetchCommunityEpoch(entry.tmpCrypt.CommunityEpochID)
+    }
 
-    communityEpoch := CR.FetchCommunityEpoch(eip.EntryCrypt.CommunityEpochID)
-    
     if communityEpoch == nil {
         return plan.Error(nil, plan.CommunityEpochNotFound, "community epoch not found")
     }
@@ -1018,7 +942,7 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
             KeyringName: CR.CommunityKeyringName,
             PubKey: communityEpoch.KeyInfo.PubKey,
         },
-        BufIn: eip.EntryCrypt.PackedEntry,
+        BufIn: entry.tmpCrypt.PackedEntry,
     })
     err = cryptErr
     if plan.IsError(err, plan.KeyringNotFound, plan.KeyEntryNotFound) {
@@ -1039,16 +963,30 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         return err
     }
 
-    err = eip.EntryInfo.Unmarshal(packingInfo.Header)
+    entry.tmpInfo.EntryOp = pdi.EntryOp(0)
+    entry.tmpInfo.EntrySubOp = 0
+    entry.tmpInfo.SupersedesEntryID = entry.tmpInfo.SupersedesEntryID[:0]
+    entry.tmpInfo.Extensions = nil
+    entry.tmpInfo.ChannelID = entry.tmpInfo.ChannelID[:0]
+    entry.tmpInfo.TIDs = entry.tmpInfo.TIDs[:0]
+    err = entry.tmpInfo.Unmarshal(packingInfo.Header)
     if err != nil {
         return err
     }
 
+    numTIDs := len(entry.tmpInfo.TIDs) / plan.TIDSz
+    if numTIDs < int(pdi.EntryTID_NormalNumTIDs) {
+        return plan.Error(nil, plan.ChEntryIsMalformed, "entry missing required TIDs")
+    }
 
-    var scrap [pdi.URIDSz]byte
-    entryURID := pdi.URIDFromInfo(scrap[:], eip.EntryInfo.TimeAuthored(), packingInfo.Hash)
-    if ! bytes.Equal(eip.txnPayloadName, entryURID) {
-        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload URID was %v but actual is %v", eip.txnPayloadName, entryURID)
+    entryID := entry.tmpInfo.EntryID()
+
+    // The entry ID's latter bytes are rightmost bytes of the entry hashname.  
+    // This has to always be set since the hashname can never be known when the entry is being packed
+    entryID.SetHash(packingInfo.Hash)
+    
+    if ! bytes.Equal(entry.PayloadTxns.PayloadID, entryID) {
+        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload ID was %v but actual is %v", entry.PayloadTxns.PayloadID, entryID)
     }
 
 
@@ -1061,26 +999,15 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
     }*/
 
     // chEntry is our main workhorse structure
-    entry := eip.entry
-    entry.AssignFromDecrytedEntry(&eip.EntryInfo, packingInfo.Signer.PubKey)
-    eip.entry.Body = append(eip.entry.Body[:0], packingInfo.Body...)
-
-    numTIDs := len(entry.Info.TIDs) / plan.TIDSz
-    if numTIDs < int(pdi.EntryTID_NormalNumTIDs) {
-        entry.ThrowMalformed(plan.Error(nil, plan.ChEntryIsMalformed, "entry missing required TIDs"))
-    } else {
-
-        // The entry ID's latter bytes are rightmost bytes of the entry hashname.
-        entry.Info.EntryID().SetHash(packingInfo.Hash)
-    }
+    entry.AssignFromDecrytedEntry(&entry.tmpInfo, packingInfo.Signer.PubKey)
+    entry.Body = append(entry.Body[:0], packingInfo.Body...)
 
     // If this entry appears to be a genesis entry, we def want to verify that.  :)
-    isGenesisEntry := len(eip.EntryCrypt.CommunityEpochID) == 0
     if entry.IsWellFormed() && isGenesisEntry {
 
         found := false
-        for _, URID := range CR.GenesisSeed.StorageEpoch.GenesisURIDs {
-            if bytes.Equal(URID, entryURID) {
+        for _, genesisEntryID := range CR.GenesisSeed.StorageEpoch.GenesisEntryIDs {
+            if bytes.Equal(entryID, genesisEntryID) {
                 entry.AddFlags(ChEntryFlag_GENESIS_ENTRY_VERIFIED)
                 found = true
                 break
@@ -1088,12 +1015,12 @@ func (CR *CommunityRepo) decryptAndMergeEntry(eip *entryIP) error {
         }
         if ! found {
             entry.ThrowMalformed(
-                plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryURID),
+                plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryID),
             )
         }
     }
 
-    CR.chMgr.QueueEntryForMerge(eip.EntryInfo.ChannelID, entry)
+    CR.chMgr.QueueEntryForMerge(entry)
  
     // At this point, the PDI entry's signature has been verified
     return err
@@ -1156,14 +1083,6 @@ func (CR *CommunityRepo) Context() context.Context {
     return CR.flow.Ctx
 }
 
-// CommitEntryTxns -- see interface MemberHost
-func (CR *CommunityRepo) CommitEntryTxns(inEntryURID []byte, inTxns []pdi.RawTxn) {
-    for _, txn := range inTxns {
-        CR.txnsToCommit <- txn
-        CR.txnsToWrite  <- txn
-    }
-}
-
 // LatestCommunityEpoch -- see interface MemberHost
 func (CR *CommunityRepo) LatestCommunityEpoch() *pdi.CommunityEpoch {
     chCE := CR.chMgr.FetchCommunityEpochsChannel()
@@ -1200,6 +1119,7 @@ func (CR *CommunityRepo) FetchCommunityEpoch(inEpochID []byte) *pdi.CommunityEpo
 }
 
 
+
 /*
 // ChannelID returns this entry's destination channnel ID.
 func (entry *chEntry) ChannelID() plan.ChannelID {
@@ -1211,7 +1131,7 @@ type entryIP struct {
 
     txnPayloadName  []byte
 
-    timeStart       int64
+    //timeStart       int64
 
     // Txn ID of the last/final segment storage provider txn
    // ParentURID      string
@@ -1226,9 +1146,6 @@ type entryIP struct {
     entryTxn        pdi.StorageTxn */
 
     entry           *chEntry
-
-    EntryCrypt      pdi.EntryCrypt
-    EntryInfo       pdi.EntryInfo
 
 
     //ChannelEpoch    *pdi.ChannelEpoch
