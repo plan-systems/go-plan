@@ -167,7 +167,7 @@ func (tc *TxnCollater) DecodeAndCollateTxn(
 // Consolidate collates multisegment txns until all the segments are present.
 //
 // If txnIn completes this multi-segment txn group, the txnIncoming returned is a reconstructed (single) segment ready for decapsulation.
-func (tc *TxnCollater) Consolidate(group *segGroup) error {
+func (tc *TxnCollater) consolidate(group *segGroup) error {
 
 	N := group.Info.SegTotal
 
@@ -267,7 +267,7 @@ func (tc *TxnCollater) Desegment(
                         delete(tc.segMap, seg.TxnURID().Blob())
                     }
 
-                    err = tc.Consolidate(group)
+                    err = tc.consolidate(group)
                     break
                 }
 

@@ -30,10 +30,6 @@ func TestVarAppendBuf(t *testing.T) {
 
 	gTesting = t
 
-	seed := plan.Now()
-	gTesting.Logf("Using seed: %d", seed)
-	rand.Seed(seed)
-
 	testBufs := make([][]byte, 100)
 
 	for i := range testBufs {
@@ -135,12 +131,12 @@ func TestTxnEncoding(t *testing.T) {
 	}
 }
 
+
 func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 
     seed := plan.Now()
-    //seed = int64(1550730342)
+    //seed = int64(1559235863)
     gTesting.Logf("using seed %d", seed)
-
     rand.Seed(seed)
 
     totalBytes := 0
@@ -161,11 +157,33 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             gTesting.Fatal(err)
         }
 
-        txns := make([]*pdi.DecodedTxn, 10000)
+  
+        var (
+            swizzle []int
+            payloadTxns pdi.PayloadTxns
+            payloadOut struct{
+                txns *pdi.PayloadTxns
+                bytes []byte
+                nameStr string
+            }
+        )
 
         collator := pdi.NewTxnCollater()
+        collator.PayloadHandler = func(inPayload []byte, inTxns *pdi.PayloadTxns) error {
+            //gTesting.Logf("Recieved payload", i, idx, N)
 
-		for i := 0; i < 1000; i++ {
+            if payloadOut.txns != nil {
+                return plan.Error(nil, plan.AssertFailed, "received more than one payload")
+            }
+            payloadOut.txns = inTxns
+            payloadOut.bytes = inPayload
+            payloadOut.nameStr = plan.Base64.EncodeToString(inTxns.PayloadID)
+
+            return nil
+        }
+
+
+		for j := 0; j < 5000; j++ {
             testTime := plan.Now()
 
 			payloadLen := int(1 + rand.Int31n(int32(stEpoch.TxnMaxSize) * 25))
@@ -176,81 +194,72 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             totalBytes += payloadLen
             totalPayloads++
 
-            nameStr := fmt.Sprintf("%d", payloadLen)
+            payloadIDStr := fmt.Sprintf("%d: %v", payloadLen, payload[:4])
+            payloadID := []byte(payloadIDStr)
 
-			txnsOut, err := encoder.EncodeToTxns(
+            payloadOut.txns = nil
+
+			err := encoder.EncodeToTxns(
 				payload,
-                []byte(nameStr),
+                payloadID,
 				plan.Encoding_Unspecified,
 				nil,
-                testTime + int64(i),
+                testTime + int64(j),
+                &payloadTxns,
 			)
 			if err != nil {
 				gTesting.Fatal(err)
 			}
 
-            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", i, len(txnsOut), len(payload))
-            if i == 266 {
-                err = nil
-            }
-            var prevURID []byte
+            N := len(payloadTxns.Txns)
 
-			for idx, txnOut := range txnsOut {
-				decodedTxn := &pdi.DecodedTxn{
-                    RawTxn: txnOut.Bytes,
+            // Setup a shuffle the txn segment order
+            {
+                if cap(swizzle) < N {
+                    swizzle = make([]int, N, N + 100)
+                } else {
+                    swizzle = swizzle[:N]
                 }
 
-                totalTxns++
+                for i := 0; i < N; i++ {
+                    swizzle[i] = i
+                }
 
-                gTesting.Logf("Decoding idx %d of %d", idx, len(txnsOut))
+                if false {
+                    rand.Shuffle(N, func(i, j int) {
+                        swizzle[i], swizzle[j] = swizzle[j], swizzle[i]
+                    })
+                }
+            }
 
-				err = decodedTxn.DecodeRawTxn(decoder)
+            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", j, N, len(payload))
+            //if i == 266 {
+            //    err = nil
+            //}
+
+			for i := 0; i < N; i++ {
+
+                idx := swizzle[i]
+                gTesting.Logf("Decoding %d (%d) of %d", i, idx, N)
+                err = collator.DecodeAndCollateTxn(decoder, &payloadTxns.Txns[idx])
 				if err != nil {
-					gTesting.Fatal(err)
-                }
-                if ! bytes.Equal(txnOut.URID, decodedTxn.Info.URID) {
-                    gTesting.Fatal("decoded URID doesn't match")
-                }
-                if ! bytes.Equal(prevURID, decodedTxn.Info.PrevURID) {
-                    gTesting.Fatal("prev seg URID not set properly")
-                }
-
-                txns[idx] = decodedTxn
-                prevURID = decodedTxn.Info.URID
-            }
-            N := len(txnsOut)
-
-            rand.Shuffle(N, func(i, j int) {
-                txns[i], txns[j] = txns[j], txns[i]
-            })
-
-            var final *pdi.DecodedTxn
-            for i := 0; i < N; i++ {
-                final, err = collator.Desegment(txns[i])
-                if err != nil {
                     gTesting.Fatal(err)
                 }
-                if final != nil && i < N - 1 {
-                    gTesting.Fatal("got final too soon")
-                }
             }
 
-            if final == nil {
-                gTesting.Fatal("didn't get final txn")
+            if payloadOut.txns == nil {
+                gTesting.Fatal("didn't get payload out")
             }
 
-            if ! bytes.Equal(payload, final.PayloadSeg) {
-                gTesting.Fatal("payload failed")
+            if ! bytes.Equal(payloadID, payloadOut.txns.PayloadID) {
+                gTesting.Fatal("payloadID chk failed")
             }
 
-            lenStr := fmt.Sprintf("%d", len(final.PayloadSeg))
-            if ! bytes.Equal([]byte(lenStr), final.Info.PayloadName) {
-                gTesting.Fatal("payload name chk failed")
+            if ! bytes.Equal(payload, payloadOut.bytes) {
+                gTesting.Fatal("payload check failed")
             }
 
-            if pdi.URID(prevURID).String() != final.URID {
-                gTesting.Fatal("last URID chk failed")
-            }
+
 		}
 	}
 
