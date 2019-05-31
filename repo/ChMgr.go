@@ -10,7 +10,7 @@ import (
     //"strings"
     "sync"
     "context"
-    //"fmt"
+    "fmt"
     //"sort"
     //"encoding/hex"
     //"encoding/json"
@@ -28,18 +28,6 @@ import (
     "github.com/dgraph-io/badger"
 
 )
-
-
-
-/*
-// revalMsg tells a channel what entries need revalidation.
-//
-// This can be more sophisticated in the future for explicit entries
-type revalMsg struct {
-    revalMode               revalMode
-    revalAfter              int64
-}
-*/
 
 
 // ChMgr is the top level interface for a community's channels.
@@ -65,13 +53,6 @@ type ChMgr struct {
 }
 
 
-
-
-
-var (
-    //hMgrStateKey   = []byte{0}
-    zero64          = []byte{0, 0, 0, 0, 0, 0, 0, 0}
-)
 
 func NewChMgr(
     inHomeDir string,
@@ -139,32 +120,6 @@ func (chMgr *ChMgr) onInternalStartup() error {
         dbTxn.Discard()
     }*/
 
-
-/*
-    //
-    //
-    //
-    //
-    // channel (re)validator
-    //
-    chMgr.channelsToRevalidate = make(chan plan.ChannelID, 20)
-    chMgr.flow.ShutdownComplete.Add(1)
-    go func() {
-
-        for chID := range chMgr.channelsToRevalidate {
-            ch, err := chMgr.FetchChannel(chID, nil)
-            if err != nil {
-                chMgr.flow.LogErr(err, "error fetching channel for revalidation")
-                continue
-            }
-
-            chMgr.Revalidate()
-        }
-
-        chMgr.flow.ShutdownComplete.Done()
-    }()*/
-
-
     return nil
 }
   
@@ -178,7 +133,7 @@ func (chMgr *ChMgr) onInternalShutdown() {
 
         shutdown := &sync.WaitGroup{} 
 
-        // First, cause all the ChStores to exit their main validation loop.
+        // First, cause all the ChStores to exit their main entry processing loop.
         chMgr.chMutex.RLock()
         {
             // Make a list to hold the channels we're waiting on
@@ -203,6 +158,8 @@ func (chMgr *ChMgr) onInternalShutdown() {
         if len(waitingOn) == 0 {
             break
         }
+
+        chMgr.CR.Infof(1, "waiting on %d channels to shutdown", len(waitingOn))
 
         // Wait until every loaded channel has exited it main validation loop
         shutdown.Wait()
@@ -585,11 +542,11 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                 )
 
                 if chNew == nil {
-                    chUnk.Infof("channel protocol %v not recognized", chGenesisEpoch.ChProtocol)
+                    chUnk.Warnf("channel protocol %v not recognized", chGenesisEpoch.ChProtocol)
                 } else {
 
                     // Stop entry processing for the ChUnknown we want to take off service
-                    chUnk.Infof("Rebooting channel")
+                    chUnk.Info(1, "rebooting channel")
                     chUnk.ShutdownEntryProcessing(true)
 
                     // Hot swap the ChUnknown with the new agent
@@ -921,6 +878,10 @@ func (chMgr *ChMgr) NewChAgent(
         chSt.State.ChProtocol = inChState.ChProtocol
         chSt.State.ChannelID = append(chSt.State.ChannelID[:0], inChState.ChannelID...)
         chSt.revalAfter = pdi.URIDTimestampMax
+
+        shortStr := chSt.ChID().SuffixStr()
+        chSt.SetLogLabel(fmt.Sprintf("Ch %s", shortStr))
+        chSt.Infof(1, "instantiating channel %v with protocol '%s'", chSt.ChID().Str(), chSt.State.ChProtocol)
     }
 
     return ch
@@ -998,7 +959,7 @@ func (chMgr *ChMgr) OpenChannelSession(
     }
     
 
-    chSession := &ChSession{
+    cs := &ChSession{
         MemberSession: inMemberSession,
         SessionID: atomic.AddUint32(&chMgr.nextSessionID, 1),
         ChAgent: ch,
@@ -1007,11 +968,12 @@ func (chMgr *ChMgr) OpenChannelSession(
         OnComplete: make(chan error),
     }
 
-    err = chSession.Startup(inInvocation)
+
+    err = cs.startup(inInvocation)
     if err != nil {
         return nil, err
     }
-
+    
     if ch == nil {
         if inInvocation.ChannelGenesis == nil {
             err = plan.Error(nil, plan.ParamMissing, "ChSession has no channel agent")
@@ -1023,26 +985,26 @@ func (chMgr *ChMgr) OpenChannelSession(
             body, _ := inInvocation.ChannelGenesis.Marshal()
             chMsg := &ChMsg{
                 Op: ChMsgOp_CH_NEW_ENTRY,
-                SessionID: chSession.SessionID,
+                SessionID: cs.SessionID,
                 ChEntry: &ChEntryMsg{
                     EntryOp: pdi.EntryOp_NEW_CHANNEL_EPOCH,
                     Body: body,
                 },
             }
 
-            chSession.msgInbox <- chMsg
+            cs.msgInbox <- chMsg
         }
-    } 
- 
+    }
 
-    return chSession, err
+    cs.SetLogLabel(fmt.Sprint("ChSess-", cs.SessionID))
+ 
+    return cs, err
 }
 
 
 
-
-
 type ChSession struct {
+    plan.Logger
 
     SessionID           uint32
 
@@ -1069,7 +1031,7 @@ type ChSession struct {
 }
 
 
-func (cs *ChSession) Startup(
+func (cs *ChSession) startup(
     inInvocation *ChInvocation,
 ) error {
 

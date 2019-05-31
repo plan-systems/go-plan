@@ -58,6 +58,8 @@ type CommunityRepoState struct {
 
 // CommunityRepo wraps a community's data repository and responds to queries for the given community.
 type CommunityRepo struct {
+    plan.Logger
+
     flow                    plan.Flow
 
     GenesisSeed             GenesisSeed    
@@ -167,6 +169,9 @@ func NewCommunityRepo(
         spSyncActive: false,
         spSyncStatus: spSyncStopped,
     }
+
+    name := fmt.Sprintf("repo %v", path.Base(CR.HomePath))
+    CR.SetLogLabel(name)
  
     CR.txnCollater.PayloadHandler = func(inPayload []byte, inPayloadTxns *pdi.PayloadTxns) error {
         var err error
@@ -269,7 +274,7 @@ func (CR *CommunityRepo) Startup(
 
     err := CR.flow.Startup(
         inCtx,
-        fmt.Sprintf("repo %v", CR.HomePath),
+        CR.GetLogLabel(),
         CR.onInternalStartup,
         CR.onInternalShutdown,
     )
@@ -327,10 +332,6 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         for payload := range CR.txnsToCommit {
 
-            // TODO drop txn gracefully?
-
-            CR.flow.Log.Infof("committing payload %v", payload.PayloadIDStr())
-
             N := len(payload.Txns)
             for i := 0; i < N; i++ {
                 _, err := CR.spClient.CommitTxn(CR.spContext, &pdi.RawTxn{Bytes: payload.Txns[i].Bytes})
@@ -338,6 +339,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
                     CR.flow.Log.WithError(err).Warn("got commit err")
                 }
             }
+
+            CR.Infof(1, "committed payload %v", payload.PayloadIDSuffixStr())
 
             // TODO update commit log
             // mark txn as committed
@@ -362,6 +365,8 @@ func (CR *CommunityRepo) onInternalStartup() error {
             CR.communitySKI.EndSession(CR.flow.ShutdownReason)
             CR.communitySKI = nil
         }
+
+        CR.Info(0, "shutdown complete")
 
         CR.flow.ShutdownComplete.Done()
         
@@ -391,7 +396,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
             if err != nil {
                 // TODO log err
             }
-            CR.flow.Log.Infof("stored  payload %v (%d txns)", payload.PayloadIDStr(), N)
+            CR.Infof(1, "stored payload %v (%d txns)", payload.PayloadIDSuffixStr(), N)
 
             // Commits underlying txns if they've been locally authored
             if payload.NewlyAuthored {
@@ -480,8 +485,6 @@ func (CR *CommunityRepo) onInternalStartup() error {
         close(CR.txnsToDecode)
     }()
 
-
-
     if err = CR.chMgr.Startup(CR.flow.Ctx); err != nil {
         return err
     }
@@ -497,6 +500,8 @@ func (CR *CommunityRepo) onInternalShutdown() {
 
     // First, end all member sessions (and channel sessions)
     CR.MemberSessions.Shutdown(CR.flow.ShutdownReason, nil)
+
+    CR.Infof(1, "all member sessions ended")
 
     // This will cause the fetch, then decode, then merge routines to stop
     if CR.txnsToFetch != nil {

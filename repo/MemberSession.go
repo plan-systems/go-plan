@@ -144,6 +144,7 @@ func (MS *MemberSessions) StartSession(
         CommunityEpoch: *MS.Host.LatestCommunityEpoch(),
     }
 
+    ms.SetLogLabel(fmt.Sprintf("%s member %d", path.Base(inBasePath), inSessReq.MemberEpoch.MemberID))
     ms.communityKey = ms.CommunityEpoch.CommunityKeyRef()
     ms.MemberIDStr = ms.MemberEpoch.FormMemberStrID()
     ms.SharedPath = path.Join(inBasePath, ms.MemberIDStr)
@@ -151,7 +152,7 @@ func (MS *MemberSessions) StartSession(
     if len(inSessReq.WorkstationID) == 0 {
         ms.WorkstationPath = ms.SharedPath
     } else {
-        ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64.EncodeToString(ms.WorkstationID[:15]))
+        ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64p.EncodeToString(ms.WorkstationID[:15]))
     }
     
     err = ms.flow.Startup(
@@ -191,13 +192,6 @@ type MemberTerminal struct {
 
 */
 
-
-type ChSessionPB struct {
-    Invocation          ChInvocation 
-    Outlet              Repo_OpenChannelSessionServer
-}
-
-
 // MemberHost is a context for a MemberSession to operate wthin.
 type MemberHost interface {
 
@@ -213,14 +207,14 @@ type MemberHost interface {
     // The given session is ending
     OnSessionEnded(inSession *MemberSession)
 
-    // Starts a new channel session
-    //OpenChannelSession(inPB ChSessionPB) (*ChSession, error) 
 }
 
 
 
 // MemberSession represents a user/member "logged in", meaning a SKI session is active.
 type MemberSession struct {
+    plan.Logger
+
     flow            plan.Flow
 
     // The current community epoch
@@ -329,7 +323,7 @@ func (ms *MemberSession) onInternalStartup() error {
                 continue
             }
 
-            ms.flow.Log.Infof("encoded  entry %v", entry.PayloadTxns.PayloadIDStr())
+            ms.Infof(1, "encoded entry %v", entry.tmpInfo.EntryID().SuffixStr())
 
             ms.Host.(*CommunityRepo).entriesToMerge <- entry
         }
@@ -550,16 +544,23 @@ func (ms *MemberSession) OpenChannelSession(
         return nil, err
     }
 
-    chSession, err := CR.chMgr.OpenChannelSession(ms, inInvocation, inOutlet)
+    cs, err := CR.chMgr.OpenChannelSession(ms, inInvocation, inOutlet)
     if err != nil {
+        ms.Infof(1, "error opening channel session: %v", err)
         return nil, err
     }
 
+    if cs.ChAgent != nil {
+        cs.MemberSession.Infof(1, "channel session opened on %v (ID %d)", cs.ChAgent.Store().ChID().SuffixStr(), cs.SessionID)
+    } else {
+        cs.MemberSession.Infof(1, "channel genesis (ID %d)", cs.SessionID)
+    }
+
     ms.ChSessionsMutex.Lock()
-    ms.ChSessions[chSession.SessionID] = chSession
+    ms.ChSessions[cs.SessionID] = cs
     ms.ChSessionsMutex.Unlock()
 
-    return chSession, nil
+    return cs, nil
 }
 
 // ManageChSessionPipe blocks until the client closes their pipe or this Member sessions is closing.
@@ -574,7 +575,7 @@ func (ms *MemberSession) ManageChSessionPipe(inPipe Repo_ChSessionPipeServer) er
             ms.ChSessionsMutex.RUnlock()
 
             if cs == nil {
-                ms.flow.Log.Warnf("channel session %d not found", chMsg.SessionID)
+                ms.Warnf("channel session %d not found", chMsg.SessionID)
             } else {
                 switch chMsg.Op {
                     case ChMsgOp_HEARTBEAT:
