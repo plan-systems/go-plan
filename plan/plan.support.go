@@ -4,12 +4,14 @@ package plan
 import (
     "bytes"
     "context"
+    "fmt"
     "os"
 	"os/user"
     "path"
     "strings"
     "encoding/hex"
     "sync"
+    "github.com/golang/glog"
 
     //crand "crypto/rand" 
 
@@ -28,9 +30,14 @@ func (chID ChID) Blob() ChIDBlob {
     return blob
 }
 
-// Str returns this channel ID in plan.Base64 form.
+// Str returns this channel ID in plan.Base64p form.
 func (chID ChID) Str() string {
-    return Base64.EncodeToString(chID)
+    return Base64p.EncodeToString(chID)
+}
+
+// SuffixStr returns the last few digits of this ChID in string form (for easy reading, logs, etc)
+func (chID ChID) SuffixStr() string {
+    return Base64p.EncodeToString(chID[ChIDSz-6:])
 }
 
 // AssignFromTID copies from the right-part of the given TID
@@ -62,7 +69,12 @@ func (tid TID) Blob() TIDBlob {
 
 // Str returns this TID in plan.Base64 form.
 func (tid TID) Str() string {
-    return Base64.EncodeToString(tid)
+    return Base64p.EncodeToString(tid)
+}
+
+// SuffixStr returns the last few digits of this TID in string form (for easy reading, logs, etc)
+func (tid TID) SuffixStr() string {
+    return Base64p.EncodeToString(tid[TIDSz-6:])
 }
 
 // SetTimeAndHash writes the given timestamp and the right-most part of inSig into this TID.
@@ -351,6 +363,110 @@ func (F *Flow) LogErr(inErr error, inDesc string) {
 }
 
 
+// Logger is an aid to logging and provides convenience functions
+type Logger struct {
+    hasPrefix bool
+    logPrefix string
+    logLabel  string
+}
+
+// SetLogLabel sets the label prefix for all entries logged.
+func (l *Logger) SetLogLabel(inLabel string) {
+    l.logLabel = inLabel
+    l.hasPrefix = len(inLabel) > 0
+    if l.hasPrefix { 
+        l.logPrefix = fmt.Sprintf("<%s> ", inLabel)
+    }
+}
+
+// GetLogLabel gets the label last set via SetLogLabel()
+func (l *Logger) GetLogLabel() string {
+    return l.logLabel
+}
+
+// Info logs to the INFO log.
+// Arguments are handled in the manner of fmt.Print(); a newline is appended if missing.
+func (l *Logger) Info(inV glog.Level, args ...interface{}) {
+    logIt := true
+    if inV > 0 {
+        logIt = bool(glog.V(inV))
+    }
+
+    if logIt {
+        if l.hasPrefix { 
+            glog.InfoDepth(1, l.logPrefix, fmt.Sprint(args...))
+        } else {
+            glog.InfoDepth(1, args...)
+        }
+    }
+}
+
+// Infof logs to the INFO log.
+// Arguments are handled in the manner of fmt.Printf(); a newline is appended if missing.
+func (l *Logger) Infof(inV glog.Level, inFormat string, args ...interface{}) {
+    logIt := true
+    if inV > 0 {
+        logIt = bool(glog.V(inV))
+    }
+
+    if logIt {
+        if l.hasPrefix { 
+            glog.InfoDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+        } else {
+            glog.InfoDepth(1, fmt.Sprintf(inFormat, args...))
+        }
+    }
+}
+
+// Warn logs to the WARNING and INFO logs.
+// Arguments are handled in the manner of fmt.Print(); a newline is appended if missing.
+func (l *Logger) Warn(args ...interface{}) {
+    {
+        if l.hasPrefix { 
+            glog.WarningDepth(1, l.logPrefix, fmt.Sprint(args...))
+        } else {
+            glog.WarningDepth(1, args...)
+        }
+    }
+}
+
+// Warnf logs to the WARNING and INFO logs.
+// Arguments are handled in the manner of fmt.Printf(); a newline is appended if missing.
+func (l *Logger) Warnf(inFormat string, args ...interface{}) {
+    {
+        if l.hasPrefix { 
+            glog.WarningDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+        } else {
+            glog.WarningDepth(1, fmt.Sprintf(inFormat, args...))
+        }
+    }
+}
+
+
+// Fatalf logs to the FATAL, ERROR, WARNING, and INFO logs,
+// Arguments are handled in the manner of fmt.Printf(); a newline is appended if missing.
+func (l *Logger) Fatalf(inFormat string, args ...interface{}) {
+    {
+        if l.hasPrefix { 
+            glog.FatalDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+        } else {
+            glog.FatalDepth(1, fmt.Sprintf(inFormat, args...))
+        }
+    }
+}
+
+
+var gLogger = Logger{}
+
+// Fatalf -- see Fatalf (above)
+func Fatalf(inFormat string, args ...interface{}) {
+    gLogger.Fatalf(inFormat, args...)
+}
+
+
+
+
+
 
 
 /*****************************************************
@@ -425,8 +541,6 @@ func Unplex(x uint64) (uint32, uint32) {
 }
 
 */
-
-
 
 
 // UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
