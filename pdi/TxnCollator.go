@@ -27,7 +27,12 @@ type PayloadHandler func(inPayload []byte, inTxnSet *PayloadTxns) error
 
 // PayloadIDStr returns the payload name/ID as a base64 string.
 func (txns *PayloadTxns) PayloadIDStr() string {
-    return Base64.EncodeToString(txns.PayloadID)
+    return Base64p.EncodeToString(txns.PayloadID)
+}
+
+// PayloadIDSuffixStr returns a string of the last few bytes of the PayloadID (for easier reading etc)
+func (txns *PayloadTxns) PayloadIDSuffixStr() string {
+    return Base64p.EncodeToString(txns.PayloadID[len(txns.PayloadID)-6:])
 }
 
 // AssignFromSegments exports the given txns into a finalized single virtual segments

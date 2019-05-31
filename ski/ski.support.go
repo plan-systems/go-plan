@@ -928,7 +928,7 @@ func BinDesc(inBinStr []byte) string {
     if alreadyASCII {
         outStr = string(binStr)
     } else {
-        outStr = plan.Base64.EncodeToString(binStr)
+        outStr = plan.Base64p.EncodeToString(binStr)
     }
 
     return outStr + suffix
