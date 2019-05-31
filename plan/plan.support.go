@@ -384,12 +384,17 @@ func (l *Logger) GetLogLabel() string {
     return l.logLabel
 }
 
+// LogV returns true if logging is currently enabled for log verbose level.
+func (l *Logger) LogV(inVerboseLevel int32) bool {
+    return bool(glog.V(glog.Level(inVerboseLevel)))
+}
+
 // Info logs to the INFO log.
 // Arguments are handled in the manner of fmt.Print(); a newline is appended if missing.
-func (l *Logger) Info(inV glog.Level, args ...interface{}) {
+func (l *Logger) Info(inVerboseLevel int32, args ...interface{}) {
     logIt := true
-    if inV > 0 {
-        logIt = bool(glog.V(inV))
+    if inVerboseLevel > 0 {
+        logIt = bool(glog.V(glog.Level(inVerboseLevel)))
     }
 
     if logIt {
