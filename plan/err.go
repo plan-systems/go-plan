@@ -6,11 +6,18 @@ import (
 )
 
 // Assert asserts essential assumptions
-func Assert(inCond bool, inFormat string, inArgs ...interface{}) {
+func Assert(inCond bool, inMsg string) {
 
 	if !inCond {
-		panic(fmt.Sprintf(inFormat, inArgs...))
+		panic(inMsg)
 	}
+}
+
+// Assertf asserts essential assumptions
+func Assertf(inCond bool, inFormat string, inArgs ...interface{}) {
+
+    Assert(inCond, fmt.Sprintf(inFormat, inArgs...))
+
 }
 
 /*****************************************************
@@ -140,14 +147,26 @@ const (
 	// CommunityNotFound means the specified community name or ID did not match any of the registered communities
 	CommunityNotFound
 
+	// CommunityEpochNotFound means the community epoch ID cited was not found in this repo.
+	CommunityEpochNotFound
+
 	// FailedToConnectStorageProvider means the connection attempt the StorageProvider failed
 	FailedToConnectStorageProvider
 
+    // MemberEpochNotFound means the given member ID and/or member epoch num was not found
+    MemberEpochNotFound
+    
 	// ChannelNotFound means the given ChannelID was not found in the community repo
 	ChannelNotFound
 
-	// FailedToLoadChannelFromDisk means a channel failed to load all its files from its host community repo
-	FailedToLoadChannelFromDisk
+    // ChannelSessionNotFound means the given channel session ID did not reference an active channel session.
+    ChannelSessionNotFound
+
+	// FailedToLoadChannel means a channel failed to load all its files from its host community repo
+	FailedToLoadChannel
+
+    // ChAgentNotFound means the requested channel agent was not found
+    ChAgentNotFound
 
 	// InvalidEntrySignature means the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
 	InvalidEntrySignature
@@ -155,14 +174,20 @@ const (
 	// AuthorNotFound means the given author was not found in the given access control list.
 	AuthorNotFound
 
-	// AccessChannelNotFound means the access channel specified by a given PDI entry was not found
-	AccessChannelNotFound
+	// ACCNotFound means the access channel specified by a given PDI entry was not found
+	ACCNotFound
 
-	// NotAnAccessChannel means the access channel specified by a given PDI entry was not actually an access channel
-	NotAnAccessChannel
+	// NotAnACC means the channel ID cited by a PDI entry was not actually an access channel
+	NotAnACC
 
 	// FailedToProcessPDIHeader means decryption or unmarshalling of a PDI failed
 	FailedToProcessPDIHeader
+
+	// ChEntryIsMalformed means decryption or unmarshalling of a pdi channel entry failed
+	ChEntryIsMalformed
+
+	// ChEntryNotMerged means the given entry cannot yet be merged and must wait
+	ChEntryNotMerged
 
 	// AuthorLacksWritePermission means the given PDI entry's author does not have write permission to the specified channel
 	AuthorLacksWritePermission
@@ -170,11 +195,20 @@ const (
 	// BadTimestamp means a timestamp is in the excessively distant past or future
 	BadTimestamp
 
-	// TargetChannelEpochNotFound means the cited epoch of the target channel did not match any known epochs locally.
-	TargetChannelEpochNotFound
+	// ChannelEpochNotFound means the cited epoch of the target channel did not match any known epochs locally.
+	ChannelEpochNotFound
 
-	// TargetChannelEpochExpired means an entry cited a target channel epoch that has expired
-	TargetChannelEpochExpired
+    // ChannelEpochNotLive means the cited channel epoch is not currently live
+    ChannelEpochNotLive
+
+    // ChannelEpochDisallows means the entry does not conform to its cited channel epoch
+    ChannelEpochDisallows
+
+    // ChannelEpochExpired means the cited channel epoch has been superseded and does not allow the given entry.
+    ChannelEpochExpired
+
+    // GenesisEntryNotVerified means an entry was marked as a genesis entry but could not be verified.
+    GenesisEntryNotVerified
 
 	// TxnDBNotReady means the txnDB failed to read or write txn data
 	TxnDBNotReady
