@@ -10,8 +10,6 @@ import (
     "encoding/json"
     crand "crypto/rand"
 
-    log "github.com/sirupsen/logrus"
-
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
     "github.com/plan-systems/go-plan/pcore"
@@ -29,39 +27,40 @@ func main() {
     genesisFile := flag.String( "genesis",      "",                 "Creates a new store using the given community genesis file" )
 
     flag.Parse()
+    flag.Set("logtostderr", "true")
+    flag.Set("v", "1")
 
     sn, err := NewSnode(basePath, *init)
     if err != nil {
-        log.WithError(err).Fatalf("sn.NewSnode failed")
+        plan.Fatalf("NewSnode failed: %v", err)
     }
 
     if *init {
-        log.Info("init successful")
+        sn.Info(0, "init successful")
     } else {  
         if len(*genesisFile) > 0 {
 
             CG, err := loadGenesisInfo(*genesisFile)
             if err != nil {
-                log.WithError(err).Fatalf("error loading genesis file %s", *genesisFile)
+                sn.Fatalf("error loading genesis file %s: %v", *genesisFile, err)
             }
 
             err = CG.CreateNewCommunity(sn)
             if err != nil {
-                log.WithError(err).Fatalf("failed to create datastore: %s", CG.GenesisSeed.CommunityEpoch.CommunityName)
+                sn.Fatalf("failed to create datastore %s: %v", CG.GenesisSeed.CommunityEpoch.CommunityName, err)
             }
         }
 
         if err == nil {
         
-            log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
-
             intr, intrCtx := plan.SetupInterruptHandler(context.Background())
             defer intr.Close()
 
             snCtx, err := sn.Startup(intrCtx)
             if err != nil {
-                log.WithError(err).Fatalf("failed to startup node")
+                sn.Fatalf("failed to startup: %v", err)
             } else {
+                sn.Infof(0, "to stop: kill -s SIGINT %d", os.Getpid())
 
                 select {
                     case <-snCtx.Done():
@@ -156,11 +155,6 @@ type CommunityGenesis struct {
 // Context -- see interface MemberHost
 func (CG *CommunityGenesis) Context() context.Context {
     return context.Background()
-}
-
-// CommitEntryTxns -- see interface MemberHost
-func (CG *CommunityGenesis) CommitEntryTxns(inEntryURID []byte, inTxns []pdi.RawTxn) {
-    CG.txnsToCommit = append(CG.txnsToCommit, inTxns...)
 }
 
 // LatestCommunityEpoch -- see interface MemberHost
@@ -390,7 +384,7 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
         parentEntry: newEpochHistory,
     }
 
-
+    // We do the post CommunityEpoch first so that the entry ID genrated (now the community epoch ID), can be used for subsequent entries
     entries := []*chEntry{
         newACC,
         newMemberReg,
@@ -405,7 +399,6 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
     for _, entry := range entries {
 
         entry.Info.TIDs = make([]byte, pdi.EntryTID_NormalNumTIDs * plan.TIDSz)
-        entry.Info.AuthorMemberID = genesisID
         entry.Info.EntryID().SetTimeFS(nowFS)
 
         if ! entry.whitelist {
@@ -425,30 +418,33 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
             body, _ = entry.chEpoch.Marshal()
         } else {
             entry.Info.EntryOp = pdi.EntryOp_POST_CONTENT
+            entry.Info.ChannelID = CG.GenesisSeed.StorageEpoch.CommunityChID(entry.chID)
 
             body, _ = entry.body.Marshal()
         }
 
-        // Set the dest channel ID (this will be 0s for community channels not yet created)
-        entry.Info.ChannelID = CG.GenesisSeed.StorageEpoch.CommunityChID(entry.chID)
-
-        txns, entryURID, err := ms.EncryptAndEncodeEntry(&entry.Info, body)
+        txns, err := ms.EncryptAndEncodeEntry(&entry.Info, body)
         if err != nil {
             return err
         }
 
+        entryID := entry.Info.EntryID()
+
         // Set the channel IDs of the newly generated community channels
         if entry.chEpoch != nil {
-            CG.GenesisSeed.StorageEpoch.CommunityChID(entry.chID).AssignFromTID(entry.Info.EntryID())
+            CG.GenesisSeed.StorageEpoch.CommunityChID(entry.chID).AssignFromTID(entryID)
         }
 
         if entry.whitelist {
-            CG.GenesisSeed.StorageEpoch.GenesisURIDs = append(CG.GenesisSeed.StorageEpoch.GenesisURIDs, entryURID)
+            CG.GenesisSeed.StorageEpoch.GenesisEntryIDs = append(CG.GenesisSeed.StorageEpoch.GenesisEntryIDs, entryID)
         }
 
-        CG.CommitEntryTxns(entryURID, txns)
+        CG.txnsToCommit = append(CG.txnsToCommit, txns.Txns...)
 
     }
+
+    // Set the member epoch ID now that we know it.
+    CG.MemberSeed.MemberEpoch.EpochTID = postMember.Info.EntryID()
 
     // Set the genesis community epoch ID now that the entry ID has been generated
     CG.GenesisSeed.CommunityEpoch.EpochTID = postGenesisEpoch.Info.EntryID()
