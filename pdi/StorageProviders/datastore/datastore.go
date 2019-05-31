@@ -18,8 +18,6 @@ import (
 
     //"golang.org/x/sync/semaphore"
 
-    log "github.com/sirupsen/logrus"
-
     //ds "github.com/ipfs/go-datastore"
 	//dsq "github.com/ipfs/go-datastore/query"
 
@@ -42,6 +40,8 @@ type StorageConfig struct {
 
 // Store wraps a PLAN community UUID and a datastore
 type Store struct {
+    plan.Logger
+
     flow                        plan.Flow
 
     AgentDesc                   string    
@@ -103,6 +103,9 @@ func NewStore(
         St.AbsPath = path.Clean(path.Join(inBasePath, St.Config.HomePath))
     }
 
+    storeDesc := fmt.Sprintf("St-%v", St.Config.StorageEpoch.Name)
+    St.SetLogLabel(storeDesc)
+
     return St
 }
 
@@ -112,17 +115,11 @@ func (St *Store) Startup(
     inFirstTime bool,
 ) error {
 
-    storeDesc := fmt.Sprintf("Store %v", St.Config.StorageEpoch.Name)
-
-    logE := log.WithFields(log.Fields{ 
-        "impl": St.Config.ImplName,
-        "path": St.AbsPath,
-    })
-    logE.Infof( "starting %v", storeDesc )
+    St.Infof(0, "starting up using %s", St.AbsPath)
 
     err := St.flow.Startup(
         inCtx,
-        storeDesc,
+        St.GetLogLabel(),
         St.internalStartup,
         St.internalShutdown,
     )
@@ -194,7 +191,7 @@ func (St *Store) internalStartup() error {
             }
             St.subsMutex.Unlock()
         }
-        St.flow.Log.Info("1) commit notification exited")
+        St.Info(1, "(1) commit notification exited")
 
         // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
         for {
@@ -226,7 +223,7 @@ func (St *Store) internalStartup() error {
 
             atomic.AddInt32(&St.numCommitJobs, -1)
         }
-        St.flow.Log.Info("2) commit pipeline closed")
+        St.Info(1, "(2) commit pipeline closed")
 
         // Cause all subs to fire, causing them to exit when they see St.OpState == Stopping
         St.txnUpdates <- txnUpdate{}
@@ -248,7 +245,7 @@ func (St *Store) internalShutdown() {
         }
     }
 
-    St.flow.Log.Info("3) pending commits complete")
+    St.Info(1, "(3) pending commits complete")
 
     // This will initiate a close-cascade causing St.resources to be released
     close(St.DecodedCommits)
@@ -352,7 +349,7 @@ func (St *Store) updateAccount(
 
         if err == nil {
             if creatingNew {
-                St.flow.Log.Infof("creating account %v to receive deposit", pdi.Encode64(inAcctAddr))
+                St.Infof(0, "creating account %v to receive deposit", pdi.Encode64(inAcctAddr))
             }
             err = dbTxn.Set(inAcctAddr, scrap[:acctSz]) 
             if err != nil {
@@ -363,9 +360,7 @@ func (St *Store) updateAccount(
 
     // If we get a deposit err, log it and proceed normally (i.e. the funds are lost forever)
     if err != nil {
-        St.flow.Log.WithField( 
-            "acct", inAcctAddr,
-        ).Warning(err)
+        St.Warnf("error updating acct %v: %v", inAcctAddr, err)
     }
 
     return err
@@ -499,7 +494,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
             if err != nil {
                 err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
             } else {
-                St.flow.Log.Infof("committed txn %v", job.Txn.URIDstring())
+                St.Infof(1, "committed txn %v", job.Txn.URIDstring())
             }
 
             batch.Finish(err)
@@ -518,9 +513,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
                 perr = plan.Error(err, plan.FailedToCommitTxn, "txn commit failed")
             }
 
-            St.flow.Log.WithFields(log.Fields{
-                "URID": job.Txn.URIDstring(),
-            }).WithError(err).Warn("CommitJob error")
+            St.Warnf("CommitJob failed: %v, URID: %s", err, job.Txn.URIDstring())
         
             err = perr
         }
@@ -582,7 +575,7 @@ func (St *Store) DoScanJob(job ScanJob) {
         err := St.doScanJob(job)
 
         if err != nil && St.IsRunning() {
-            St.flow.Log.WithError(err).Warn("scan job error")   
+            St.Warnf("scan job error: %v", err)
         }
 
         job.OnComplete <- err
@@ -606,7 +599,7 @@ func (St *Store) DoSendJob(job SendJob) {
         err := St.doSendJob(job)
 
         if err != nil && St.IsRunning() {
-            St.flow.Log.WithError(err).Warn("send job error")   
+            St.Warnf("send job error: %v", err)
         }
 
         job.OnComplete <- err
@@ -679,7 +672,7 @@ func (St *Store) doSendJob(job SendJob) error {
             }
 
             if err != nil {
-                St.flow.Log.WithError(err).Warn("failed to read txn")
+                St.Warnf("error reading txn %v:", URID, err)
                 continue
             }
 
@@ -784,7 +777,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                     }
 
                     if len(itemKey) != pdi.URIDSz {
-                        St.flow.Log.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDSz)
+                        St.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDSz)
                         continue
                     }
 
@@ -826,8 +819,13 @@ func (St *Store) doScanJob(job ScanJob) error {
                 batchCount := int32(0)
                 sent := false
 
-                // Wait the full heartbeat time unless we get a txn update in which case send out the batch after a short delay.
-                wakeTimer := heartbeat.C
+                // Do a full wait only if we're done with the txn scan (and only waiting for txn update msgs)
+                fullWait := scanDir == 0
+
+                wakeTimer := batchLag.C
+                if fullWait {
+                    wakeTimer = heartbeat.C
+                }
 
                 // Flush out any queued heartbeats
                 for len(wakeTimer) > 0 {
@@ -844,8 +842,9 @@ func (St *Store) doScanJob(job ScanJob) error {
                                 batchCount++
 
                                 // Once we one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
-                                if batchCount == 1 {
+                                if fullWait {
                                     wakeTimer = batchLag.C
+                                    fullWait = false
                                     for len(wakeTimer) > 0 {
                                         <-wakeTimer
                                     }
