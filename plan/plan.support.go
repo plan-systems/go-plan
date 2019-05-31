@@ -11,14 +11,20 @@ import (
     "strings"
     "encoding/hex"
     "sync"
-    "github.com/golang/glog"
 
     //crand "crypto/rand" 
 
     log "github.com/sirupsen/logrus"
+    "github.com/plan-systems/klog"
 
     //"github.com/ethereum/go-ethereum/common/math"
 )
+
+func init() {
+
+    klog.InitFlags(nil)
+
+}
 
 
 // Blob is a convenience function that forms a ChID byte array from a ChID byte slice. 
@@ -386,7 +392,7 @@ func (l *Logger) GetLogLabel() string {
 
 // LogV returns true if logging is currently enabled for log verbose level.
 func (l *Logger) LogV(inVerboseLevel int32) bool {
-    return bool(glog.V(glog.Level(inVerboseLevel)))
+    return bool(klog.V(klog.Level(inVerboseLevel)))
 }
 
 // Info logs to the INFO log.
@@ -394,31 +400,31 @@ func (l *Logger) LogV(inVerboseLevel int32) bool {
 func (l *Logger) Info(inVerboseLevel int32, args ...interface{}) {
     logIt := true
     if inVerboseLevel > 0 {
-        logIt = bool(glog.V(glog.Level(inVerboseLevel)))
+        logIt = bool(klog.V(klog.Level(inVerboseLevel)))
     }
 
     if logIt {
         if l.hasPrefix { 
-            glog.InfoDepth(1, l.logPrefix, fmt.Sprint(args...))
+            klog.InfoDepth(1, l.logPrefix, fmt.Sprint(args...))
         } else {
-            glog.InfoDepth(1, args...)
+            klog.InfoDepth(1, args...)
         }
     }
 }
 
 // Infof logs to the INFO log.
 // Arguments are handled in the manner of fmt.Printf(); a newline is appended if missing.
-func (l *Logger) Infof(inV glog.Level, inFormat string, args ...interface{}) {
+func (l *Logger) Infof(inV klog.Level, inFormat string, args ...interface{}) {
     logIt := true
     if inV > 0 {
-        logIt = bool(glog.V(inV))
+        logIt = bool(klog.V(inV))
     }
 
     if logIt {
         if l.hasPrefix { 
-            glog.InfoDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+            klog.InfoDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
         } else {
-            glog.InfoDepth(1, fmt.Sprintf(inFormat, args...))
+            klog.InfoDepth(1, fmt.Sprintf(inFormat, args...))
         }
     }
 }
@@ -428,9 +434,9 @@ func (l *Logger) Infof(inV glog.Level, inFormat string, args ...interface{}) {
 func (l *Logger) Warn(args ...interface{}) {
     {
         if l.hasPrefix { 
-            glog.WarningDepth(1, l.logPrefix, fmt.Sprint(args...))
+            klog.WarningDepth(1, l.logPrefix, fmt.Sprint(args...))
         } else {
-            glog.WarningDepth(1, args...)
+            klog.WarningDepth(1, args...)
         }
     }
 }
@@ -440,9 +446,9 @@ func (l *Logger) Warn(args ...interface{}) {
 func (l *Logger) Warnf(inFormat string, args ...interface{}) {
     {
         if l.hasPrefix { 
-            glog.WarningDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+            klog.WarningDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
         } else {
-            glog.WarningDepth(1, fmt.Sprintf(inFormat, args...))
+            klog.WarningDepth(1, fmt.Sprintf(inFormat, args...))
         }
     }
 }
@@ -453,9 +459,9 @@ func (l *Logger) Warnf(inFormat string, args ...interface{}) {
 func (l *Logger) Fatalf(inFormat string, args ...interface{}) {
     {
         if l.hasPrefix { 
-            glog.FatalDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+            klog.FatalDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
         } else {
-            glog.FatalDepth(1, fmt.Sprintf(inFormat, args...))
+            klog.FatalDepth(1, fmt.Sprintf(inFormat, args...))
         }
     }
 }
