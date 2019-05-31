@@ -57,9 +57,11 @@ service Repo {
     rpc         StartMemberSession(SessionReq)                      returns (SessionInfo);
 
     // Opens/Starts a new chanel session for the given channel ID.
+    // The pipe returned is all incoming traffic from the requested channel.   
     rpc         OpenChannelSession(ChInvocation)                    returns (stream ChMsg);
 
     // Sends and receives blocks to/from a channel (via the given channel session). 
+    // A client generally only calls that once and uses it to send all outbound channel traffic. 
     rpc         ChSessionPipe(stream ChMsg)                         returns (plan.Status);
 
 
@@ -121,11 +123,42 @@ message ChInvocation {
 
                 bytes               chID                        = 1;
 
-                string              ch_adapter_desc             = 2;
+                ChSessionMode       mode                        = 2;
+                uint32              flags                       = 3;
+                int64               T0                          = 4;
 
-    // Set when creating a new channel.
-                pdi.ChannelEpoch    create_new_channel                 = 3;
+                string              ch_adapter_desc             = 10;
 
+    // Set when creating a brand new channel.
+                pdi.ChannelEpoch    channel_genesis             = 11;
+
+
+
+}
+
+
+
+enum ChSessionFlags {
+
+    // If set, entry bodies will be included
+    INCLUDE_BODY                = 0;
+
+    // IF set, entries that are deferred (in addition to live entries) are included.
+    DEFERRED_ENTRIES            = 1;
+
+    // If set, entries with op type EntryOp_POST_CONTENT will be sent
+    CONTENT_ENTRIES             = 2;
+
+    // If set, entries with op type EntryOp_NEW_CHANNEL_EPOCH will be sent.
+    NEW_EPOCH_ENTRIES           = 3;
+
+}
+
+
+enum ChSessionMode {
+
+    // The ChSession will seek to T0 and start returning a stream of ChMsgs, each reflecting a live entry in the channel.
+    REPLAY_FROM_T0              = 0;
 
 }
 
@@ -135,16 +168,24 @@ message ChInvocation {
 enum ChMsgOp {
 
     // This ChMsg functionally does nothing but serves as a heartbeat to indicate the channel session is open and operating normally. 
-    NO_OP                       = 0;
+    HEARTBEAT                   = 0;
 
     // Closes the channel session associated with this channel ID.  Any subsequent ChMsgs bearing this session ID will be ignored/dropped.
-    CLOSE_CHANNEL               = 1;
+    CLOSE_CH_SESSION            = 1;
 
-    // Reserved for future use (common to all channels)
-    RESERVED_2                  = 2;
-    RESERVED_3                  = 3;
-    RESERVED_4                  = 4;
-    RESERVED_5                  = 5;
+    // The ChMsg contains an ChEntryMsg that reflects an entry in the channel.  
+    CH_ENTRY                    = 2;
+
+    // Send by the client when the user is authoring a new entry.
+    // The entry will be posted to the channel and commited to the repo.
+    CH_NEW_ENTRY                = 3;
+
+    // Buf0 contains contains a marshalled ChInfo iitem.
+    CH_INFO                     = 4;
+
+    // Channel genesis is complete and BUF0 contains the newly created chanel ID
+    CH_GENESIS_COMPLETE         = 5;
+
     RESERVED_6                  = 6;
     RESERVED_7                  = 7;
     RESERVED_8                  = 8;
@@ -160,14 +201,36 @@ enum ChMsgOp {
 
 
 
+message ChEntryMsg {
+
+                pdi.EntryOp         entry_op                    = 2;
+                sint32              entry_sub_op                = 3;
+                uint32              author_memberID             = 4;        // Creator (and signer) of this entry 
+                bytes               TIDs                        = 5;
+                ChEntryStatus       status                      = 6;
+
+                bytes               body                        = 10;
+
+}
+
 
 message ChMsg {
 
-                ChMsgOp             op                          = 1;
-                uint32              ch_sessionID                = 2;
+    // If originating from the client, this ID should be set to a unique, increasing ID.
+    // All ChMsgs emitted in response to a given ChMgr will cite its origianl ID, allowing the client to filter for a specific ID.
+                uint32              msgID                       = 1;
 
+    // Describes the purpose of this op, what args it uses, and what it's intended to do.
+                ChMsgOp             op                          = 2;
 
-                plan.Block          block                       = 3;  
+    // Unique ID assigned on each gRPC call to OpenChannelSession().
+    // When a client is originating a ChMsg, this value is used to route it to the correct ChSession. 
+                uint32              sessionID                   = 3;
+
+    // If the op involves a channel entry, then it will be set here.
+                ChEntryMsg          ch_entry                    = 10;
+
+                bytes               BUF0                        = 11;
 
 }
 
@@ -285,11 +348,17 @@ enum ChEntryFlag {
     // By definition, once this flag is cleared, it will never reappear.
     WELL_FORMED                 = 0;
 
-    // Set when this entry's dependencies have been written
-    DEPENDENCIES_WRITTEN        = 1;
+    // Set when this entry's author dependency has been written
+    AUTHOR_DEPENDENCY_WRITTEN   = 1;
+
+    // Set when this entry's ACC dependency has been written
+    ACC_DEPENDENCY_WRITTEN      = 2;
 
     // Set if this entry's URID appears in the community's list of genesis entries.
-    GENESIS_ENTRY_VERIFIED      = 2;
+    GENESIS_ENTRY_VERIFIED      = 3;
+
+    // Set if this entryOp == NEW_CHANNEL_EPOCH and has no previous channel epoch TID set.
+    IS_CHANNEL_GENESIS          = 4;
 
 }
 
@@ -303,9 +372,10 @@ message ChEntryInfo {
     **/
 
                 pdi.EntryOp         entry_op                    = 1;
-                uint32              author_memberID             = 2;        // Creator (and signer) of this entry 
-                bytes               TIDs                        = 3;
-                bytes               supersedes_entryID          = 4;
+                sint32              entry_sub_op                = 2;
+                uint32              author_memberID             = 3;        // Creator (and signer) of this entry 
+                bytes               TIDs                        = 4;
+                bytes               supersedes_entryID          = 5;
                 plan.Block          extensions                  = 6;       // Available for unrestricted client use.
                 bytes               author_sig                  = 7;
 
@@ -321,6 +391,7 @@ message ChEntryInfo {
 
 }
 
+/*
 enum LiveState {
 
     // This entry is live and the body TID its live with is the same as the entry TID (and .BodyID is nil)
@@ -329,6 +400,7 @@ enum LiveState {
     SUPERCEDED_LIVE             = 1;
 
 }
+*/
 
 message ChEntryState {
 
