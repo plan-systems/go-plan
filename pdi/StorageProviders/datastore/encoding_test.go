@@ -177,7 +177,7 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             }
             payloadOut.txns = inTxns
             payloadOut.bytes = inPayload
-            payloadOut.nameStr = plan.Base64.EncodeToString(inTxns.PayloadID)
+            payloadOut.nameStr = inTxns.PayloadIDStr()
 
             return nil
         }
