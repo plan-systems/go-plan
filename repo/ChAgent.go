@@ -4,7 +4,7 @@ import (
     "bytes"
     //"log"
     //"os"
-    "path"
+    //"path"
     //"io/ioutil"
     //"strings"
     "sync"
@@ -249,9 +249,10 @@ ChStore.db
 
 // ChStore is the low-level channel entry manager for a channel.  
 type ChStore struct {
+    plan.Logger
 
     State                   ChStoreState
-
+    
     // A Ch store needs to have each active channel sessions available so changes/notifications can be sent out.
     ChSessions              []*ChSession
 
@@ -299,10 +300,6 @@ func (chSt *ChStore) Log(inErr error, inMsg string) {
     }
 }
 
-func (chSt *ChStore) Infof(inFormat string, inArgs ...interface{}) {
-    suffix := fmt.Sprintf(inFormat, inArgs...)
-    chSt.chMgr.flow.Log.Infof("ch %s (%s): %s\n", chSt.ChID().Str(), path.Base(chSt.State.ChProtocol), suffix) 
-}
 
 // Store -- see ChAgent.Startup()
 func (chSt *ChStore) Store() *ChStore {
@@ -327,6 +324,7 @@ func (chSt *ChStore) ShutdownEntryProcessing(inBlockUntilComplete bool) {
         close(chSt.entriesToMerge)
     }
 
+    // TODO: we could just use an atomic state int instead and int32 poll it (since channel shutdown is rare)
     if inBlockUntilComplete {
         chSt.chShutdown.Wait()
     }
@@ -1279,16 +1277,22 @@ func (chSt *ChStore) ValidateEntry(
     status := ChEntryStatus_DEFERRED
     if entry.IsWellFormed() {
         if valErr == nil {
-            chSt.Infof("entry %v VALIDATED", entry.Info.EntryID().Str())
             status = ChEntryStatus_LIVE
-        } else {
-            chSt.Infof("entry %v DEFERRED (%v)", entry.Info.EntryID().Str(), valErr)
         }
     } else {
         status = ChEntryStatus_DISBARRED
     }
 
     entry.SetStatus(status)
+
+    if status != entry.StatePrev.Status && chSt.LogV(1) {
+        var errStr string 
+        if valErr != nil {
+            errStr = fmt.Sprintf(" (%v)", valErr)
+        }
+
+        chSt.Info(1, "validate entry ", entry.Info.EntryID().SuffixStr(), " => ", ChEntryStatus_name[int32(entry.State.Status)], errStr)
+    }
 
 }
 
@@ -1447,12 +1451,12 @@ func (chSt *ChStore) RevalidateDependencies(
 // QueueRevalidation queues all entries on or after the given time index for revalidation.
 func (chSt *ChStore) QueueRevalidation(inAfterTime plan.TimeFS) {
 
-    chSt.Infof("QueueRevalidation to %v", inAfterTime)
+    chSt.Infof(1, "QueueRevalidation to %v", inAfterTime)
 
     chSt.revalRequestMutex.Lock()
     if inAfterTime < chSt.revalAfter {
         chSt.revalAfter = inAfterTime
-        chSt.Infof("revalAfter = %v", inAfterTime)
+        chSt.Infof(1, "revalAfter = %v", inAfterTime)
     }
     chSt.revalRequestMutex.Unlock()
 }
@@ -1468,7 +1472,7 @@ func (chSt *ChStore) dequeueRevalidation() {
 
     chSt.revalRequestMutex.Lock()
     if valUpto.SelectEarlier(chSt.revalAfter) {
-        chSt.Infof("rewinding re-validation head to %v", chSt.revalAfter)
+        chSt.Infof(1, "rewinding re-validation head to %v", chSt.revalAfter)
     }
     chSt.revalAfter = plan.TimeFSMax
     chSt.revalRequestMutex.Unlock()
@@ -1591,11 +1595,14 @@ func chEntryProcessor(ch ChAgent) {
             break
         }
         
+        verboseLog := chSt.LogV(1)
+
         {
+            var logInfo string
 
             // Do initial merge or load the ChEntry from the chDB
             if entry != nil {
-                // No op
+                logInfo =  "incoming"
             } else if ! chSt.State.MergeEnabled {
                 moreToValidate = false
             } else {
@@ -1603,20 +1610,19 @@ func chEntryProcessor(ch ChAgent) {
                     entryTmp = chEntryAlloc(entryRevalidating)
                 }
 
-                chSt.Infof("%s", "loadNextEntryToValidate") 
-
                 if chSt.loadNextEntryToValidate(entryTmp) {
                     entry = entryTmp
                     moreToValidate = true
 
+                    logInfo =  "validating"
+
                     // If we still haven't merged yet, we need to load the body, as if it just arrived chSt.entriesToMerge.
                     // Since this only occurs when chSt.State.MergeEnabled == false later turns true, this is rare and does not have to be efficient
                     if entry.State.Status == ChEntryStatus_AWAITING_MERGE {
-                        chSt.Infof("%s", "loadOriginalEntryBody")
                         chSt.loadOriginalEntryBody(entry, nil)
                     }
                 } else {
-                    chSt.Infof("%s", "moreToValidate = false") 
+                    chSt.Info(1, "loadNextEntryToValidate() -> false") 
                     moreToValidate = false
                 }
             }
@@ -1625,13 +1631,14 @@ func chEntryProcessor(ch ChAgent) {
                 continue
             }
             
+            if verboseLog {
+                chSt.Infof(1, "%s entry %s (op: %s, status: %s)", logInfo, entry.Info.EntryID().SuffixStr(), pdi.EntryOp_name[int32(entry.Info.EntryOp)], ChEntryStatus_name[int32(entry.State.Status)])
+            }
+
             var err error
- 
-            chSt.Infof("processing entry %v (op: %v)", entry.Info.EntryID().Str(), pdi.EntryOp_name[int32(entry.Info.EntryOp)])
 
             // Does the entry need to be merged?
             if entry.State.Status == ChEntryStatus_AWAITING_MERGE {
-                chSt.Infof("%s", "merging entry")
                 err = mergeEntry(ch, entry)
             }
 
@@ -1639,9 +1646,7 @@ func chEntryProcessor(ch ChAgent) {
                 case ChEntryStatus_MERGED:      fallthrough 
                 case ChEntryStatus_DEFERRED:    fallthrough 
                 case ChEntryStatus_LIVE:
-                    chSt.Infof("%s", "validating entry")
                     chSt.ValidateEntry(entry)
-
             }
 
             // flush any changes to the entry to the channel db
@@ -2019,14 +2024,9 @@ func (chSt *ChStore) loadChEpochs() error {
         }
     }
 
-    // Now that all the epochs are loaded (in TID order), link them
-// TODO: put this in a fcn
+    // Now that all the epochs are loaded (in TID order--no sorting needed), link them
     for _, node := range chSt.chEpochNodes {
-        prev := chSt.FetchChEpoch(node.Epoch.PrevEpochTID)
-        if prev != nil {
-            node.Prev = prev
-            prev.Next = append(prev.Next, node)
-        }
+        chSt.linkChEpochNode(node)
     }
 
     return nil
@@ -2050,21 +2050,25 @@ func (chSt *ChStore) onLivenessChangedInternal(entry *chEntry) {
             if err == nil {
                 node.Status = entry.State.Status
 
+                // Append the new node and resort the them (so FetchChEpoch works)
                 chSt.chEpochNodes = append(chSt.chEpochNodes, node)
                 sort.Sort(ByEpochTID(chSt.chEpochNodes))
 
                 // Link the newly added node
-// TODO: put this in a fcn
-                prev := chSt.FetchChEpoch(node.Epoch.PrevEpochTID)
-                if prev != nil {
-                    node.Prev = prev
-                    prev.Next = append(prev.Next, node)
-                }
+                chSt.linkChEpochNode(node)
             }
         }
 
     }
+}
 
+
+func (chSt *ChStore) linkChEpochNode(ioNode *ChEpochNode) {
+    prev := chSt.FetchChEpoch(ioNode.Epoch.PrevEpochTID)
+    if prev != nil {
+        ioNode.Prev = prev
+        prev.Next = append(prev.Next, ioNode)
+    }
 }
 
 
