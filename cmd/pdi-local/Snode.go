@@ -7,7 +7,7 @@ import (
     "os"
     "path"
     "io/ioutil"
-    "fmt"
+    //"fmt"
     "sync"
     "time"
     "net"
@@ -63,6 +63,8 @@ const (
 //     can be instantiated and offer service in parallel, this is not typical operation. Rather,
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
+    plan.Logger
+
     flow                        plan.Flow
 
     storesMutex                 sync.RWMutex
@@ -122,8 +124,7 @@ func NewSnode(
         stores: make(map[plan.CommunityID]*ds.Store),
         activeSessions: pcore.NewSessionGroup(),
     }
-    
-
+        
     var err error
 
     if inBasePath == nil || len(*inBasePath) == 0 {
@@ -141,6 +142,8 @@ func NewSnode(
         return nil, err
     }
 
+    sn.SetLogLabel("pdi-local")
+
     return sn, nil
 }
 
@@ -149,7 +152,7 @@ func (sn *Snode) Startup(inCtx context.Context) (context.Context, error) {
 
     err := sn.flow.Startup(
         inCtx,
-        fmt.Sprintf("StorageProvider %x", sn.Config.NodeID[:2]),
+        sn.GetLogLabel(),
         sn.onInternalStartup,
         sn.onInternalShutdown,
     )
@@ -208,11 +211,11 @@ func (sn *Snode) onInternalShutdown() {
     }
 
     if sn.grpcServer != nil {
-        sn.flow.Log.Info("Stopping StorageProvider grpc service")
+        sn.Info(0, "stopping StorageProvider grpc service")
         sn.grpcServer.GracefulStop()
 
         _, _ = <- sn.grpcDone
-        sn.flow.Log.Debug("StorageProvider stopped")
+        sn.Info(1, "StorageProvider service stopped")
     }
 
     storesRunning.Wait()
@@ -353,7 +356,7 @@ func (sn *Snode) startServer() error {
 
     sn.grpcDone = make(chan struct{})
 
-    sn.flow.Log.Infof("starting StorageProvider service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+    sn.Infof(0, "starting StorageProvider service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     listener, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
     if err != nil {
         return err

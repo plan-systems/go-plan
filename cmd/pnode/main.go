@@ -18,7 +18,6 @@ import (
 	//_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
     //"encoding/hex"
 
-    //"github.com/plan-systems/go-plan/repo"
 
     "github.com/plan-systems/go-plan/plan"
     //"github.com/plan-systems/go-plan/ski"
@@ -26,14 +25,6 @@ import (
     //"github.com/plan-systems/go-plan/pservice"
 
     "context"
- 	//"google.golang.org/grpc"
-    //"google.golang.org/grpc/metadata"
-
-    //ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
-
-    //"github.com/plan-systems/go-plan/ski/Providers/filesys"
-
-    //github.com/dgraph-io/badger"
 
 )
 
@@ -45,6 +36,8 @@ func main() {
     //seed        := flag.String( "seed",         "",         "Reads the given member invite and reflates repo and account")
 
     flag.Parse()
+    flag.Set("logtostderr", "true")
+    flag.Set("v", "1")
 
     pn, err := NewPnode(basePath, *init)
     if err != nil {
@@ -55,14 +48,13 @@ func main() {
         intr, intrCtx := plan.SetupInterruptHandler(context.Background())
         defer intr.Close()
 
-        //intrCtx, _ := context.WithTimeout(context.Background(), 10 * time.Second)
+        //intrCtx, _ := context.WithTimeout(context.Background(), 30 * time.Second)
         
         pnCtx, err := pn.Startup(intrCtx)
         if err != nil {
-            log.WithError(err).Fatalf("failed to startup repo node")
+            pn.Fatalf("failed to startup repo node")
         } else {
-
-            log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
+            pn.Infof(0, "to stop: kill -s SIGINT %d", os.Getpid())
 
             select {
                 case <- pnCtx.Done():
@@ -71,7 +63,6 @@ func main() {
             pn.Shutdown("task complete")
         }
     }
-
 }
 
 

@@ -59,7 +59,7 @@ func (config *PnodeConfig) ApplyDefaults() {
 
     config.DefaultFileMode = plan.DefaultFileMode
     config.GrpcNetworkName = "tcp"
-    config.GrpcNetworkAddr = ":50081"
+    config.GrpcNetworkAddr = ":50082"
     config.Version = 1
 
 }
@@ -67,6 +67,8 @@ func (config *PnodeConfig) ApplyDefaults() {
 
 // Pnode wraps one or more communities replicated to a local dir.
 type Pnode struct {
+    plan.Logger
+
     flow                        plan.Flow
 
     reposMutex                  sync.RWMutex
@@ -94,6 +96,8 @@ func NewPnode(
         repos: make(map[plan.CommunityID]*repo.CommunityRepo),
         activeSessions: pcore.NewSessionGroup(),
     }
+
+    pn.SetLogLabel("pnode")
 
     var err error
 
@@ -238,7 +242,7 @@ func (pn *Pnode) Startup(
 
     err := pn.flow.Startup(
         inCtx, 
-        "Pnode",
+        pn.GetLogLabel(),
         pn.internalStartup,
         pn.internalShutdown,
     )
