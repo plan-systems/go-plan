@@ -141,9 +141,9 @@ func SegmentIntoTxns(
 
 
 
-// Base64 is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
+// Base64p is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
 // See comments for TxnInfo.URID in pdi.proto
-var Base64 = base64.NewEncoding(plan.Base64CharSet).WithPadding(base64.NoPadding)
+var Base64p = base64.NewEncoding(plan.Base64pCharSet).WithPadding(base64.NoPadding)
 
 
 const (
@@ -176,9 +176,8 @@ const (
 
 // Encode64 encodes the given binary buffer into base64.
 func Encode64(in []byte) string {
-	return Base64.EncodeToString(in)
+	return Base64p.EncodeToString(in)
 }
-
 
 // URID aka "Universal Resource Identifier"
 // 
@@ -210,7 +209,7 @@ func (id URID) String() string {
         return ""
     }
         
-    Base64.Encode(str[:], id)
+    Base64p.Encode(str[:], id)
 	return string(str[:sz])  
 }
 
