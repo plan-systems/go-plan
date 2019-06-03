@@ -20,6 +20,7 @@ The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs
 
 |    Date     | Status                                                                  |
 |:-----------:|-------------------------------------------------------------------------|
+| Jul 2019 | pre-alpha prototype demonstrates `ch/talk` and `ch/space` at [DWeb 2019](https://www.plan-systems.org/2019/05/13/decentralized-web-camp-and-beyond/)               |
 | May 2019 | pnode community genesis and basic channel ops implmented               |
 | Feb 2019 | pdi-datastore now implements [StorageProvider](https://github.com/plan-systems/design-docs/blob/master/PLAN-API-Documentation.md#Persistent-Data-Interface) using a centralized db |
 | Dec 2018 | Architecture docs complete; resuming active development                 |
