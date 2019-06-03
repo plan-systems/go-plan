@@ -160,24 +160,17 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
   
         var (
             swizzle []int
-            payloadTxns pdi.PayloadTxns
-            payloadOut struct{
-                txns *pdi.PayloadTxns
-                bytes []byte
-                nameStr string
-            }
+            payloadOut *pdi.PayloadTxnSet
         )
 
         collator := pdi.NewTxnCollater()
-        collator.PayloadHandler = func(inPayload []byte, inTxns *pdi.PayloadTxns) error {
+        collator.PayloadHandler = func(inTxns *pdi.PayloadTxnSet) error {
             //gTesting.Logf("Recieved payload", i, idx, N)
 
-            if payloadOut.txns != nil {
+            if payloadOut != nil {
                 return plan.Error(nil, plan.AssertFailed, "received more than one payload")
             }
-            payloadOut.txns = inTxns
-            payloadOut.bytes = inPayload
-            payloadOut.nameStr = inTxns.PayloadIDStr()
+            payloadOut = inTxns
 
             return nil
         }
@@ -194,24 +187,20 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             totalBytes += payloadLen
             totalPayloads++
 
-            payloadIDStr := fmt.Sprintf("%d: %v", payloadLen, payload[:4])
-            payloadID := []byte(payloadIDStr)
+            //payloadIDStr := fmt.Sprintf("%d: %v", payloadLen, payload[:4])
+            //payloadID := []byte(payloadIDStr)
 
-            payloadOut.txns = nil
-
-			err := encoder.EncodeToTxns(
+			payloadTxns, err := encoder.EncodeToTxns(
 				payload,
-                payloadID,
 				plan.Encoding_Unspecified,
 				nil,
                 testTime + int64(j),
-                &payloadTxns,
 			)
 			if err != nil {
 				gTesting.Fatal(err)
 			}
 
-            N := len(payloadTxns.Txns)
+            N := len(payloadTxns.Segs)
 
             // Setup a shuffle the txn segment order
             {
@@ -238,28 +227,33 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
             //}
 
 			for i := 0; i < N; i++ {
-
                 idx := swizzle[i]
                 gTesting.Logf("Decoding %d (%d) of %d", i, idx, N)
-                err = collator.DecodeAndCollateTxn(decoder, &payloadTxns.Txns[idx])
+                err = collator.DecodeAndCollateTxn(decoder, &pdi.RawTxn{
+                    Bytes: payloadTxns.Segs[idx].RawTxn,
+                    URID:  payloadTxns.Segs[idx].Info.URID,
+                })
 				if err != nil {
                     gTesting.Fatal(err)
                 }
             }
 
-            if payloadOut.txns == nil {
+            if payloadOut == nil {
                 gTesting.Fatal("didn't get payload out")
             }
 
-            if ! bytes.Equal(payloadID, payloadOut.txns.PayloadID) {
-                gTesting.Fatal("payloadID chk failed")
+            err = payloadOut.AccessPayload(func(p []byte) error{
+                if ! bytes.Equal(payload, p) {
+                    return plan.Error(nil, plan.AssertFailed, "payload check failed")
+                }
+                return nil
+            })
+            if err != nil {
+                gTesting.Fatal(err)
             }
 
-            if ! bytes.Equal(payload, payloadOut.bytes) {
-                gTesting.Fatal("payload check failed")
-            }
-
-
+            pdi.RecycleTxnSet(payloadOut)
+            payloadOut = nil
 		}
 	}
 

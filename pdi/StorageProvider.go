@@ -43,12 +43,10 @@ type TxnEncoder interface {
 	// Pre: ResetSigner() must be successfully called.
 	EncodeToTxns(
 		inPayloadData     []byte,
-        inPayloadID       []byte,
 		inPayloadEncoding plan.Encoding,
 		inTransfers       []*Transfer,
 		inTimeSealed      int64, // If non-zero, this is used in place of the current time
-        outTxns           *PayloadTxns,
-	) error
+	) (*PayloadTxnSet, error)
 
 	// Generates a txn that destroys the given address from committing any further txns.
 	//EncodeDestruct(from ski.PubKey) (*Txn, error)
@@ -67,9 +65,6 @@ type TxnDecoder interface {
 		outInfo  *TxnInfo, // If non-nil, populated w/ info extracted from inTxn
 	) ([]byte, error)
 }
-
-
-
 
 
 // StorageKeyringSz is the byte size of the name used to identify a Keyring used for StorageProvider keys
