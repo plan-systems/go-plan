@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
+    "golang.org/x/crypto/blake2b"
+
 	"github.com/plan-systems/go-plan/plan"
 )
 
@@ -677,24 +679,36 @@ func Zero(buf []byte) {
 // FetchHasher returns the hash pkg for the given hash kit
 func FetchHasher(hashKitID HashKitID) func() hash.Hash {
 
+    var hasher func() hash.Hash
+
 	switch hashKitID {
 
-        case 0:
         case HashKitID_LegacyKeccak_256:
-            return sha3.NewLegacyKeccak256
+            hasher = sha3.NewLegacyKeccak256
 
         case HashKitID_LegacyKeccak_512:
-            return sha3.NewLegacyKeccak512
+            hasher = sha3.NewLegacyKeccak512
 
         case HashKitID_SHA3_256:
-            return sha3.New256
+            hasher = sha3.New256
 
         case HashKitID_SHA3_512:
-            return sha3.New512
+            hasher = sha3.New512
 
+        case HashKitID_Blake2b_256:
+            hasher = func() hash.Hash {
+                inst, _ := blake2b.New256(nil)
+                return inst
+            }
+
+        case HashKitID_Blake2b_512:
+            hasher = func() hash.Hash {
+                inst, _ := blake2b.New512(nil)
+                return inst
+            }
     }
 
-    return nil
+    return hasher
 }
 
 

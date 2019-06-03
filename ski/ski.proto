@@ -28,9 +28,10 @@ enum  HashKitID {
 
     LegacyKeccak_256    = 1;
     LegacyKeccak_512    = 2;
-
     SHA3_256            = 3;
     SHA3_512            = 4;
+    Blake2b_256         = 5;
+    Blake2b_512         = 6;
 }
 
 
