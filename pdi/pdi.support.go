@@ -97,43 +97,43 @@ func ReadVarBuf(dAtA []byte, offset int) (int, []byte, error) {
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
 	inPayload         []byte,
-    inPayloadID       []byte,
     inPayloadEnc      plan.Encoding, 
-	inMaxSegmentSize uint32,
-) ([]*TxnInfo, error) {
+	inMaxSegmentSize  uint32,
+) (*PayloadTxnSet, error) {
 
     payloadSz := uint32(len(inPayload))
 	bytesRemain := uint32(payloadSz)
 
 	N := (payloadSz + inMaxSegmentSize - 1) / inMaxSegmentSize
-	segs := make([]*TxnInfo, 0, N)
     pos := uint32(0)
 
-	for bytesRemain > 0 {
+    txnSet := NewTxnSet(N)
+    txnSet.NewlyAuthored = true
+    txnSet.NumSegsMissing = 0
+
+    for i := uint32(0); i < N; i++ {
+
+        seg := NewDecodedTxn(nil)
+        txnSet.Segs[i] = seg
 
 		segSz := bytesRemain
 		if segSz > inMaxSegmentSize {
 			segSz = inMaxSegmentSize
 		}
 
-		segs = append(segs, &TxnInfo{
-            PayloadEncoding: inPayloadEnc,
-            PayloadID: inPayloadID,
-            SegSz: segSz,
-		})
+        seg.Info.PayloadEncoding = inPayloadEnc
+        seg.Info.SegSz = segSz
+		seg.Info.SegIndex = i
+		seg.Info.SegTotal = N
+        seg.PayloadSeg = inPayload[pos:pos+segSz]
 
 		pos += segSz
         bytesRemain -= segSz
-	}
-
-	for i, seg := range segs {
-		seg.SegIndex = uint32(i)
-		seg.SegTotal = uint32(N)
-	}
+    }
 
     plan.Assert(bytesRemain == 0, "bytesRemain != 0")
 
-	return segs, nil
+	return txnSet, nil
 
 }
 

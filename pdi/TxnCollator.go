@@ -8,9 +8,6 @@ import (
 )
 
 
-// PayloadHandler is the callback made when a txn segment series is complete and reassembled.
-type PayloadHandler func(inTxnSet *PayloadTxnSet) error
-
 // DecodedTxn contains the contents of a decoded raw native txn from a StorageProvider
 type DecodedTxn struct {
     RawTxn     []byte
@@ -28,8 +25,6 @@ type PayloadTxnSet struct {
     scrap           bytes.Buffer
 }
 
-
-
 var txnPool = sync.Pool{
 	New: func() interface{} {
 		return new(DecodedTxn)
@@ -37,10 +32,18 @@ var txnPool = sync.Pool{
 }
 
 // NewDecodedTxn allocates/recycles a DecodedTxn as if it was newly instantiated.
-func NewDecodedTxn() *DecodedTxn {
+func NewDecodedTxn(inRawTxn []byte) *DecodedTxn {
     seg := txnPool.Get().(*DecodedTxn)
 
-    seg.RawTxn = seg.RawTxn[:0]
+    txnLen := len(inRawTxn)
+
+    if txnLen == 0 {
+        seg.RawTxn = seg.RawTxn[:0]
+    } else if txnLen < 20000 && txnLen > cap(seg.RawTxn) {
+        seg.RawTxn = append(seg.RawTxn[:0], inRawTxn...)
+    } else {
+        seg.RawTxn = inRawTxn
+    }
     seg.PayloadSeg = nil
     seg.Info.Reset()
 
@@ -98,44 +101,38 @@ func RecycleTxnSet(inTxnSet *PayloadTxnSet) {
     txnSetPool.Put(inTxnSet)
 }
 
-// AccessPayload re-assumbles the payload 
-func (txnSet *PayloadTxnSet) AccessPayload(
-    inReader func(inPayload []byte) error,
+// UnmarshalPayload re-assumbles the payload as necessary and unmarshals to the givne item
+func (txnSet *PayloadTxnSet) UnmarshalPayload(
+    outItem plan.Marshaller,
 ) error {
+
+    info := txnSet.Info()
 
     var err error
 
-    info := txnSet.Info()
-    if info == nil {
-        err = plan.Error(nil, plan.ParamMissing, "no txns to unmarshal")
-    } else if txnSet.NumSegsMissing > 0 {
-        err = plan.Error(nil, plan.ParamMissing, "payload txn set not complete")
+    if info.SegTotal == 1 {
+
+        // If only a single txn, nothing to reassemble
+        err = outItem.Unmarshal(txnSet.Segs[0].PayloadSeg)
+
     } else {
 
-        if info.SegTotal == 1 {
+        totalSz := 0
+        for _, seg := range txnSet.Segs {
+            totalSz += int(seg.Info.SegSz)
+        }
 
-            // If only a single txn, nothing to reassemble
-            err = inReader(txnSet.Segs[0].PayloadSeg)
+        txnSet.scrap.Reset()
+        txnSet.scrap.Grow(totalSz)
 
+        for _, seg := range txnSet.Segs {
+            txnSet.scrap.Write(seg.PayloadSeg)
+        }
+
+        if txnSet.scrap.Len() != totalSz {
+            err = plan.Error(nil, plan.AssertFailed, "UnmarshalPayload assert failed")
         } else {
-
-            totalSz := 0
-            for _, seg := range txnSet.Segs {
-                totalSz += int(seg.Info.SegSz)
-            }
-
-            txnSet.scrap.Reset()
-            txnSet.scrap.Grow(totalSz)
-
-            for _, seg := range txnSet.Segs {
-                txnSet.scrap.Write(seg.PayloadSeg)
-            }
-
-            if txnSet.scrap.Len() != totalSz {
-                err = plan.Error(nil, plan.AssertFailed, "UnmarshalPayload assert failed")
-            } else {
-                err = inReader(txnSet.scrap.Next(totalSz))
-            }
+            err = outItem.Unmarshal(txnSet.scrap.Next(totalSz))
         }
     }
 
@@ -161,19 +158,83 @@ func (txnSet *PayloadTxnSet) PayloadEncoding() plan.Encoding {
     return plan.Encoding_Unspecified
 }
 
+// Verify verifies that all the segments, verify all segments are linked\ and consistent
+func (txnSet *PayloadTxnSet) Verify() error {
+
+    info := txnSet.Info()
+
+    if info == nil {
+        return plan.Error(nil, plan.ParamMissing, "no txns to present")
+    } else if txnSet.NumSegsMissing > 0 {
+        return plan.Errorf(nil, plan.ParamMissing, "missing %d out of %d segments", txnSet.NumSegsMissing, info.SegTotal)
+    } else {
+
+        var prevURID []byte
+
+        for _, seg := range txnSet.Segs {
+
+            if seg == nil {
+                return plan.Error(nil, plan.TxnNotConsistent, "missing at least one txn")
+            } else if seg.Info.SegTotal != info.SegTotal || seg.Info.PayloadEncoding != info.PayloadEncoding {
+                return plan.Errorf(nil, plan.TxnNotConsistent, "txn set %v not consistent", seg.URIDstring())
+            } else if ! bytes.Equal(seg.Info.PrevURID, prevURID) {
+                return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg URID %v, got %v", seg.URIDstring(), seg.Info.PrevURID, prevURID)
+            }
+
+            prevURID = seg.Info.URID
+        }
+    }
+
+    return nil
+
+}
+
+
 // MergeSegment adds the given txn to this segment group
-func (txnSet *PayloadTxnSet) MergeSegment(seg *DecodedTxn) bool {
+func (txnSet *PayloadTxnSet) MergeSegment(seg *DecodedTxn) error {
 
 	idx := seg.Info.SegIndex
+	segSz := uint32(len(seg.PayloadSeg))
+ 
+    // Check segment/txn info is well-formed
+	if idx < 0 || seg.Info.SegTotal < 1 || idx >= seg.Info.SegTotal {
+		return plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.URIDstring(), seg.Info.SegIndex, seg.Info.SegTotal)
+    } else if seg.Info.SegSz != segSz {
+		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.URIDstring(), seg.Info.SegSz, segSz)
+    } else if uint32(len(txnSet.Segs)) != seg.Info.SegTotal {
+		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: total segments (%d) is not consistent with txnSet", seg.URIDstring(), seg.Info.SegTotal)
+    }
 
-	if txnSet.Segs[idx] == nil {
+    // Put the segment in it's place.
+    if txnSet.Segs[idx] == nil {
         if txnSet.NumSegsMissing > 0 {
-		    txnSet.NumSegsMissing--
+            txnSet.NumSegsMissing--
         }
-	}
-	txnSet.Segs[idx] = seg
-	
-    return txnSet.NumSegsMissing == 0
+    }
+    txnSet.Segs[idx] = seg
+
+    // If seem to have all the segments, verify all segments are linked and consistent
+    if txnSet.NumSegsMissing == 0 {
+        return txnSet.Verify()
+    } 
+
+    return nil
+}
+
+// DecodeAndMergeTxn decodes the given txn and merges it with this PayloadTxnSet. Txns
+// passed to this function are assumed to be part of the same txn set.  If not, an error
+func (txnSet *PayloadTxnSet) DecodeAndMergeTxn(
+    inDecoder TxnDecoder,
+    inRawTxn []byte,
+) error {
+
+    txn := NewDecodedTxn(inRawTxn)
+    err := txn.DecodeRawTxn(inDecoder)
+    if err != nil {
+        return err
+    }
+    
+    return txnSet.MergeSegment(txn)
 }
    
 // DecodeRawTxn is a convenience function for TxnDecoder.DecodeRawTxn()
@@ -211,7 +272,6 @@ func (seg *DecodedTxn) URIDstring() string {
 
 // TxnCollater helps desegment/"collate" txns from multi-segment pieces into a single segment (that can be unmarshalled).
 type TxnCollater struct {
-    PayloadHandler PayloadHandler
     segMap         map[URIDBlob]segEntry
 }
 
@@ -232,83 +292,34 @@ func NewTxnCollater() TxnCollater {
 func (tc *TxnCollater) DecodeAndCollateTxn(
     inDecoder TxnDecoder,
     inRawTxn *RawTxn,
-) error {
+) (*PayloadTxnSet, error) {
 
-    seg := NewDecodedTxn()
-    seg.RawTxn = inRawTxn.Bytes
+    seg := NewDecodedTxn(inRawTxn.Bytes)
 
     err := seg.DecodeRawTxn(inDecoder)
     if err != nil {
-        return err
+        return nil, err
     }
 
     if len(inRawTxn.URID) > 0 && ! bytes.Equal(seg.Info.URID, inRawTxn.URID) {
-        return plan.Errorf(nil, plan.TxnFailedToDecode, "txn URID did not match given label") 
+        return nil, plan.Errorf(nil, plan.TxnFailedToDecode, "txn URID did not match given label") 
     }
 
     return tc.Desegment(seg)
 }
  
 
-// Consolidate collates multisegment txns until all the segments are present.
-//
-// If txnIn completes this multi-segment txn group, the txnIncoming returned is a reconstructed (single) segment ready for decapsulation.
-func (tc *TxnCollater) consolidate(txnSet *PayloadTxnSet) error {
-
-    info := txnSet.Info()
-    if info == nil {
-        return plan.Error(nil, plan.TxnNotConsistent, "no txn segments to consolidate")
-    }
-
-	// Exit if there's still more segments to go
-	if txnSet.NumSegsMissing > 0 {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "missing %d out of %d segments", txnSet.NumSegsMissing, info.SegTotal)
-	}
-
-	var prevURID []byte
-
-	// First verify all segments present and calc size
-	for _, seg := range txnSet.Segs {
-
-        if seg.Info.SegTotal != info.SegTotal || seg.Info.PayloadEncoding != info.PayloadEncoding {
-            return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v failed group consistency check", seg.URIDstring())
-        } else if ! bytes.Equal(seg.Info.PrevURID, prevURID) {
-			return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg URID %v, got %v", seg.URIDstring(), seg.Info.PrevURID, prevURID)
-		}
-
-		prevURID = seg.Info.URID
-	}
-
-    return tc.PayloadHandler(txnSet)
-}
-
-
 // Desegment collects decoded txns (payload segments) and returns ones that are a single segment.
 func (tc *TxnCollater) Desegment(
     seg *DecodedTxn,
-) error {
+) (outTxnSet *PayloadTxnSet, err error) {
 
-	var (
-		err  error
-	)
-	segSz := uint32(len(seg.PayloadSeg))
-
-    segURID := seg.TxnURID()
-
-	// If there's only a single segment, we can decode immediately.
-	if seg.Info.SegTotal < 1 || seg.Info.SegIndex >= seg.Info.SegTotal {
-		err = plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.URIDstring(), seg.Info.SegIndex, seg.Info.SegTotal)
-    } else if seg.Info.SegSz != segSz {
-		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.URIDstring(), seg.Info.SegSz, segSz)
-    } else if seg.Info.SegIndex == 0 && len(seg.Info.PrevURID) != 0 {
-		err = plan.Errorf(nil, plan.TxnNotConsistent, "txn %v has illegal PrevURID", seg.URIDstring())
-	} else if seg.Info.SegTotal == 1 {
-        txnSet := NewTxnSet(1)
-        txnSet.MergeSegment(seg)
-        err = tc.PayloadHandler(txnSet)
+    if seg.Info.SegTotal <= 1 {
+        outTxnSet = NewTxnSet(1)
+        err = outTxnSet.MergeSegment(seg)
 	} else {
-        
-        txnURID := segURID.Blob()
+
+        txnURID := seg.TxnURID().Blob()
         entry := tc.segMap[txnURID]
 
         // Use the last segment as a catalyst to start a new txnSet
@@ -326,15 +337,15 @@ func (tc *TxnCollater) Desegment(
             // Advance the leading "edge" of the segGroup towards index 0 (the first segment in the group)
             for entry.seg != nil && err == nil {
         
-                canConsolidate := txnSet.MergeSegment(entry.seg)
-                if canConsolidate {
+                err = txnSet.MergeSegment(entry.seg)
+                if txnSet.NumSegsMissing == 0 {
 
                     // Detach each txn segment
                     for _, seg := range txnSet.Segs {
                         delete(tc.segMap, seg.TxnURID().Blob())
                     }
 
-                    err = tc.consolidate(txnSet)
+                    outTxnSet = txnSet
                     break
                 }
 
@@ -352,5 +363,5 @@ func (tc *TxnCollater) Desegment(
         }
 	}
 
-	return err
+	return outTxnSet, err
 }

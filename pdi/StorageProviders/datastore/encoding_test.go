@@ -92,7 +92,6 @@ func TestTxnEncoding(t *testing.T) {
 	}
     stEpoch.TxnMaxSize = 10000
 
-
     {
         authorKey := ski.KeyRef{
             KeyringName: stEpoch.StorageKeyringName(),
@@ -144,7 +143,6 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
     totalPayloads := 0
 
     
-    
 	// Test agent encode/decode
 	{
         
@@ -160,38 +158,27 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
   
         var (
             swizzle []int
-            payloadOut *pdi.PayloadTxnSet
+            payloadIn, payloadOut pdi.RawTxn
+            txnSet *pdi.PayloadTxnSet
         )
 
         collator := pdi.NewTxnCollater()
-        collator.PayloadHandler = func(inTxns *pdi.PayloadTxnSet) error {
-            //gTesting.Logf("Recieved payload", i, idx, N)
-
-            if payloadOut != nil {
-                return plan.Error(nil, plan.AssertFailed, "received more than one payload")
-            }
-            payloadOut = inTxns
-
-            return nil
-        }
-
 
 		for j := 0; j < 5000; j++ {
             testTime := plan.Now()
 
 			payloadLen := int(1 + rand.Int31n(int32(stEpoch.TxnMaxSize) * 25))
 
-			payload := blobBuf[:payloadLen]
-			rand.Read(payload)
+			payloadIn.Bytes = blobBuf[:payloadLen]
+			rand.Read(payloadIn.Bytes)
 
             totalBytes += payloadLen
             totalPayloads++
 
-            //payloadIDStr := fmt.Sprintf("%d: %v", payloadLen, payload[:4])
-            //payloadID := []byte(payloadIDStr)
+            payloadPb, err := payloadIn.Marshal()
 
 			payloadTxns, err := encoder.EncodeToTxns(
-				payload,
+				payloadPb,
 				plan.Encoding_Unspecified,
 				nil,
                 testTime + int64(j),
@@ -201,7 +188,8 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 			}
 
             N := len(payloadTxns.Segs)
-
+            totalTxns += N
+            
             // Setup a shuffle the txn segment order
             {
                 if cap(swizzle) < N {
@@ -209,51 +197,45 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
                 } else {
                     swizzle = swizzle[:N]
                 }
-
                 for i := 0; i < N; i++ {
                     swizzle[i] = i
                 }
-
-                if false {
+                if true {
                     rand.Shuffle(N, func(i, j int) {
                         swizzle[i], swizzle[j] = swizzle[j], swizzle[i]
                     })
                 }
             }
 
-            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", j, N, len(payload))
-            //if i == 266 {
-            //    err = nil
-            //}
+            gTesting.Logf("#%d: Testing %d segment txn set (payloadSz=%d)", j, N, len(payloadIn.Bytes))
 
 			for i := 0; i < N; i++ {
                 idx := swizzle[i]
                 gTesting.Logf("Decoding %d (%d) of %d", i, idx, N)
-                err = collator.DecodeAndCollateTxn(decoder, &pdi.RawTxn{
+                txnSet, err = collator.DecodeAndCollateTxn(decoder, &pdi.RawTxn{
                     Bytes: payloadTxns.Segs[idx].RawTxn,
                     URID:  payloadTxns.Segs[idx].Info.URID,
                 })
+                if i < N - 1 {
+                    plan.Assert(txnSet == nil, "txnSet should be nil")
+                } else {
+                    plan.Assert(txnSet != nil, "txnSet should be non nil")
+                }
 				if err != nil {
                     gTesting.Fatal(err)
                 }
             }
 
-            if payloadOut == nil {
-                gTesting.Fatal("didn't get payload out")
-            }
+            err = txnSet.UnmarshalPayload(&payloadOut)
+			if err != nil {
+				gTesting.Fatal(err)
+			}
 
-            err = payloadOut.AccessPayload(func(p []byte) error{
-                if ! bytes.Equal(payload, p) {
-                    return plan.Error(nil, plan.AssertFailed, "payload check failed")
-                }
-                return nil
-            })
-            if err != nil {
-                gTesting.Fatal(err)
-            }
+            pdi.RecycleTxnSet(txnSet)
 
-            pdi.RecycleTxnSet(payloadOut)
-            payloadOut = nil
+            if ! bytes.Equal(payloadIn.Bytes, payloadOut.Bytes) {
+                gTesting.Fatal("payload check failed")
+            }
 		}
 	}
 
