@@ -7,7 +7,6 @@ import (
 	"github.com/plan-systems/go-plan/plan"
 )
 
-
 // DecodedTxn contains the contents of a decoded raw native txn from a StorageProvider
 type DecodedTxn struct {
     RawTxn     []byte
@@ -20,7 +19,7 @@ type PayloadTxnSet struct {
     Segs            []*DecodedTxn
     NumSegsMissing  uint32
     NewlyAuthored   bool
-    PayloadID       plan.TIDBlob
+    PayloadTID      plan.TIDBlob
 
     scrap           bytes.Buffer
 }
@@ -69,7 +68,7 @@ func NewTxnSet(inNumSegs uint32) *PayloadTxnSet {
     
     txnSet.NumSegsMissing = inNumSegs
     txnSet.NewlyAuthored = false
-    txnSet.PayloadID = plan.NilTID
+    txnSet.PayloadTID = plan.NilTID
 
     if cap(txnSet.Segs) < int(inNumSegs) {
         txnSet.Segs = make([]*DecodedTxn, inNumSegs)

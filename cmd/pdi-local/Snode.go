@@ -393,12 +393,8 @@ func (sn *Snode) StartSession(ctx context.Context, in *pdi.SessionReq) (*pdi.Sto
         return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found: %v", in.StorageEpoch.CommunityID)
     }
 
-    /******* gRPC Server Notes **********
-        1) An endpoint w/ a stream response sends an io.EOF once the handler proc returns (even if streamer stays open)
-    */
-
     // TODO security checks to prevent DoS
-    session :=  sn.activeSessions.NewSession(ctx)
+    session :=  sn.activeSessions.NewSession(ctx, nil)
     session.Cookie = St
 
     info := &pdi.StorageInfo{

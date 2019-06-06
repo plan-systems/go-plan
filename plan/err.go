@@ -150,6 +150,9 @@ const (
 	// CommunityEpochNotFound means the community epoch ID cited was not found in this repo.
 	CommunityEpochNotFound
 
+    // CommunityKeyNotAvailable means no community key sessions knew of the given community key.
+    CommunityKeyNotAvailable
+
 	// FailedToConnectStorageProvider means the connection attempt the StorageProvider failed
 	FailedToConnectStorageProvider
 
@@ -188,6 +191,9 @@ const (
 
 	// ChEntryNotMerged means the given entry cannot yet be merged and must wait
 	ChEntryNotMerged
+
+    // ChEntryIsNotLive means the requested entry is not currently live 
+    ChEntryIsNotLive
 
 	// AuthorLacksWritePermission means the given PDI entry's author does not have write permission to the specified channel
 	AuthorLacksWritePermission

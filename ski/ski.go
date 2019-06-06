@@ -11,6 +11,8 @@ import (
 
 // Session provides crypto services from an opaque service provider.
 //
+// THREADSAFE
+//
 // FUTURE: this will become a gRPC service.
 type Session interface {
 

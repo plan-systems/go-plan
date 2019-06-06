@@ -1244,7 +1244,6 @@ func (U* PayloadUnpacker) UnpackAndVerify(
     bodyPos := headerEnd
     bodyEnd := bodyPos + uint32(hdr.BodySz)
 
-
     if err == nil {
         if bodyEnd > bufLen - 1 {
             err = plan.Error(nil, plan.UnmarshalFailed, "body end exceeds buf size")
@@ -1254,7 +1253,6 @@ func (U* PayloadUnpacker) UnpackAndVerify(
     // 2) Read the sig len
     sigPos := bodyEnd + 1
     sigEnd := sigPos + uint32(inSignedBuf[bodyEnd])
-
 
     if err == nil {
         if U.threadsafe {

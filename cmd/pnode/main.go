@@ -28,12 +28,10 @@ import (
 
 )
 
-
 func main() {
 
     basePath    := flag.String( "path",         "",         "Directory for all files associated with this repo" )
     init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh repo" )
-    //seed        := flag.String( "seed",         "",         "Reads the given member invite and reflates repo and account")
 
     flag.Parse()
     flag.Set("logtostderr", "true")
