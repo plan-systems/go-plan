@@ -73,13 +73,11 @@ const (
 
 func genRandomSessionToken(N int) string {
 
-    const vocab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-
     buf := make([]byte, N)
 
-    rand.Read( buf )
+    rand.Read(buf)
     for i := 0; i < N; i++ {
-        buf[i] = vocab[buf[i] & 0x3F]
+        buf[i] = plan.Base64pCharSet[buf[i] & 0x3F]
     }
     
     return string( buf )
@@ -180,7 +178,14 @@ func TransferSessionToken(ctx context.Context, md metadata.MD) (context.Context,
     return ctx2, nil
 }
 
+// ApplyTokenOutgoingContext applies the given binary string to the given context, encoding it into a base64 string.
+func ApplyTokenOutgoingContext(ctx context.Context, inToken []byte) context.Context {
 
+    str := plan.Base64p.EncodeToString(inToken)
+    ctx2 := metadata.AppendToOutgoingContext(ctx, SessionTokenKey, str)
+
+    return ctx2
+}
 
 // FetchSession extracts the session token string from the context, performs a session lookup, and returns the ClientSession object.
 func (group *SessionGroup) FetchSession(ctx context.Context) (*ClientSession, error) {
@@ -225,17 +230,24 @@ func (group *SessionGroup) LookupSession(inSessionToken string, inBumpActivity b
 // NewSession creates a new ClientSession and inserts the session token into the given context
 func (group *SessionGroup) NewSession(
     ctx context.Context,
+    inTokenOverride []byte,
 ) *ClientSession {
 
+
     session := &ClientSession{
-        SessionToken: genRandomSessionToken(32),
         OnEndSession: func(*ClientSession, string) { },
+    }
+
+    if len(inTokenOverride) > 0 {
+        session.SessionToken = plan.Base64p.EncodeToString(inTokenOverride)
+    } else {
+        session.SessionToken = genRandomSessionToken(32)
     }
 
     group.InsertSession(session)
 
-    trailer := metadata.Pairs(SessionTokenKey, session.SessionToken)
-    grpc.SetTrailer(ctx, trailer)
+    tokenPair := metadata.Pairs(SessionTokenKey, session.SessionToken)
+    grpc.SetTrailer(ctx, tokenPair)
 
     return session
 }
