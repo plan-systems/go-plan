@@ -103,7 +103,7 @@ func NewStore(
         St.AbsPath = path.Clean(path.Join(inBasePath, St.Config.HomePath))
     }
 
-    storeDesc := fmt.Sprintf("St-%v", St.Config.StorageEpoch.Name)
+    storeDesc := fmt.Sprintf("St:%v", St.Config.StorageEpoch.Name)
     St.SetLogLabel(storeDesc)
 
     return St
@@ -115,7 +115,7 @@ func (St *Store) Startup(
     inFirstTime bool,
 ) error {
 
-    St.Infof(0, "starting up using %s", St.AbsPath)
+    St.Info(0, "starting up store ", St.AbsPath)
 
     err := St.flow.Startup(
         inCtx,
@@ -360,7 +360,7 @@ func (St *Store) updateAccount(
 
     // If we get a deposit err, log it and proceed normally (i.e. the funds are lost forever)
     if err != nil {
-        St.Warnf("error updating acct %v: %v", inAcctAddr, err)
+        St.Errorf("error updating acct %v: %v", inAcctAddr, err)
     }
 
     return err
@@ -510,10 +510,10 @@ func (St *Store) doCommitJob(job CommitJob) error {
 
             perr, _ := err.(*plan.Err)
             if perr == nil {
-                perr = plan.Error(err, plan.FailedToCommitTxn, "txn commit failed")
+                perr = plan.Error(err, plan.FailedToCommitTxns, "txn commit failed")
             }
 
-            St.Warnf("CommitJob failed: %v, URID: %s", err, job.Txn.URIDstring())
+            St.Errorf("CommitJob failed: %v, URID: %s", err, job.Txn.URIDstring())
         
             err = perr
         }
@@ -575,7 +575,7 @@ func (St *Store) DoScanJob(job ScanJob) {
         err := St.doScanJob(job)
 
         if err != nil && St.IsRunning() {
-            St.Warnf("scan job error: %v", err)
+            St.Errorf("scan job error: %v", err)
         }
 
         job.OnComplete <- err
@@ -599,7 +599,7 @@ func (St *Store) DoSendJob(job SendJob) {
         err := St.doSendJob(job)
 
         if err != nil && St.IsRunning() {
-            St.Warnf("send job error: %v", err)
+            St.Errorf("send job error: %v", err)
         }
 
         job.OnComplete <- err
@@ -621,11 +621,6 @@ func (St *Store) DoCommitJob(job CommitJob) error {
     if err != nil {
         atomic.AddInt32(&St.numSendJobs, -1)
         return err
-    }
-
-    St.txnUpdates <- txnUpdate{
-        job.Txn.Info.URID, 
-        pdi.TxnStatus_COMMITTING,
     }
 
     St.DecodedCommits <- job
@@ -811,14 +806,12 @@ func (St *Store) doScanJob(job ScanJob) error {
 
                     copy(seekKey, URIDs[batchCount-1])
                 }
-
             }
 
             // At this point, we've sent a healthy batch of scanned txn IDs and we need to also send any pending txn status updates.
             {
                 batchCount := int32(0)
-                sent := false
-
+                
                 // Do a full wait only if we're done with the txn scan (and only waiting for txn update msgs)
                 fullWait := scanDir == 0
 
@@ -832,7 +825,9 @@ func (St *Store) doScanJob(job ScanJob) error {
                     <-wakeTimer
                 }
 
-                for err == nil && ! sent {
+                sendNow := false
+
+                for err == nil && ! sendNow {
 
                     select {
                         case txnUpdate := <- job.txnUpdates:
@@ -841,7 +836,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                                 statuses[batchCount] = byte(txnUpdate.TxnStatus)
                                 batchCount++
 
-                                // Once we one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
+                                // Once we get one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
                                 if fullWait {
                                     wakeTimer = batchLag.C
                                     fullWait = false
@@ -850,16 +845,19 @@ func (St *Store) doScanJob(job ScanJob) error {
                                     }
                                 }
                             }
-                                
+
                         case <- wakeTimer:
-                            err = job.Outlet.Send(&pdi.TxnList{
-                                URIDs: URIDs[:batchCount],
-                                Statuses: statuses[:batchCount],
-                            })
-                            sent = true
+                            sendNow = true
 
                         case <- St.flow.Ctx.Done():
                             err = St.CheckStatus()
+                    }
+
+                    if sendNow || batchCount == batchMax {
+                        err = job.Outlet.Send(&pdi.TxnList{
+                            URIDs: URIDs[:batchCount],
+                            Statuses: statuses[:batchCount],
+                        })
                     }
                 }
 
