@@ -113,8 +113,8 @@ const (
 	// AssertFailed means an unreachable part of code was...reached.  :\
 	AssertFailed
 
-	// ParamMissing one or more params was missing, nil, or not otherwise given
-	ParamMissing
+	// ParamErr means one or more params was missing, nil, or malformed.
+	ParamErr
 
 	// MarshalFailed means Marshal() returned an error
 	MarshalFailed
@@ -329,8 +329,8 @@ const (
 	// FailedToLoadDatabase means an error was encountered when creating or loading the database
 	FailedToLoadDatabase
 
-	// FailedToCommitTxn means an unexpected fatal error occurred while committing one ore more txns
-	FailedToCommitTxn
+	// FailedToCommitTxns means an unexpected fatal error occurred while committing one ore more txns
+	FailedToCommitTxns
 
 	// IncompatibleStorage means the given TxnEncoder desc string reflects that the SP and client are incompatible
 	IncompatibleStorage

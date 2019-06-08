@@ -163,9 +163,9 @@ func (txnSet *PayloadTxnSet) Verify() error {
     info := txnSet.Info()
 
     if info == nil {
-        return plan.Error(nil, plan.ParamMissing, "no txns to present")
+        return plan.Error(nil, plan.ParamErr, "no txns to present")
     } else if txnSet.NumSegsMissing > 0 {
-        return plan.Errorf(nil, plan.ParamMissing, "missing %d out of %d segments", txnSet.NumSegsMissing, info.SegTotal)
+        return plan.Errorf(nil, plan.ParamErr, "missing %d out of %d segments", txnSet.NumSegsMissing, info.SegTotal)
     } else {
 
         var prevURID []byte

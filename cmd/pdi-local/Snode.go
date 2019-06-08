@@ -385,7 +385,7 @@ func (sn *Snode) startServer() error {
 // StartSession -- see service StorageProvider in pdi.proto
 func (sn *Snode) StartSession(ctx context.Context, in *pdi.SessionReq) (*pdi.StorageInfo, error) {
     if in.StorageEpoch == nil {
-        return nil, plan.Errorf(nil, plan.ParamMissing, "missing StorageEpoch")
+        return nil, plan.Errorf(nil, plan.ParamErr, "missing StorageEpoch")
     }
 
     St := sn.fetchStore(in.StorageEpoch.CommunityID)

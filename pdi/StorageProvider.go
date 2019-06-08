@@ -120,7 +120,7 @@ func (epoch *StorageEpoch) GenerateNewAddr(
     krName := epoch.StorageKeyringName()
 
     if len(krName) == 0 {
-        return nil, plan.Error(nil, plan.ParamMissing, "invalid StorageEpoch")
+        return nil, plan.Error(nil, plan.ParamErr, "invalid StorageEpoch")
     }
 
     keyInfo, err := ski.GenerateNewKey(

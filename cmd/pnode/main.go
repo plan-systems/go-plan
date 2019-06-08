@@ -58,7 +58,7 @@ func main() {
                 case <- pnCtx.Done():
             }
 
-            pn.Shutdown("task complete")
+            pn.Shutdown("pnode complete")
         }
     }
 }
