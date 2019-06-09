@@ -164,7 +164,7 @@ var CryptoKit = ski.CryptoKit{
         inPwd []byte,
     ) ([]byte, error) {
 
-        hashKitID := ski.HashKitID_LegacyKeccak_256
+        hashKitID := ski.HashKitID_Blake2b_256
         hasher := ski.FetchHasher(hashKitID)
 
         var salt [26]byte
