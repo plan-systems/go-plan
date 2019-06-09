@@ -1,0 +1,32 @@
+// See http://github.com/plan-systems/plan-protobufs/
+
+
+syntax = "proto3";
+
+package client;
+
+//import "github.com/plan-systems/go-plan/pdi/pdi.proto";
+//import "github.com/plan-systems/go-plan/plan/plan.proto";
+
+
+
+message LoginPB {
+
+}
+
+
+message SessionPB {
+
+}
+
+
+
+service Workstation {
+
+    // Bootstraps a repo for a given member.
+    rpc         Login(LoginPB)                                      returns (SessionPB);
+
+
+}
+
+
