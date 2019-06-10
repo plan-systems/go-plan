@@ -66,10 +66,10 @@ func (tid TID) IsNil() bool {
     }
 
     if bytes.Equal(tid, NilTID[:]) {
-        return false
+        return true
     }
 
-    return true
+    return false
 }
 
 // Blob is a convenience function that forms a TID byte array from a TID byte slice. 
