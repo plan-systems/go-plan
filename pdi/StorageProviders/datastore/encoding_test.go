@@ -22,9 +22,8 @@ var gTesting *testing.T
 var gCommunityEpoch = pdi.CommunityEpoch{
     CommunityID: []byte{0, 1, 2, 3, 4, 5, 5, 7, 99, 123},
     CommunityName: "encoding-test",
-    EntryHashKit: ski.HashKitID_LegacyKeccak_256,
+    EntryHashKit: ski.HashKitID_Blake2b_256,
 }
-
 
 func TestVarAppendBuf(t *testing.T) {
 
@@ -103,7 +102,6 @@ func TestTxnEncoding(t *testing.T) {
         }
     }
 
-
 	A := &testSession{
 		*tool,
 		nil,
@@ -130,7 +128,6 @@ func TestTxnEncoding(t *testing.T) {
 	}
 }
 
-
 func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
 
     seed := plan.Now()
@@ -141,7 +138,6 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
     totalBytes := 0
     totalTxns  := 0
     totalPayloads := 0
-
     
 	// Test agent encode/decode
 	{
@@ -154,7 +150,6 @@ func txnEncodingTest(A *testSession, stEpoch *pdi.StorageEpoch) {
         if err != nil {
             gTesting.Fatal(err)
         }
-
   
         var (
             swizzle []int
