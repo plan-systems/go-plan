@@ -191,7 +191,7 @@ func (St *Store) internalStartup() error {
             }
             St.subsMutex.Unlock()
         }
-        St.Info(1, "(1) commit notification exited")
+        St.Info(1, "T-1) commit notification exited")
 
         // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
         for {
@@ -223,7 +223,7 @@ func (St *Store) internalStartup() error {
 
             atomic.AddInt32(&St.numCommitJobs, -1)
         }
-        St.Info(1, "(2) commit pipeline closed")
+        St.Info(1, "T-2) commit pipeline closed")
 
         // Cause all subs to fire, causing them to exit when they see St.OpState == Stopping
         St.txnUpdates <- txnUpdate{}
@@ -245,7 +245,7 @@ func (St *Store) internalShutdown() {
         }
     }
 
-    St.Info(1, "(3) pending commits complete")
+    St.Info(1, "T-3) pending commits complete")
 
     // This will initiate a close-cascade causing St.resources to be released
     close(St.DecodedCommits)
@@ -711,11 +711,11 @@ func (St *Store) doScanJob(job ScanJob) error {
     }
 
     heartbeat := time.NewTicker(time.Second * 28)
-    var batchLag *time.Ticker
+    var batchDelay *time.Ticker
 
     // Before we start the db txn (and effectively get locked to a db rev in time), subscribe this job to receive new commits
     if job.TxnScan.SendTxnUpdates {
-        batchLag = time.NewTicker(time.Millisecond * 300)
+        batchDelay = time.NewTicker(time.Millisecond * 300)
 
         job.txnUpdates = St.addTxnSubscriber()
     }
@@ -815,7 +815,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                 // Do a full wait only if we're done with the txn scan (and only waiting for txn update msgs)
                 fullWait := scanDir == 0
 
-                wakeTimer := batchLag.C
+                wakeTimer := batchDelay.C
                 if fullWait {
                     wakeTimer = heartbeat.C
                 }
@@ -825,9 +825,9 @@ func (St *Store) doScanJob(job ScanJob) error {
                     <-wakeTimer
                 }
 
-                sendNow := false
+                doneWaiting := false
 
-                for err == nil && ! sendNow {
+                for err == nil && ! doneWaiting {
 
                     select {
                         case txnUpdate := <- job.txnUpdates:
@@ -838,7 +838,7 @@ func (St *Store) doScanJob(job ScanJob) error {
 
                                 // Once we get one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
                                 if fullWait {
-                                    wakeTimer = batchLag.C
+                                    wakeTimer = batchDelay.C
                                     fullWait = false
                                     for len(wakeTimer) > 0 {
                                         <-wakeTimer
@@ -847,17 +847,18 @@ func (St *Store) doScanJob(job ScanJob) error {
                             }
 
                         case <- wakeTimer:
-                            sendNow = true
+                            doneWaiting = true
 
                         case <- St.flow.Ctx.Done():
                             err = St.CheckStatus()
                     }
 
-                    if sendNow || batchCount == batchMax {
+                    if doneWaiting || batchCount == batchMax {
                         err = job.Outlet.Send(&pdi.TxnList{
                             URIDs: URIDs[:batchCount],
                             Statuses: statuses[:batchCount],
                         })
+                        batchCount = 0
                     }
                 }
 
