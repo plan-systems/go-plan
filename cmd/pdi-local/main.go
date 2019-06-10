@@ -5,20 +5,19 @@ import (
     "context"
     "flag"
     "os"
-    "path"
+    //"path"
     "io/ioutil"
     "encoding/json"
     crand "crypto/rand"
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
-    "github.com/plan-systems/go-plan/pcore"
+    "github.com/plan-systems/go-plan/client"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/repo"
     "github.com/plan-systems/go-plan/ski"
     "github.com/plan-systems/go-plan/ski/Providers/hive"
 )
-
 
 func main() {
 
@@ -36,7 +35,7 @@ func main() {
     }
 
     if *init {
-        sn.Info(0, "init successful")
+        sn.Info(0, "init successful into ", sn.BasePath)
     } else {  
         if len(*genesisFile) > 0 {
 
@@ -112,7 +111,7 @@ func loadGenesisInfo(inPathname string) (*CommunityGenesis, error) {
             CommunityEpoch:  &pdi.CommunityEpoch{
                 CommunityID: params.CommunityID,
                 CommunityName: params.CommunityName,
-                EntryHashKit: ski.HashKitID_LegacyKeccak_256,
+                EntryHashKit: ski.HashKitID_Blake2b_256,
                 //EpochTID: plan.GenerateTID(nil),
                 MaxMemberClockDelta: 120,
             },
@@ -127,7 +126,6 @@ func loadGenesisInfo(inPathname string) (*CommunityGenesis, error) {
     genesis.GenesisSeed.CommunityEpoch.EpochTID = make([]byte, plan.TIDSz)
     plan.TID(genesis.GenesisSeed.CommunityEpoch.EpochTID).SetTimeAndHash(plan.NowFS(), randTID[:])
 */
-    genesis.MemberSessions.Host = genesis
 
     return genesis, nil
 }
@@ -140,9 +138,7 @@ type CommunityGenesis struct {
 
     GenesisSeed         repo.GenesisSeed
     MemberSeed          repo.MemberSeed
-
-
-    MemberSessions      repo.MemberSessions
+ 
     txnsToCommit        []pdi.RawTxn
 }
 
@@ -167,13 +163,6 @@ func (CG *CommunityGenesis) LatestStorageEpoch() pdi.StorageEpoch {
     return *CG.GenesisSeed.StorageEpoch
 }
 
-// OnSessionEnded -- see interface MemberHost
-func (CG *CommunityGenesis) OnSessionEnded(inSession *repo.MemberSession) {
-    CG.MemberSessions.OnSessionEnded(inSession)
-}
-
-
-
 
 
 
@@ -183,11 +172,6 @@ func (CG *CommunityGenesis) OnSessionEnded(inSession *repo.MemberSession) {
 func (CG *CommunityGenesis) CreateNewCommunity(
     sn *Snode,
 ) error {
-
-    keyDir, err := hive.GetSharedKeyDir()
-    if err != nil { return err }
-
-
 
     CG.MemberSeed = repo.MemberSeed{
         RepoSeed: &repo.RepoSeed{
@@ -203,13 +187,15 @@ func (CG *CommunityGenesis) CreateNewCommunity(
         },
     }
 
+    keyDir, err := hive.GetSharedKeyDir()
+    if err != nil { return err }
+
     genesisSKI, err := hive.StartSession(
         keyDir,
         CG.MemberSeed.MemberEpoch.FormMemberStrID(),
-        nil,
+        []byte("password"),
     )
     if err != nil { return err }
-    defer genesisSKI.EndSession("session complete")
 
     // Generate a new storage epoch
     if err == nil {
@@ -246,20 +232,19 @@ func (CG *CommunityGenesis) CreateNewCommunity(
     }
 
     // Emit all the genesis entries
-    var ms *repo.MemberSession
     if err == nil {
-        ms, err = CG.MemberSessions.StartSession(
-            &repo.SessionReq{
-                CommunityID: CG.GenesisSeed.CommunityEpoch.CommunityID,
-                MemberEpoch: CG.MemberSeed.MemberEpoch,
-            },
-            genesisSKI,
-            path.Join(sn.BasePath, "genesis"),
-        )
-        if err == nil {
-            err = CG.emitGenesisEntries(ms)
+        crypto := &client.MemberCrypto{
+            CommunityEpoch: *CG.GenesisSeed.CommunityEpoch,
+            StorageEpoch:   *CG.GenesisSeed.StorageEpoch,
         }
+
+        err = crypto.StartSession(genesisSKI, *CG.MemberSeed.MemberEpoch)
+        if err == nil {
+            err = CG.emitGenesisEntries(crypto)
+        }
+        crypto.EndSession("genesis complete")
     }
+
 
     if err == nil {
         deposits := []*pdi.Transfer{
@@ -277,9 +262,6 @@ func (CG *CommunityGenesis) CreateNewCommunity(
             *CG.GenesisSeed.StorageEpoch,
         )
     }
-
-    CG.MemberSessions.Shutdown("genesis complete", nil)
-
 
     // Write out the MemberSeed file
     if err == nil {
@@ -327,17 +309,13 @@ type chEntry struct {
 
     whitelist       bool    
     chEpoch         *pdi.ChannelEpoch
-    body            pcore.Marshaller
+    body            plan.Marshaller
     chID            pdi.CommunityChID
     parentEntry     *chEntry
 }
 
 
-func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
-
-    //curTime := CG.GenesisSeed.CommunityEpoch.TimeStarted
-
-    //chEpochs := 
+func (CG *CommunityGenesis) emitGenesisEntries(mc *client.MemberCrypto) error {
 
 
     genesisID := uint32(CG.MemberSeed.MemberEpoch.MemberID)
@@ -392,7 +370,6 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
         newEpochHistory,
         postGenesisEpoch,
     }
-    
 
     nowFS := plan.NowFS()
 
@@ -402,11 +379,10 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
         entry.Info.EntryID().SetTimeFS(nowFS)
 
         if ! entry.whitelist {
-            copy(entry.Info.GetTID(pdi.EntryTID_AuthorEntryID),         postMember.Info.EntryID())
-            copy(entry.Info.GetTID(pdi.EntryTID_ACCEntryID),            newACC.Info.EntryID())
+            copy(entry.Info.ACCEntryID(),            newACC.Info.EntryID())
 
             if entry.parentEntry != nil {
-                copy(entry.Info.GetTID(pdi.EntryTID_ChannelEpochEntryID),   entry.parentEntry.Info.EntryID())
+                copy(entry.Info.ChannelEpochID(),    entry.parentEntry.Info.EntryID())
             }
         }
 
@@ -423,7 +399,7 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
             body, _ = entry.body.Marshal()
         }
 
-        txns, err := ms.EncryptAndEncodeEntry(&entry.Info, body)
+        txns, err := mc.EncryptAndEncodeEntry(&entry.Info, body)
         if err != nil {
             return err
         }
@@ -439,7 +415,11 @@ func (CG *CommunityGenesis) emitGenesisEntries(ms *repo.MemberSession) error {
             CG.GenesisSeed.StorageEpoch.GenesisEntryIDs = append(CG.GenesisSeed.StorageEpoch.GenesisEntryIDs, entryID)
         }
 
-        CG.txnsToCommit = append(CG.txnsToCommit, txns.Txns...)
+        for _, seg := range txns.Segs {
+            CG.txnsToCommit = append(CG.txnsToCommit, pdi.RawTxn{
+                Bytes: seg.RawTxn,
+            })
+        }
 
     }
 

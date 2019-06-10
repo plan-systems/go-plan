@@ -523,6 +523,9 @@ message EntryInfo {
 
                 plan.Block          extensions                  = 11;       // Available for unrestricted client use.
 
+    // Repo internal use only; set to nil for all published entries -- see ValidateAuthor()
+                bytes               author_sig                  = 20;
+
 
 }
 
