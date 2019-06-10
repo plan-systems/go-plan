@@ -14,9 +14,11 @@ import (
     "bytes"
     "fmt"
 	//"os/user"
+    "sync"
+    "sync/atomic"
     "path"
     //"crypto/md5"
-    //"github.com/plan-systems/go-plan/ski/Providers/hive"
+    "github.com/plan-systems/go-plan/ski/Providers/hive"
 	//_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
     //"encoding/hex"
     "encoding/json"
@@ -26,7 +28,7 @@ import (
 
     "github.com/plan-systems/go-plan/repo"
 
-    "github.com/plan-systems/go-plan/pcore"
+    "github.com/plan-systems/go-plan/client"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
     "github.com/plan-systems/go-plan/pdi"
@@ -57,6 +59,8 @@ func main() {
 
 
     flag.Parse()
+    flag.Set("logtostderr", "true")
+    flag.Set("v", "1")
 
     ws, err := NewWorkstation(basePath, *init)
     if err != nil {
@@ -84,7 +88,10 @@ func main() {
 
         log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
 
-        ws.Login(0, seedMember)
+        err = ws.Login(0, seedMember)
+        if err != nil {
+            log.WithError(err).Fatalf("client-sim fail")
+        }
 
         select {
             case <- wsCtx.Done():
@@ -115,8 +122,8 @@ type Workstation struct {
 
     Seeds                       []string
 
-    MemberSeed                  repo.MemberSeed
 }
+
 
 
 // InstallInfo is generated during client installation is considered immutable. 
@@ -242,6 +249,17 @@ func (ws *Workstation) internalShutdown() {
 }
 
 
+
+type msgCallback struct {
+    MsgID   uint32
+    F       func(inMsg *repo.Msg)
+}
+
+type msgResonder struct {
+    callbacks []msgCallback
+}
+
+
 const seedFilename = "member.seed"
 
 
@@ -275,14 +293,493 @@ func (ws *Workstation) ImportSeed(
 }
 
 
-type UserSession struct {
-    //flow                plan.Flow
+type msgItem struct {
+    msg *repo.Msg
+    entryBody []byte
+    onCommitComplete OnCommitComplete
+}
 
-    repoConn            *grpc.ClientConn
+type msgResponder struct {
+    clientSess          *ClientSess
+    chSessID            repo.ChSessID
+    responders          map[uint32]*msgItem
+    respondersMutex     sync.Mutex
+    nextMsgID           uint32
+}
+
+func (resp *msgResponder) initResponder(clientSess *ClientSess) {
+    resp.responders = map[uint32]*msgItem{}
+    resp.clientSess = clientSess
+    resp.nextMsgID  = 1
+}
+
+
+func (resp *msgResponder) newMsg(op repo.MsgOp) *repo.Msg {
+
+    msg := &repo.Msg{
+        ID: atomic.AddUint32(&resp.nextMsgID, 1),
+        Op: op,
+        ChSessID: uint32(resp.chSessID),
+    }
+
+    return msg
+}
+
+
+func (resp *msgResponder) putResponder(inItem *msgItem) {
+    resp.respondersMutex.Lock()
+    resp.responders[inItem.msg.ID] = inItem
+    resp.respondersMutex.Unlock()
+}
+
+func (resp *msgResponder) fetchResponder(inMsgID uint32, inPop bool) *msgItem {
+    resp.respondersMutex.Lock()
+    item := resp.responders[inMsgID]
+    if item != nil && inPop {
+        delete(resp.responders, inMsgID)
+    }
+    resp.respondersMutex.Unlock()
+
+    return item
+}
+
+func (resp *msgResponder) handleCommon(msg *repo.Msg) {
+
+    switch msg.Op {
+                        
+        case repo.MsgOp_CH_NEW_ENTRY_READY:
+            if item := resp.fetchResponder(msg.ID, false); item != nil {
+                item.msg = msg
+                resp.clientSess.entriesToCommit <- item
+            } else {
+                resp.clientSess.Warnf("got CH_NEW_ENTRY_READY but msg ID %d not found", msg.ID)
+            }
+
+        case repo.MsgOp_COMMIT_COMPLETE:
+            if item := resp.fetchResponder(msg.ID, true); item != nil {
+                if item.onCommitComplete != nil {
+                    var err error
+                    if len(msg.BUF0) > 0 {
+                        err = plan.Error(nil, plan.FailedToCommitTxns, string(msg.BUF0))
+                    }
+                    go item.onCommitComplete(msg.EntryInfo, msg.EntryState, err)
+                }
+            } else {
+                resp.clientSess.Warnf("got MsgOp_COMMIT_COMPLETE but msg ID %d not found", msg.ID)
+            }
+    }
+}
+
+
+
+
+type chSess struct {
+
+    ChID                plan.ChID
+    msgInbox            chan *repo.Msg
+    isOpen              bool
+
+    msgResponder
+}
+
+
+type ClientSess struct {
+    plan.Logger
+
+    flow                plan.Flow
+
+    ws                  *Workstation
+
+    MemberCrypto        client.MemberCrypto
+
     MemberSeed          repo.MemberSeed
     Info                repo.GenesisSeed
-    SessionInfo         *repo.SessionInfo
+    repoClient          repo.RepoClient
+
+    entriesToCommit     chan *msgItem
+            
+    msgOutbox           chan *repo.Msg
+    //msInbbox           chan *repo.Msg
+
+    msgInlet            repo.Repo_OpenMemberSessionClient
+    msgOutlet           repo.Repo_OpenMsgPipeClient
+
+    sessToken           []byte
+
+    chSessions          map[repo.ChSessID]*chSess
+    chSessionsMutex     sync.RWMutex
+
+    msgResponder
 }
+
+
+
+func (sess *ClientSess) Startup(
+    inCtx context.Context,
+) (context.Context, error) {
+
+    sess.SetLogLabel("ClientSession")
+
+    err := sess.flow.Startup(
+        inCtx, 
+        sess.GetLogLabel(),
+        sess.internalStartup,
+        sess.internalShutdown,
+    )
+
+    return sess.flow.Ctx, err
+}
+
+
+func (sess *ClientSess) internalStartup() error {
+
+    sess.MemberCrypto.CommunityEpoch = *sess.Info.CommunityEpoch
+    sess.MemberCrypto.StorageEpoch   = *sess.Info.StorageEpoch
+
+    keyDir, err := hive.GetSharedKeyDir()
+    if err != nil { return err }
+
+    SKI, err := hive.StartSession(
+        keyDir,
+        sess.MemberSeed.MemberEpoch.FormMemberStrID(),
+        []byte("password"),
+    )
+    if err != nil { return err }
+
+    err = sess.MemberCrypto.StartSession(SKI, *sess.MemberSeed.MemberEpoch)
+    if err != nil { return err }
+
+
+    //
+    //
+    //
+    go func() {
+
+        for item := range sess.entriesToCommit {
+            txnSet, err := sess.MemberCrypto.EncryptAndEncodeEntry(item.msg.EntryInfo, item.entryBody)
+            if err != nil {
+                sess.Warn("failed to encypt/encode entry: ", err)
+
+                // TODO: save txns? to failed to send log/db?
+            } else {
+                msg := item.msg
+                msg.Op = repo.MsgOp_COMMIT_TXNS
+                msg.EntryInfo = nil
+                msg.EntryState = nil
+                msg.BUF0 = nil
+                N := len(txnSet.Segs)
+                msg.ITEMS = make([][]byte, N)
+                for i := 0; i < N; i++ {
+                    msg.ITEMS[i] = txnSet.Segs[i].RawTxn
+                }
+                sess.msgOutbox <- msg
+            }
+        }
+
+        sess.MemberCrypto.EndSession(sess.flow.ShutdownReason)
+
+        sess.flow.ShutdownComplete.Done()
+    }()
+
+
+    //
+    //
+    //
+    go func() {
+
+        for msg := range sess.msgOutbox {
+
+            //sess.Infof(1, "sess.msgOutlet -> (sess %d, ID %d, %s)", msg.ChSessID, msg.ID, repo.MsgOp_name[int32(msg.Op)])
+
+            err := sess.msgOutlet.Send(msg)
+            if err != nil {
+                sess.Warn("error sending msg: ", err)
+
+                // TODO: save msg to failed to send log/db?
+            }
+        }
+
+        sess.MemberCrypto.EndSession(sess.flow.ShutdownReason)
+
+        sess.flow.ShutdownComplete.Done()
+    }()
+
+    return nil
+}
+
+func (sess *ClientSess) internalShutdown() {
+
+    // First end all chSessions
+    sess.chSessionsMutex.RLock()
+    for _, cs := range sess.chSessions {
+        cs.CloseSession()
+    }
+    sess.chSessionsMutex.RUnlock()
+
+
+    if sess.msgOutbox != nil {
+        close(sess.msgOutbox)
+    }
+}
+
+func (sess *ClientSess) detachChSess(cs *chSess) {
+
+    sess.chSessionsMutex.Lock()
+    delete(sess.chSessions, cs.chSessID)
+    sess.chSessionsMutex.Unlock()
+
+}
+
+
+
+func (sess *ClientSess) connectToRepo(inAddr string) error {
+
+    repoConn, err := grpc.DialContext(sess.flow.Ctx, inAddr, grpc.WithInsecure())
+    if err != nil {
+        return err
+    }
+
+    sess.repoClient = repo.NewRepoClient(repoConn)
+
+    return nil
+}
+
+func (sess *ClientSess) disconnectFromRepo() {
+
+	
+}
+
+
+func (sess *ClientSess) openMemberSession() error {
+
+    var (
+        header metadata.MD
+        err error
+    )
+
+    sess.msgInlet, err = sess.repoClient.OpenMemberSession(sess.flow.Ctx, 
+        &repo.MemberSessionReq{
+            WorkstationID: sess.ws.Info.InstallID,
+            CommunityID: sess.Info.CommunityEpoch.CommunityID,
+            MemberEpoch: sess.MemberSeed.MemberEpoch,
+        },
+        grpc.Header(&header), 
+    )
+    if err != nil {
+        return err
+    }
+
+    msg, err := sess.msgInlet.Recv()
+    if err != nil {
+        return err
+    }
+    if msg.Op != repo.MsgOp_MEMBER_SESSION_READY || msg.ChSessID != 0 {
+        return plan.Error(nil, plan.AssertFailed, "did not get valid MsgOp_MEMBER_SESSION_READY ")
+    }
+
+    sess.sessToken = msg.BUF0
+ 
+    // Since OpenMemberSession() uses a stream responder, the trailer is never set, so we use this guy as the sesh token.
+    sess.flow.Ctx = pcore.ApplyTokenOutgoingContext(sess.flow.Ctx, sess.sessToken)
+
+    sess.msgOutlet, err = sess.repoClient.OpenMsgPipe(sess.flow.Ctx)
+    if err != nil {
+        return err
+    }
+
+    // Send the community keyring!
+    {
+        msg := &repo.Msg{
+            Op: repo.MsgOp_ADD_COMMUNITY_KEYS,
+        }
+
+        // TODO: come up w/ better key idea
+        msg.BUF0, err = sess.MemberCrypto.ExportCommunityKeyring(sess.sessToken)
+        if err != nil {
+            return err
+        }
+
+        sess.msgOutbox <- msg
+    }
+
+    go func() {
+        for sess.flow.IsRunning() {
+            msg, err := sess.msgInlet.Recv()
+            if err != nil {
+                sess.flow.FilterFault(err)
+            } else {
+    
+                //sess.Infof(1, "(sess %d, ID %d, %s) <- sess.msgInlet", msg.ChSessID, msg.ID, repo.MsgOp_name[int32(msg.Op)])
+
+                if msg.ChSessID == 0 {
+                    sess.handleCommon(msg)
+                } else {
+                    sess.chSessionsMutex.RLock()
+                    cs := sess.chSessions[repo.ChSessID(msg.ChSessID)]
+                    sess.chSessionsMutex.RUnlock()
+                    if cs == nil {
+                        sess.Warnf("received unrecognized ch session ID: %d", msg.ChSessID)
+                    } else {
+                        if cs.isOpen {
+                            cs.msgInbox <- msg
+                        }
+                    }
+                }
+            }
+        }
+    }()
+
+    return nil
+}
+
+
+
+func (sess *ClientSess) openChannel(
+    inChID plan.ChID,
+) (*chSess, error) {
+
+    sessInfo, err := sess.repoClient.StartChannelSession(sess.flow.Ctx,
+        &repo.ChInvocation{
+            ChID: inChID,
+            Mode: repo.ChSessionMode_REPLAY_FROM_T0,
+        })
+
+    if err != nil {
+        return nil, err
+    }
+
+    cs := &chSess{
+        ChID: inChID,
+        msgInbox: make(chan *repo.Msg, 1),
+        isOpen: true,
+    }
+    cs.initResponder(sess)
+    cs.chSessID = repo.ChSessID(sessInfo.SessID)
+
+    sess.chSessionsMutex.Lock()
+    if sess.chSessions[cs.chSessID] != nil {
+        err = plan.Error(nil, plan.AssertFailed, "ch session ID already in use")
+    }
+    sess.chSessions[cs.chSessID] = cs
+    sess.chSessionsMutex.Unlock()
+
+    if err != nil {
+        return nil, err
+    }
+
+    go func() {
+
+        for { 
+            msg := <- cs.msgInbox
+            if msg == nil {
+                cs.clientSess.detachChSess(cs)          // If we're here, it's bc the channel is closing
+                break
+            }
+
+            switch msg.Op {
+                case repo.MsgOp_CH_ENTRY:
+                    fmt.Print(msg.BUF0)
+                case repo.MsgOp_CLOSE_CH_SESSION:
+                    cs.CloseSession()
+                default:
+                    cs.handleCommon(msg)
+            }
+        }
+    }()
+
+    return cs, nil
+}
+
+
+
+func (cs *chSess) CloseSession() {
+    if cs.isOpen {
+        cs.isOpen = false
+        close(cs.msgInbox)
+        cs.clientSess.msgOutbox <- &repo.Msg{
+            Op: repo.MsgOp_CLOSE_CH_SESSION,
+            ChSessID: uint32(cs.chSessID),
+        }
+    }
+}
+
+
+// OnCommitComplete is a callback when an entry's txn(s) have been merged or rejected by the repo.
+type OnCommitComplete func(
+    inEntryInfo *pdi.EntryInfo,
+    inEntryState *repo.EntryState,
+    inErr error,
+)
+
+// OnOpenComplete is callback when a new ch session is now open and available for access.
+type OnOpenComplete func(
+    chSess *chSess,
+    inErr error,
+)
+
+func (cs *chSess) PostContent(
+    inBody []byte,
+    onCommitComplete OnCommitComplete,
+) {
+
+    msg := cs.clientSess.newMsg(repo.MsgOp_CH_NEW_ENTRY_REQ)
+    msg.ChSessID = uint32(cs.chSessID)
+    msg.EntryInfo = &pdi.EntryInfo{
+        EntryOp: pdi.EntryOp_POST_CONTENT,
+    }
+
+    cs.putResponder(&msgItem{
+        msg: msg,
+        entryBody: inBody,
+        onCommitComplete: onCommitComplete,
+    })
+
+    cs.clientSess.msgOutbox <- msg
+
+}
+
+
+func (sess *ClientSess) createNewChannel(
+    inProtocol string,
+    onOpenComplete OnOpenComplete,
+) {
+
+    info := &pdi.EntryInfo{
+        EntryOp: pdi.EntryOp_NEW_CHANNEL_EPOCH,
+    }
+    info.SetTimeAuthored(0)
+    copy(info.AuthorEntryID(), sess.MemberSeed.MemberEpoch.EpochTID)
+
+
+    chEpoch := pdi.ChannelEpoch{
+        ChProtocol: inProtocol,
+        ACC: sess.Info.StorageEpoch.RootACC(),
+    }
+
+    item := &msgItem{
+        msg: sess.newMsg(repo.MsgOp_CH_NEW_ENTRY_READY),
+        onCommitComplete: func(
+            inEntryInfo *pdi.EntryInfo,
+            inEntryState *repo.EntryState,
+            inErr error,
+        ) {
+            if inErr != nil {
+                onOpenComplete(nil, inErr)
+            } else {
+                chSess, err := sess.openChannel(inEntryInfo.FormGenesisChID())
+                onOpenComplete(chSess, err)
+            }
+        },
+    }
+    item.msg.EntryInfo = info
+    item.entryBody, _ = chEpoch.Marshal()
+
+    sess.putResponder(item)
+
+    sess.entriesToCommit <- item
+
+}
+
 
 
 
@@ -295,15 +792,19 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
         return err
     }
 
-    sess := UserSession{
-
+    sess := &ClientSess{
+        ws: ws,
+        msgOutbox: make(chan *repo.Msg, 4),
+        chSessions: make(map[repo.ChSessID]*chSess),
+        entriesToCommit: make(chan *msgItem, 1),
     }
+    sess.initResponder(sess)
 
     if err = sess.MemberSeed.Unmarshal(buf); err != nil {
         return err
     }
 
- 
+
     {
         unpacker := ski.NewUnpacker(false)
 
@@ -319,21 +820,22 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
         }
     }
 
-	repoCtx, _ := context.WithCancel(ws.flow.Ctx)
 
-    //addr := ws.MemberSeed.RepoSeed.Services[0].Addr
-    // TODO: StorageProvider node is tracker!?
-    addr :=  ":50082"
-    sess.repoConn, err = grpc.DialContext(repoCtx, addr, grpc.WithInsecure())
+    sess.Startup(ws.flow.Ctx)
     if err != nil {
-        log.WithError(err).Fatalf("failed to connect to pnode")
+        return err
+    }
+  
+    addr :=  ":50082"
+    err = sess.connectToRepo(addr)
+    if err != nil {
+        return err
     }
 
-    repoClient := repo.NewRepoClient(sess.repoConn)
 
     // TODO: move this to ImportSeed()
     if inSeedMember {
-        _, err := repoClient.SeedMember(repoCtx, &sess.MemberSeed)
+        _, err := sess.repoClient.SeedRepo(sess.flow.Ctx, sess.MemberSeed.RepoSeed)
         if err != nil {
             return err
 
@@ -341,227 +843,66 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
         }    
     }
 
-    var header, trailer metadata.MD
-    sess.SessionInfo, err = repoClient.StartMemberSession(repoCtx, 
-        &repo.SessionReq{
-            WorkstationID: ws.Info.InstallID,
-            CommunityID: sess.Info.CommunityEpoch.CommunityID,
-            MemberEpoch: sess.MemberSeed.MemberEpoch,
-        },
-        grpc.Header(&header), 
-        grpc.Trailer(&trailer),
-    )
+    err = sess.openMemberSession()
     if err != nil {
-        log.WithError(err).Fatalf("StartMemberSession() error")
+        return err
     }
 
     reader := bufio.NewReader(os.Stdin)
-    fmt.Println("Press enter for OpenChannelSession()")
+
+    //time.Sleep(10 * time.Second)
+
+    N := 2
+
+    for i := 0; i < N; i++ {
+        idx := i
+        go func() {
+            sess.Infof(0, "creating new channel %d", idx)
+            sess.createNewChannel(repo.ChProtocolTalk, func(
+                cs *chSess,
+                inErr error,
+            ) {
+                if err != nil {
+                    fmt.Print("createNewChannel error: ", inErr)
+                } else {
+                    for i := 0; i < 100000; i++ {
+                        hello := fmt.Sprintf("hello, world!  This is msg #%d in channel %s", i, cs.ChID.Str())
+                        fmt.Println("====> ", hello)
+
+                        cs.PostContent(
+                            []byte(hello),
+                            func(
+                                inEntryInfo *pdi.EntryInfo,
+                                inEntryState *repo.EntryState,
+                                inErr error,
+                            ) {
+                                if inErr != nil {
+                                    fmt.Println("PostContent() -- got commit hello err:", inErr)
+                                } else {
+                                    fmt.Println("PostContent() entry ID", inEntryInfo.EntryID().SuffixStr())
+                                }
+                            },
+                        )
+                        time.Sleep(50 * time.Millisecond)
+                    }
+                }
+            })
+        }()
+    }
+
+    fmt.Printf("ENTER TO START")
     reader.ReadString('\n')
 
-    repoCtx, err = pcore.TransferSessionToken(repoCtx, trailer)
-    chSession, err := repoClient.OpenChannelSession(repoCtx, &repo.ChInvocation{
-        ChannelGenesis: &pdi.ChannelEpoch{
-            ChProtocol: repo.ChProtocolTalk,
-            ACC: sess.Info.StorageEpoch.RootACC(),
-        },
-    })
-    if err != nil {
-        log.WithError(err).Fatalf("OpenChannelSession() error")
-    }
-
-    chMsg, err := chSession.Recv()
-    if err != nil {
-        log.WithError(err).Fatalf("OpenChannelSession() error")
-    }
-
-    sessID := chMsg.SessionID
-
-    fmt.Println("Press enter for ChSessionPipe()")
-    reader.ReadString('\n')
-
-    chSessPipe, err := repoClient.ChSessionPipe(repoCtx)
-    if err != nil {
-        log.WithError(err).Fatalf("ChSessionPipe() error")
-    }
-
-
-    heartbeat := time.NewTicker(time.Second * 15).C
-    newTalkie := time.NewTicker(time.Second * 5).C
-
-    for msgID := uint32(1); true; msgID++ {
-        
-        select {
-            case <- chSession.Context().Done():
-                log.Info("chSession.Context().Done()")
-            case <- chSessPipe.Context().Done():
-                log.Info("chSessPipe.Context().Done()")
-            case <- heartbeat:
-                chSessPipe.Send(&repo.ChMsg{
-                    MsgID: msgID,
-                    Op: repo.ChMsgOp_HEARTBEAT,
-                    SessionID: sessID,
-                })
-            case <- newTalkie:
-                chSessPipe.Send(&repo.ChMsg{
-                    MsgID: msgID,
-                    Op: repo.ChMsgOp_CH_NEW_ENTRY,
-                    SessionID: sessID,
-                    ChEntry: &repo.ChEntryMsg{
-                        EntryOp: pdi.EntryOp_POST_CONTENT,
-                        Body: []byte(fmt.Sprintf("Hello world %d", msgID)),
-                    },
-                })
-        }
-
-
-    }
+    time.Sleep(1000 * time.Second)
 
     return nil
 }
 
 
-func sleepTillDrew() {
-
-    keepGoing := 1
-
-    for keepGoing != 0 {
-        keepGoing++
-        time.Sleep(1 * time.Second)
-    }
-
-}
 
 /*
-
-
-    // Seed a new repo?
-    if len(*seed) > 0 {
-        buf, err := ioutil.ReadFile(*seed)
-        if err != nil {
-            log.Fatal(err)
-        }
-
-        seed := &repo.MemberSeed{}
-        if err = seed.Unmarshal(buf); err != nil {
-            log.Fatal(err)
-        }
-
-        if err = pn.SeedRepo(seed.RepoSeed); err != nil {
-            log.WithError(err).Fatalf("seed failed from %v", *seed)*
-        }
-    }
-
-            if *test {
-                go func() {
-                    buf, _ := ioutil.ReadFile("/Users/aomeara/go/src/github.com/plan-systems/go-plan/cmd/pdi-local/yoyo.plan.seed")
-
-                    seed := &repo.MemberSeed{}
-                    seed.Unmarshal(buf)
-
-                    var workstationID [plan.CommunityIDSz]byte
-                    for i := 0; i < plan.CommunityIDSz; i++ {
-                        workstationID[i] = byte(i)
-                    }
-
-                    ////// TEMP
-                    genesisSeed := repo.GenesisSeed{}
-                    var packingInfo ski.SignedPayload
-                    unpacker := ski.NewUnpacker(false)
-                    err = unpacker.UnpackAndVerify(seed.RepoSeed.SignedGenesisSeed, &packingInfo)
-                    if err == nil {
-                        err = genesisSeed.Unmarshal(packingInfo.Header)
-                    }
-                    ms, _, _ := pn.StartMemberSession(context.Background(), &repo.SessionReq{
-                        WorkstationID: workstationID[:],
-                        CommunityID: genesisSeed.CommunityEpoch.CommunityID,
-                        MemberEpoch: seed.MemberEpoch,
-                    })
-
-                    ms.GetItWorking()
-                }()
-            }*/
-
-
-
-/*
-
-    var err error
-	CR.spContext, CR.spCancel = context.WithCancel(CR.flow.Ctx)
-
-    addr := CR.State.Services[0].Addr
-	CR.spClientConn, err = grpc.DialContext(CR.spContext, addr, grpc.WithInsecure())
-	if err != nil {
-        err = plan.Errorf(err, plan.FailedToConnectStorageProvider, "grpc.Dial() failed with addr %v", addr)
-	}
-
-    if err == nil {
-	    CR.spClient = pdi.NewStorageProviderClient(CR.spClientConn)
-    }
-		
-    if err == nil {
-        var header, trailer metadata.MD
-        CR.spInfo, err = CR.spClient.StartSession(
-            CR.spContext, 
-            &pdi.SessionReq{
-                StorageEpoch: CR.GenesisSeed.StorageEpoch,
-            },
-            grpc.Header(&header), 
-            grpc.Trailer(&trailer),
-        )
-        if err != nil {
-            err = plan.Error(err, plan.FailedToConnectStorageProvider, "StartSession() failed")
-        }
-
-        if err == nil {
-            CR.spContext, err = pcore.TransferSessionToken(CR.spContext, trailer)
-            if err != nil {
-                err = plan.Error(err, plan.FailedToConnectStorageProvider, "TransferSessionToken() failed")
-            }
-        }
-    }
-
-    if err != nil {
-        CR.DisconnectFromStorage()
-        return err
-    }
-
-    CR.txnScanning.Add(1)
-    go CR.forwardTxnScanner()
-
-
-
-
-
-
-
-
-
-
-
 
 var gTestBuf = "May PLAN empower organizations and individuals, and may it be an instrument of productivity and self-organization."
 
-func (ms *MemberSession) GetItWorking() {
-
-    for i := 0; i < 100 && ms.flow.IsRunning() && false; i++ {
-
-        cheese := fmt.Sprintf("#%d: %s", i, gTestBuf)
-
-
-        ms.EntriesToCommit <- &entryIP{
-            Entry: chEntry{
-                Info: pdi.EntryInfo{
-                    EntryOp: pdi.EntryOp_POST_CONTENT,
-                    ChannelID: 123,
-                    AuthorMemberID: ms.MemberEpoch.MemberID,
-                    AuthorMemberEpoch: ms.MemberEpoch.EpochNum },
-                Body: []byte(cheese),
-            },
-        }
-        
-        time.Sleep(10 * time.Second)
-    }
-}
 
 */

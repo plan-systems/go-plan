@@ -257,11 +257,23 @@ func (pn *Pnode) Shutdown(inReason string) {
 
 }
 
-
 // seedRepo adds a new repo (if it doesn't already exist)
 func (pn *Pnode) seedRepo(
     inSeed *repo.RepoSeed,
 ) error {
+
+    {
+        genesis, err := inSeed.ExtractAndVerifyGenesisSeed()
+        if err !=  nil {
+            return err
+        }
+
+        // If the repo is already seed, nothing further required
+        CR := pn.fetchRepo(genesis.StorageEpoch.CommunityID)
+        if CR != nil {
+            return nil
+        }
+    }
 
     // In the unlikely event that pn.Shutdown() is called while this is all happening, 
     //    prevent the rug from being snatched out from under us.
@@ -273,6 +285,7 @@ func (pn *Pnode) seedRepo(
     }
 
     // Only proceed if the dir doesn't exist
+    // TODO: change dir name in the event of a name collision.
     repoPath, err := plan.CreateNewDir(pn.ReposPath, inSeed.SuggestedDirName)
     if err != nil { return err }
 
@@ -289,6 +302,8 @@ func (pn *Pnode) seedRepo(
     }
 
     if err == nil {
+        pn.Info(0, "seeding new repo at ", repoPath)
+
         if pn.flow.IsRunning() {
             pn.registerRepo(CR)
         } else {
@@ -383,13 +398,13 @@ func (pn *Pnode) startServer() error {
 **
 **/
 
-// SeedMember -- see service Repo in repo.proto.
-func (pn *Pnode) SeedMember(
+// SeedRepo -- see service Repo in repo.proto.
+func (pn *Pnode) SeedRepo(
     ctx context.Context, 
-    in *repo.MemberSeed,
+    inRepoSeed *repo.RepoSeed,
 ) (*plan.Status, error) {
 
-    err := pn.seedRepo(in.RepoSeed)
+    err := pn.seedRepo(inRepoSeed)
     if err != nil {
         return nil, err
     }
@@ -403,56 +418,66 @@ func (pn *Pnode) SeedMember(
     return &plan.Status{}, nil
 }
 
-// StartMemberSession -- see service Repo in repo.proto.
-func (pn *Pnode) StartMemberSession(
-    ctx context.Context, 
-    in *repo.SessionReq,
-) (*repo.SessionInfo, error) {
+// OpenMemberSession -- see service Repo in repo.proto.
+func (pn *Pnode) OpenMemberSession(
+    inSessReq *repo.MemberSessionReq, 
+    inMsgOutlet repo.Repo_OpenMemberSessionServer,
+) error {
 
-    CR := pn.fetchRepo(in.CommunityID)
+    CR := pn.fetchRepo(inSessReq.CommunityID)
     if CR == nil {
-        return nil, plan.Error(nil, plan.CommunityNotFound, "community not found")
+        return plan.Error(nil, plan.CommunityNotFound, "community not found")
     }
 
-    ms, err := CR.StartMemberSession(in)
+    ms, err := CR.OpenMemberSession(inSessReq, inMsgOutlet)
+    if err != nil {
+        return err
+    }
+
+//
+// TODO: remove active session when the ms goes away
+
+    // Because this a streaming call, headers and trailers won't ever arrive.  
+    // Instead, the ms passes it manually and so we have to add it here.
+    sess := pn.activeSessions.NewSession(inMsgOutlet.Context(), ms.SessionToken)
+    sess.Cookie = ms
+
+    // Should this be waiting on ms.flow.ShutdownComplete instead?
+    select {
+        case <- inMsgOutlet.Context().Done():
+    }
+
+	return nil
+}
+
+// StartChannelSession -- see service Repo in repo.proto.
+func (pn *Pnode) StartChannelSession(
+    ctx context.Context, 
+    inInvocation *repo.ChInvocation, 
+) (*repo.ChSessionInfo, error) {
+    ms, err := pn.fetchMemberSession(ctx)
     if err != nil {
         return nil, err
     }
 
-    sess := pn.activeSessions.NewSession(ctx)
-    sess.Cookie = ms
-
-    info := &repo.SessionInfo{
+    chSession, err := ms.StartChannelSession(inInvocation)
+    if err != nil {
+        return nil, err
     }
 
-	return info, nil
+    info := &repo.ChSessionInfo{
+        SessID: uint32(chSession.ChSessID),
+    }
+
+    return info, nil
 }
 
-// OpenChannelSession -- see service Repo in repo.proto.
-func (pn *Pnode) OpenChannelSession(
-    inInvocation *repo.ChInvocation, 
-    io repo.Repo_OpenChannelSessionServer,
-) error {
-    ms, err := pn.fetchMemberSession(io.Context())
+// OpenMsgPipe -- see service Repo in repo.proto.
+func (pn *Pnode) OpenMsgPipe(inMsgInlet repo.Repo_OpenMsgPipeServer) error {
+    ms, err := pn.fetchMemberSession(inMsgInlet.Context())
     if err != nil {
         return err
     }
 
-    chSession, err := ms.OpenChannelSession(inInvocation, io)
-    if err != nil {
-        return err
-    }
-
-    return <- chSession.OnComplete
+    return ms.OpenMsgPipe(inMsgInlet)
 }
-
-// ChSessionPipe -- see service Repo in repo.proto.
-func (pn *Pnode) ChSessionPipe(in repo.Repo_ChSessionPipeServer) error {
-    ms, err := pn.fetchMemberSession(in.Context())
-    if err != nil {
-        return err
-    }
-
-    return ms.ManageChSessionPipe(in)
-}
-
