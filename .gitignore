@@ -25,12 +25,17 @@ vendor/
 # debug binaries
 *debug
 
+*.pb.go
 
 ski/ski.pb.go
 pdi/pdi.pb.go
 plan/plan.pb.go
 repo/repo.pb.go
+client/client.pb.go
 
 cmd/pdi-local/pdi-local
+cmd/pdi-local/yoyo.json
+cmd/pdi-local/yoyo.plan.seed
 cmd/pnode/pnode
+cmd/client-sim/client-sim
 
