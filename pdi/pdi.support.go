@@ -3,18 +3,12 @@
 package pdi
 
 import (
-
     "io"
     "strconv"
-
 
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
 	//"github.com/plan-systems/go-plan/pdi"
-
-    //"golang.org/x/crypto/sha3"
-
-    //"github.com/ethereum/go-ethereum/common/hexutil"
 
     "encoding/base64"
 )
@@ -233,23 +227,15 @@ func ExtractTime(inURID []byte) int64 {
 // If in is set, the new URID written starting at pos 0 (assuming it has the capacity), otherwise a new buf is allocated.
 func URIDFromInfo(in []byte, inTimestamp int64, inID []byte) URID {
 
-    idSz := len(inID)
-    utidLen := URIDTimestampSz
-    if idSz > 0 {
-        utidLen += URIDTxnIDSz
-    }
-
     if inTimestamp > URIDTimestampMax {
         inTimestamp = URIDTimestampMax
     }
 
     var raw []byte
-    {
-        if cap(in) >= utidLen {
-            raw = in[:utidLen]
-        } else {
-            raw = make([]byte, utidLen)
-        }
+    if cap(in) >= URIDSz {
+        raw = in[:URIDSz]
+    } else {
+        raw = make([]byte, URIDSz)
     }
 
 	raw[0] = byte(inTimestamp >> 40)
@@ -260,20 +246,21 @@ func URIDFromInfo(in []byte, inTimestamp int64, inID []byte) URID {
 	raw[5] = byte(inTimestamp)
 
     // Use right-most bytes
-    if idSz > 0 {
+    {
+        idSz := len(inID)
         overhang := idSz - URIDTxnIDSz
 
         if overhang > 0 {
             copy(raw[6:], inID[overhang:])
         } else {
-            for i := 6; i < -overhang; i++ {
-                raw[i] = 0
+            for i := 0; i < -overhang; i++ {
+                raw[6+i] = 0
             }
             copy(raw[6-overhang:], inID)
         }
     }
 
-    return raw[:utidLen]
+    return raw
 }
 
 
@@ -431,6 +418,19 @@ func (entry *EntryInfo) GetTID(inID EntryTID) plan.TID {
     return entry.TIDs[pos:end]
 }
 
+
+// Recycle resets this instance to as if it was newly instantiated (but without throwing away all the buffers)
+func (entry *EntryInfo) Recycle() {
+    entry.EntryOp = EntryOp(0)
+    entry.EntrySubOp = 0
+    entry.ChannelID = entry.ChannelID[:0]
+    entry.TIDs = entry.TIDs[:0]
+    entry.SupersedesEntryID = entry.SupersedesEntryID[:0]
+    entry.Extensions = nil
+    entry.AuthorSig = entry.AuthorSig[:0]
+}
+
+
 // EntryID returns the entry TID for this entry.
 //
 // Note: if this entry is in the process of being authored/formed, the hash portion of the TID is undefined since
@@ -439,19 +439,34 @@ func (entry *EntryInfo) EntryID() plan.TID {
     return entry.GetTID(EntryTID_EntryID)
 }
 
+// ChannelEpochID returns the entry TID bearing the channel epoch that authorizes this entry
+func (entry *EntryInfo) ChannelEpochID() plan.TID {
+    return entry.GetTID(EntryTID_ChannelEpochEntryID)
+}
+
+// AuthorEntryID returns the entry ID in the member registry channel containing the MemberEpoch that verifies this entry's author sig.
+func (entry *EntryInfo) AuthorEntryID() plan.TID {
+    return entry.GetTID(EntryTID_AuthorEntryID)
+}
+
+// ACCEntryID returns the ACC entry TD that authorizes this entry
+func (entry *EntryInfo) ACCEntryID() plan.TID {
+    return entry.GetTID(EntryTID_ACCEntryID)
+}
+
 // TimeAuthoredFS returns a unix timestamp (in 1<<16 seconds) of when is entry was authored.
 func (entry *EntryInfo) TimeAuthoredFS() plan.TimeFS {
-    entryTID := entry.GetTID(EntryTID_EntryID)
-    return entryTID.ExtractTimeFS()
+    return entry.GetTID(EntryTID_EntryID).ExtractTimeFS()
 }
 
 // TimeAuthored returns a unix timestamp (in seconds) of when is entry was authored.
 func (entry *EntryInfo) TimeAuthored() int64 {
-    entryTID := entry.GetTID(EntryTID_EntryID)
-    return entryTID.ExtractTime()
+    return entry.GetTID(EntryTID_EntryID).ExtractTime()
 }
 
 // SetTimeAuthored sets the time in this entry's TID, initializing as necessary.
+//
+// If inTimeFS == 0, then the current time is applied.
 func (entry *EntryInfo) SetTimeAuthored(inTimeFS plan.TimeFS) {
     
     if inTimeFS <= 0 {
@@ -466,6 +481,34 @@ func (entry *EntryInfo) SetTimeAuthored(inTimeFS plan.TimeFS) {
     }
     
     entry.EntryID().SetTimeFS(inTimeFS)
+}
+
+// Clone instantiates a completely sepearate copy of this EntryInfo. 
+func (entry *EntryInfo) Clone() *EntryInfo {
+
+    clone := &EntryInfo{
+        EntryOp: entry.EntryOp,
+        EntrySubOp: entry.EntrySubOp,
+    }
+
+    if len(entry.ChannelID) > 0 {
+        clone.ChannelID = append([]byte{}, entry.ChannelID...)
+    }
+
+    if len(entry.TIDs) > 0 {
+        clone.TIDs = append([]byte{}, entry.TIDs...)
+    }
+
+    if len(entry.SupersedesEntryID) > 0 {
+        clone.SupersedesEntryID = append([]byte{}, entry.SupersedesEntryID...)
+    }
+
+    return clone
+}
+
+// FormGenesisChID returns the ChID for what is presumed to be a channel genesis entry
+func (entry *EntryInfo) FormGenesisChID() plan.ChID {
+    return plan.ChID(entry.EntryID()[plan.TIDSz - plan.ChIDSz:])
 }
 
 // IsChannelGenesis returns true if this channel epoch implies the creation/genesis of a new channel
