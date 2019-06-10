@@ -18,7 +18,6 @@ import (
 	//_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
     //"encoding/hex"
 
-
     "github.com/plan-systems/go-plan/plan"
     //"github.com/plan-systems/go-plan/ski"
     //"github.com/plan-systems/go-plan/pdi"
@@ -62,6 +61,3 @@ func main() {
         }
     }
 }
-
-
-

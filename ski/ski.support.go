@@ -948,34 +948,6 @@ func BinDesc(inBinStr []byte) string {
     return outStr + suffix
 }
 
-
-/*
-// FormMemberID returns a pseudo-random hash from a given seed string and community ID.
-func FormMemberID(
-    inSeedStr   string,
-    inEpoch     *pdi.StorageEpoch,
-) uint64 {
-
-    kit, _ := NewHashKit(HashKitID_LegacyKeccak_256)
-    kit.Hasher.Reset()
-    kit.Hasher.Write(inEpoch.CommunityId)
-    kit.Hasher.Write(inEpoch.EpochId)
-    kit.Hasher.Write([]byte(inSeedStr))
-
-    var buf [64]byte
-    kit.Hasher.Sum(buf[:0])
-
-
-    var memID uint64
-    for i := 0; i < 8; i++ {
-        memID = (memID << 8) | uint64(buf[i])
-    }
-
-    return memID
-}*/
-
-
-
 // PayloadPacker signs and packs payload buffers IAW ski.SigHeader
 type PayloadPacker struct {
     signSession Session
@@ -985,7 +957,6 @@ type PayloadPacker struct {
     threadsafe     bool
     mutex          sync.Mutex
 }
-
 
 // NewPacker creates a new PayloadSigner
 func NewPacker(
@@ -997,7 +968,6 @@ func NewPacker(
         signingKeyRef: &KeyRef{},
 	}
 }
-
 
 // ResetSession prepares this packer for use.
 func (P *PayloadPacker) ResetSession(
@@ -1201,7 +1171,6 @@ func NewUnpacker(
 		hashKits:   map[HashKitID]HashKit{},
     }
 }
-
 
 // UnpackAndVerify decodes the given buffer into its payload and signature components, and verifies the signature.
 // This procedure assumes the signed buf was produced via Signer.SignAndPack()

@@ -25,7 +25,6 @@ import (
 
     //"github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/pcore"
     "github.com/plan-systems/go-plan/repo"
 
 
@@ -74,7 +73,7 @@ type Pnode struct {
     reposMutex                  sync.RWMutex
     repos                       map[plan.CommunityID]*repo.CommunityRepo
     
-    activeSessions              pcore.SessionGroup
+    activeSessions              plan.SessionGroup
 
     BasePath                    string
     ReposPath                   string
@@ -94,7 +93,7 @@ func NewPnode(
 
     pn := &Pnode{
         repos: make(map[plan.CommunityID]*repo.CommunityRepo),
-        activeSessions: pcore.NewSessionGroup(),
+        activeSessions: plan.NewSessionGroup(),
     }
 
     pn.SetLogLabel("pnode")
