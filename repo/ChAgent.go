@@ -968,7 +968,7 @@ func (chSt *ChStore) ValidateAgainstEpochHistory(
 
         chEpochID := entry.Info.ChannelEpochID()
 
-        epochNode := chSt.FetchChEpoch(chEpochID)
+        epochNode = chSt.FetchChEpoch(chEpochID)
         if epochNode == nil {
             return nil, plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v not found", chEpochID)
         }
@@ -1165,10 +1165,6 @@ func (chSt *ChStore) ValidateEntry(
     var (
         valErr error
     )
-
-    if entry.HasFlags(EntryFlag_GENESIS_ENTRY_VERIFIED) {
-        fmt.Println( "processing genesis!")
-    }
 
     if ! entry.HasFlags(EntryFlag_GENESIS_ENTRY_VERIFIED, EntryFlag_WELL_FORMED) {
     
@@ -1640,10 +1636,6 @@ func chEntryProcessor(ch ChAgent) {
 
             // flush any changes to the entry to the channel db
             err = chSt.flushEntry(entry)
-
-            if verboseLog {
-                chSt.Infof(1, "flushEntry entry %s", entry.Info.EntryID().SuffixStr())
-            }
 
             if entry.onMergeComplete != nil {
                 entry.onMergeComplete(entry, ch, err)

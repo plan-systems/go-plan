@@ -895,7 +895,6 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
 
     var (
-        commEpoch *pdi.CommunityEpoch
     )
 
     tmpCrypt := &CR.tmpCrypt
@@ -904,13 +903,7 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
         // TODO handle me -- plus entry.
     }
 
-    isGenesisEntry := len(tmpCrypt.CommunityEpochID) == 0
-    if isGenesisEntry {
-        commEpoch = CR.GenesisSeed.CommunityEpoch
-        //entry.tmpCrypt.CommunityEpochID = append(tmpCrypt.CommunityEpochID[:0], commEpoch.EpochTID...)
-    } else {
-        commEpoch = CR.FetchCommunityEpoch(tmpCrypt.CommunityEpochID, true)
-    }
+    commEpoch := CR.FetchCommunityEpoch(tmpCrypt.CommunityEpochID, true)
 
     // TODO: have txn holding tank for txns that can't decode b/c the epoch isn't live or not found yet
     if commEpoch == nil {
@@ -978,21 +971,24 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
 
 
     // If this entry appears to be a genesis entry, we def want to verify that.  :)
-    if entry.IsWellFormed() && isGenesisEntry {
-        entryID := entry.Info.EntryID()
+    if entry.IsWellFormed() {
+        isGenesisEntry := entry.Info.AuthorEntryID().IsNil()
+        if isGenesisEntry {
+            entryID := entry.Info.EntryID()
 
-        found := false
-        for _, genesisEntryID := range CR.GenesisSeed.StorageEpoch.GenesisEntryIDs {
-            if bytes.Equal(entryID, genesisEntryID) {
-                entry.AddFlags(EntryFlag_GENESIS_ENTRY_VERIFIED)
-                found = true
-                break
+            found := false
+            for _, genesisEntryID := range CR.GenesisSeed.StorageEpoch.GenesisEntryIDs {
+                if bytes.Equal(entryID, genesisEntryID) {
+                    entry.AddFlags(EntryFlag_GENESIS_ENTRY_VERIFIED)
+                    found = true
+                    break
+                }
             }
-        }
-        if ! found {
-            entry.ThrowMalformed(
-                plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryID),
-            )
+            if ! found {
+                entry.ThrowMalformed(
+                    plan.Errorf(nil, plan.GenesisEntryNotVerified, "genesis entry %v not found", entryID),
+                )
+            }
         }
     }
 
