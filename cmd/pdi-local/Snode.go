@@ -15,7 +15,6 @@ import (
     //"encoding/hex"
     "encoding/json"
 
-    "github.com/plan-systems/go-plan/pcore"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pdi"
 
@@ -70,7 +69,7 @@ type Snode struct {
     storesMutex                 sync.RWMutex
     stores                      map[plan.CommunityID]*ds.Store
     
-    activeSessions              pcore.SessionGroup
+    activeSessions              plan.SessionGroup
 
     BasePath                    string
     Config                      Config
@@ -101,7 +100,6 @@ type Config struct {
 
 
 
-
 // ApplyDefaults sets std fields and values
 func (config *Config) ApplyDefaults() {
 
@@ -122,7 +120,7 @@ func NewSnode(
 
     sn := &Snode{
         stores: make(map[plan.CommunityID]*ds.Store),
-        activeSessions: pcore.NewSessionGroup(),
+        activeSessions: plan.NewSessionGroup(),
     }
         
     var err error
