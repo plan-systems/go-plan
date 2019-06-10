@@ -26,7 +26,6 @@ import (
     "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
-    "github.com/plan-systems/go-plan/pcore"
 
     "github.com/dgraph-io/badger"
 )
@@ -633,7 +632,7 @@ func (CR *CommunityRepo) connectToStorage() {
         }
 
         if err == nil {
-            CR.spContext, err = pcore.TransferSessionToken(CR.spContext, trailer)
+            CR.spContext, err = plan.TransferSessionToken(CR.spContext, trailer)
             if err != nil {
                 err = plan.Error(err, plan.FailedToConnectStorageProvider, "TransferSessionToken() failed")
             }
