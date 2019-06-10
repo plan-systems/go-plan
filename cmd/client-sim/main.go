@@ -47,7 +47,6 @@ import (
 
     //"github.com/denisbrodbeck/machineid"
 
-
 )
 
 
@@ -580,7 +579,7 @@ func (sess *ClientSess) openMemberSession() error {
     sess.sessToken = msg.BUF0
  
     // Since OpenMemberSession() uses a stream responder, the trailer is never set, so we use this guy as the sesh token.
-    sess.flow.Ctx = pcore.ApplyTokenOutgoingContext(sess.flow.Ctx, sess.sessToken)
+    sess.flow.Ctx = plan.ApplyTokenOutgoingContext(sess.flow.Ctx, sess.sessToken)
 
     sess.msgOutlet, err = sess.repoClient.OpenMsgPipe(sess.flow.Ctx)
     if err != nil {
@@ -849,10 +848,10 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
     }
 
     reader := bufio.NewReader(os.Stdin)
+    fmt.Println("ENTER TO START")
+    reader.ReadString('\n')
 
-    //time.Sleep(10 * time.Second)
-
-    N := 2
+    N := 54
 
     for i := 0; i < N; i++ {
         idx := i
@@ -883,15 +882,14 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
                                 }
                             },
                         )
-                        time.Sleep(50 * time.Millisecond)
+                        time.Sleep(10050 * time.Millisecond)
                     }
                 }
             })
         }()
     }
 
-    fmt.Printf("ENTER TO START")
-    reader.ReadString('\n')
+
 
     time.Sleep(1000 * time.Second)
 
