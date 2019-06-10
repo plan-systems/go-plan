@@ -16,7 +16,7 @@ import (
     "encoding/json"
     //"e
     
-    "github.com/plan-systems/go-plan/ski/Providers/hive"
+    //"github.com/plan-systems/go-plan/ski/Providers/hive"
 
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
@@ -35,8 +35,6 @@ import (
 // Config are params needed in order to run/start a CommunityRepo
 // TODO: where do these settings go?  StorageEpoch 
 type Config struct {
-
-
 
     // Number of storage provider faults/errors before this repo disconnects and requires manual override
     MaxStorageProviderFaults int32              `json:"max_storage_provider_faults"`   
@@ -89,7 +87,6 @@ type CommunityRepo struct {
     spInfo                 *pdi.StorageInfo
     spCancel                context.CancelFunc
     spContext               context.Context
-    spClientConn           *grpc.ClientConn
 
     //spCommitContext         context.Context
     //spCommitCancel          context.CancelFunc
@@ -103,8 +100,8 @@ type CommunityRepo struct {
 
 
     txnsToDecode            chan pdi.RawTxn
-    txnsToWrite             chan *pdi.PayloadTxns
-    txnsToCommit            chan *pdi.PayloadTxns
+    txnsToWrite             chan *pdi.PayloadTxnSet
+    txnsToCommit            chan *pdi.PayloadTxnSet
 
     txnsToFetch             chan *pdi.TxnList         // URIDs to be fetched from the SP (that the repo needs)
     txnCollater             pdi.TxnCollater
@@ -112,9 +109,15 @@ type CommunityRepo struct {
     txnWorklist             *badger.DB      // Status info by txn URID
 
     entriesToMerge          chan *chEntry
-    CommunityKeyringName    []byte
 
-    communitySKI            ski.Session
+    // Used to save on allocations
+    commKeyRef              ski.KeyRef
+
+    commSessionsMutex       sync.RWMutex
+    commSessions            []*CommunityCrypto
+
+
+    //communitySKI            ski.Session
     //communitySKICond        *sync.Cond
     //communitySKIMutex       sync.RWMutex
 
@@ -122,14 +125,16 @@ type CommunityRepo struct {
 
     //pipelines               sync.WaitGroup
 
-    MemberSessions          MemberSessions
+    MemberSessMgr          MemberSessMgr
+
+
+    // Used for unpacking txns intenrally
+    tmpCrypt            pdi.EntryCrypt
+
+
 
 /*
-    storage                 pdi.StorageSession
-    storageProvider         pdi.StorageProvider
-    storageMsgs             <-chan *pdi.StorageMsg
 
-    txnsToProcess          chan txnInProcess
 
     // Newly authored entries from active sessions on this pnode that are using this CommunityRepo.
     // These entries are first validated/processed as if they came off the wire, merged with the local db, and committed to the active storage sessions.
@@ -147,7 +152,6 @@ type CommunityRepo struct {
     openChannels            ChannelStoreGroup*/
 
 }
-
 
 
 
@@ -172,24 +176,6 @@ func NewCommunityRepo(
 
     name := fmt.Sprintf("repo %v", path.Base(CR.HomePath))
     CR.SetLogLabel(name)
- 
-    CR.txnCollater.PayloadHandler = func(inPayload []byte, inPayloadTxns *pdi.PayloadTxns) error {
-        var err error
-
-        switch inPayloadTxns.PayloadEncoding {
-            case plan.Encoding_Pb_EntryCrypt:
-                entry := chEntryAlloc(entryFromStorageProvider)
-                entry.PayloadTxns = inPayloadTxns
-                entry.tmpCrypt.CommunityEpochID = entry.tmpCrypt.CommunityEpochID[:0]
-                entry.tmpCrypt.PackedEntry = entry.tmpCrypt.PackedEntry[:0]
-                err = entry.tmpCrypt.Unmarshal(inPayload)
-                if err == nil {
-                    CR.entriesToMerge <- entry
-                }
-        }
-
-        return err
-    }
 
     seedPathname := CR.GenesisSeedPathname()
 
@@ -209,42 +195,20 @@ func NewCommunityRepo(
     } 
 
     if err == nil {
-        err = CR.LoadGenesisSeed(seedPathname)
+        if seed, err := LoadAndVerifyGenesisSeed(seedPathname); err == nil {
+            CR.GenesisSeed = *seed
+        }
     }
 
     if err == nil {
         CR.chMgr = NewChMgr(inHomePath, CR)
-        CR.MemberSessions.Host = CR
-        CR.CommunityKeyringName = CR.GenesisSeed.StorageEpoch.CommunityKeyringName()
+        CR.MemberSessMgr.CR = CR
+        CR.commKeyRef.KeyringName = CR.GenesisSeed.StorageEpoch.CommunityKeyringName()
     }
 
     return CR, err
 }
 
-func (CR *CommunityRepo) doChannelGenesis() {
-
-
-}
-
-
-
-func (CR *CommunityRepo) LoadGenesisSeed(inSeedPathname string) error {
-
-    buf, err := ioutil.ReadFile(inSeedPathname)
-    if err == nil { 
-        var packingInfo ski.SignedPayload
-        err = CR.unpacker.UnpackAndVerify(buf, &packingInfo)
-        if err == nil {
-            err = CR.GenesisSeed.Unmarshal(packingInfo.Header)
-            if err == nil {
-                if ! bytes.Equal(packingInfo.Signer.PubKey, CR.GenesisSeed.StorageEpoch.OriginKey.PubKey) {
-                    err = plan.Errorf(nil, plan.VerifySignatureFailed, "%v failed to verify", inSeedPathname)
-                }
-            }
-        }
-    }
-    return err
-}
 
 
 
@@ -310,15 +274,9 @@ func (CR *CommunityRepo) onInternalStartup() error {
     opts.Dir = path.Join(CR.HomePath, "txnDB")
     opts.ValueDir = opts.Dir
 
-    // Create a heap-only key hive used for the community keyring
-    if CR.communitySKI, err = hive.StartSession("", "", nil); err != nil {
-        return err
-    }
-
     if CR.txnDB, err = badger.Open(opts); err != nil {
         return plan.Error(err, plan.StorageNotReady, "CommunityRepo.txnDB.Open() failed")
     }
-
 
     //
     //
@@ -327,20 +285,21 @@ func (CR *CommunityRepo) onInternalStartup() error {
     // txn committer
     //
     // Receives txns ready to be committed to the community's storage
-    CR.txnsToCommit = make(chan *pdi.PayloadTxns, 16)
+    CR.txnsToCommit = make(chan *pdi.PayloadTxnSet, 16)
     go func() {
 
         for payload := range CR.txnsToCommit {
 
-            N := len(payload.Txns)
-            for i := 0; i < N; i++ {
-                _, err := CR.spClient.CommitTxn(CR.spContext, &pdi.RawTxn{Bytes: payload.Txns[i].Bytes})
+            for _, txn := range payload.Segs {
+                _, err := CR.spClient.CommitTxn(CR.spContext, &pdi.RawTxn{Bytes: txn.RawTxn})
                 if err != nil {
-                    CR.flow.Log.WithError(err).Warn("got commit err")
+                    CR.Warn("StorageProvider.CommitTxn() failed: ", err)
                 }
             }
 
-            CR.Infof(1, "committed payload %v", payload.PayloadIDSuffixStr())
+            CR.Infof(1, "committed payload %v", payload.PayloadTID.TID().SuffixStr())
+
+            pdi.RecycleTxnSet(payload)
 
             // TODO update commit log
             // mark txn as committed
@@ -361,15 +320,24 @@ func (CR *CommunityRepo) onInternalStartup() error {
         CR.txnDB.Close()
         CR.txnDB = nil
 
-        if CR.communitySKI != nil {
-            CR.communitySKI.EndSession(CR.flow.ShutdownReason)
-            CR.communitySKI = nil
+        // End all community keyring sessions 
+        {
+            CR.commSessionsMutex.Lock()
+            N := len(CR.commSessions)
+            for i := 0; i < N; i++ {
+                CR.commSessions[i].EndSession(CR.flow.ShutdownReason)
+                CR.commSessions[i] = nil
+            }
+            CR.commSessions = nil
+            CR.commSessionsMutex.Unlock()
         }
 
         CR.Info(0, "shutdown complete")
 
         CR.flow.ShutdownComplete.Done()
         
+    // TODO: fix this so fetching stop asap but commit is last to disconnect.
+    // Or, we can stop asap once we have txn logging such that uncommited txns get to the server
         CR.spSyncStop()        
     }()
     //
@@ -379,15 +347,15 @@ func (CR *CommunityRepo) onInternalStartup() error {
     // txnsToWrite processor
     //
     // Writes incoming raw txns to the txn DB
-    CR.txnsToWrite = make(chan *pdi.PayloadTxns, 8)
+    CR.txnsToWrite = make(chan *pdi.PayloadTxnSet, 8)
     go func() {
         var err error
 
         for payload := range CR.txnsToWrite {
             wb := CR.txnDB.NewWriteBatch()
-            N := len(payload.Txns)
-            for i := 0; i < N; i++ {
-                err = wb.Set(payload.Txns[i].URID, payload.Txns[i].Bytes, 0)
+            N := len(payload.Segs)
+            for _, seg := range payload.Segs {
+                err = wb.Set(seg.Info.URID, seg.RawTxn, 0)
                 if err != nil {
                     // TODO log err
                 }
@@ -396,7 +364,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
             if err != nil {
                 // TODO log err
             }
-            CR.Infof(1, "stored payload %v (%d txns)", payload.PayloadIDSuffixStr(), N)
+            CR.Infof(1, "stored payload %v (%d txns)", payload.PayloadTID.TID().SuffixStr(), N)
 
             // Commits underlying txns if they've been locally authored
             if payload.NewlyAuthored {
@@ -406,7 +374,6 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         close(CR.txnsToCommit)
     }()
-
     //
     //
     //
@@ -444,9 +411,20 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         for txnIn := range CR.txnsToDecode {
 
-            err = CR.txnCollater.DecodeAndCollateTxn(txnDecoder, &txnIn)
+            txnSet, err := CR.txnCollater.DecodeAndCollateTxn(txnDecoder, &txnIn)
             if err != nil {
-                CR.flow.Log.WithError(err).Warnf("err processing txn %v", txnIn.URID)
+                CR.Warnf("error processing txn %v: %v", txnIn.URID, err)
+            } else {
+                payloadEncoding := txnSet.PayloadEncoding()
+
+                switch payloadEncoding {
+                    case plan.Encoding_Pb_EntryCrypt:
+                        entry := NewChEntry(entryFromStorageProvider)
+                        entry.PayloadTxnSet = txnSet
+                        CR.entriesToMerge <- entry
+                    default:
+                        CR.Warn("encountered unhandled payload encoding: ", payloadEncoding)
+                }
             }
         }
 
@@ -478,7 +456,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
                 }
             }
             if err != nil && err != io.EOF {
-                CR.flow.Log.WithError(err).Warn("StorageProvider.FetchTxns() err")
+                CR.Warn("StorageProvider.FetchTxns() error: ", err)
             }
         }
 
@@ -499,7 +477,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
 func (CR *CommunityRepo) onInternalShutdown() {
 
     // First, end all member sessions (and channel sessions)
-    CR.MemberSessions.Shutdown(CR.flow.ShutdownReason, nil)
+    CR.MemberSessMgr.Shutdown(CR.flow.ShutdownReason, nil)
 
     CR.Infof(1, "all member sessions ended")
 
@@ -512,11 +490,10 @@ func (CR *CommunityRepo) onInternalShutdown() {
 
 
 
-
-
-
 func (CR *CommunityRepo) spSyncActivate() {
 
+    CR.Info(1, "sync with StorageProvider(s) ACTIVATING")
+    
     // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
     CR.spSyncActive = true
     CR.spSyncWake()
@@ -525,6 +502,8 @@ func (CR *CommunityRepo) spSyncActivate() {
 
 
 func (CR *CommunityRepo) spSyncStop() {
+
+    CR.Info(1, "sync with StorageProvider(s) DEACTIVATING")
 
     // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
     CR.spSyncActive = false
@@ -546,22 +525,15 @@ func (CR *CommunityRepo) spSyncWake() {
 func (CR *CommunityRepo) disconnectFromStorage() {
 
     CR.spSyncStatus = spSyncStopping
-
-    if CR.spClientConn != nil {
-        CR.spClientConn.Close()
-        CR.spClientConn = nil
-    }
-
-    CR.spClient = nil
-    CR.spContext = nil
-    CR.spClientConn = nil
-    CR.spInfo = nil
     if CR.spCancel != nil {
         CR.spCancel()
         CR.spCancel = nil
     }
 
     CR.spSyncWorkers.Wait()
+    CR.spClient = nil
+    CR.spContext = nil
+    CR.spInfo = nil
     CR.spSyncStatus = spSyncStopped
     CR.spSyncWake()
 }
@@ -634,17 +606,16 @@ func (CR *CommunityRepo) connectToStorage() {
 
     CR.spSyncStatus = spSyncConnecting
 
-    var err error
 	CR.spContext, CR.spCancel = context.WithCancel(CR.flow.Ctx)
 
     addr := CR.State.Services[0].Addr
-	CR.spClientConn, err = grpc.DialContext(CR.spContext, addr, grpc.WithInsecure())
+	clientConn, err := grpc.DialContext(CR.spContext, addr, grpc.WithInsecure())
 	if err != nil {
         err = plan.Errorf(err, plan.FailedToConnectStorageProvider, "grpc.Dial() failed with addr %v", addr)
 	}
 
     if err == nil {
-	    CR.spClient = pdi.NewStorageProviderClient(CR.spClientConn)
+	    CR.spClient = pdi.NewStorageProviderClient(clientConn)
     }
 		
     if err == nil {
@@ -769,14 +740,15 @@ const (
 
 func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
 
+    var err error
+
     count := 0
     N := len(ioTxnList.URIDs)
     if N != len(ioTxnList.Statuses) {
-        CR.flow.Log.Warn("received bad TxnList")
-        return plan.Error(nil, plan.StorageNotConsistent, "received bad TxnList")
+        err = plan.Error(nil, plan.StorageNotConsistent, "received bad TxnList")
+        CR.Errorf("received bad TxnList")
+        return err
     }
-
-    var err error
 
     if N > 0 {
         dbTxn := CR.txnDB.NewTransaction(false)
@@ -832,9 +804,11 @@ func (CR *CommunityRepo) backwardTxnScanner() {
 // When it receives URID updates, reconciles that with the repo's txn db, and sends off requests for missing txns.
 func (CR *CommunityRepo) forwardTxnScanner() {
 
-    for CR.flow.IsRunning() {
+    doingScan := true
 
-        CR.Trace("starting forward txn scan")
+    for doingScan {
+
+        CR.Info(1, "starting forward txn scan")
 
         scanner, err := CR.spClient.Scan(
             CR.spContext,
@@ -845,25 +819,23 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             },
         )
         if err != nil {
-            CR.flow.Log.WithError(err).Warn("unexpected Scan() err")
+            CR.Warn("StorageProvider.Scan() error: ", err)
         }
 
-        for err == nil && CR.flow.IsRunning() {
+        for err == nil {
             var txnList *pdi.TxnList
             txnList, err = scanner.Recv()
         
             if ! CR.flow.IsRunning() {
+                doingScan = false
                 break
             } else if err != nil {
-                CR.flow.Log.WithError(err).Warn("forward scan recv err")
+                CR.Warn("StorageProvider.Scan() recv error: ", err)
                 break
             } else if txnList != nil {
-                CR.Tracef("received %v txn URIDs", len(txnList.URIDs))
 
                 // Filter for txn we need
                 CR.filterNeededTxns(txnList)
-
-                CR.Tracef("after filter, %v txns remain", len(txnList.URIDs))
 
                 // Request txns we're missing
                 if len(txnList.URIDs) > 0 {
@@ -874,6 +846,7 @@ func (CR *CommunityRepo) forwardTxnScanner() {
 
         select {
             case <- CR.spContext.Done():
+                doingScan = false
             case <- time.After(5 * time.Second):
         }
     }
@@ -923,76 +896,77 @@ func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
 func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
 
     var (
-        err error
-        communityEpoch *pdi.CommunityEpoch
+        commEpoch *pdi.CommunityEpoch
     )
 
-    isGenesisEntry := len(entry.tmpCrypt.CommunityEpochID) == 0
-    if isGenesisEntry {
-        communityEpoch = CR.GenesisSeed.CommunityEpoch
-        entry.tmpCrypt.CommunityEpochID = append(entry.tmpCrypt.CommunityEpochID[:0], communityEpoch.EpochTID...)
-    } else {
-        communityEpoch = CR.FetchCommunityEpoch(entry.tmpCrypt.CommunityEpochID)
+    tmpCrypt := &CR.tmpCrypt
+    err := entry.PayloadTxnSet.UnmarshalPayload(tmpCrypt)
+    if err == nil {
+        // TODO handle me -- plus entry.
     }
 
-    if communityEpoch == nil {
+    isGenesisEntry := len(tmpCrypt.CommunityEpochID) == 0
+    if isGenesisEntry {
+        commEpoch = CR.GenesisSeed.CommunityEpoch
+        //entry.tmpCrypt.CommunityEpochID = append(tmpCrypt.CommunityEpochID[:0], commEpoch.EpochTID...)
+    } else {
+        commEpoch = CR.FetchCommunityEpoch(tmpCrypt.CommunityEpochID, true)
+    }
+
+    // TODO: have txn holding tank for txns that can't decode b/c the epoch isn't live or not found yet
+    if commEpoch == nil {
         return plan.Error(nil, plan.CommunityEpochNotFound, "community epoch not found")
     }
 
-    // STEP 1 -- Decrypt the entry header and body using the cited community key ID.
-    //var decryptOut *ski.CryptOpOut 
-    decryptOut, cryptErr := CR.communitySKI.DoCryptOp(&ski.CryptOpArgs{
-        CryptOp: ski.CryptOp_DECRYPT_SYM,
-        OpKey: &ski.KeyRef{
-            KeyringName: CR.CommunityKeyringName,
-            PubKey: communityEpoch.KeyInfo.PubKey,
-        },
-        BufIn: entry.tmpCrypt.PackedEntry,
-    })
-    err = cryptErr
-    if plan.IsError(err, plan.KeyringNotFound, plan.KeyEntryNotFound) {
-        // TODO: append txn URID onto a list for later processing
-        // Status info stored w/ txns:
-        //    - time received, txn status (revoked?), attempts to merge, merge fail reasons/history
+    var payload ski.SignedPayload
+
+    {
+        var decryptOut *ski.CryptOpOut
+
+        // to decrypt an incoming entry, we need have the community keyring on hand.  
+        // This is only available if a memeber is logged in *or* a member has offered their community keyring 
+        //    to be retained for the explicit purpose of processing entries with no one logged in.
+        CR.commSessionsMutex.RLock()
+        {
+            CR.commKeyRef.PubKey = commEpoch.KeyInfo.PubKey
+            decryptArgs := ski.CryptOpArgs{
+                CryptOp: ski.CryptOp_DECRYPT_SYM,
+                OpKey: &CR.commKeyRef,
+                BufIn: tmpCrypt.PackedEntry,
+            }
+
+            for _, commSess := range CR.commSessions {
+                var decryptErr error
+                decryptOut, decryptErr = commSess.Keys.DoCryptOp(&decryptArgs)
+                if decryptErr != nil {
+                    break
+                }
+                if err != nil && plan.IsError(decryptErr, plan.KeyringNotFound, plan.KeyEntryNotFound) {
+                    CR.Errorf("error decrypting incoming entry: %v", decryptErr)
+                }
+            }
+        }
+        CR.commSessionsMutex.RUnlock()
+
+        if decryptOut == nil {
+            err = plan.Error(nil, plan.CommunityKeyNotAvailable, "community key not available")
+        } else {
+            err = CR.unpacker.UnpackAndVerify(
+                decryptOut.BufOut,
+                &payload,
+            )
+        }
     }
+
+    err = entry.AssignFromDecrytedEntry(&payload)
     if err != nil {
         return err
     }
 
-    var packingInfo ski.SignedPayload
-    err = CR.unpacker.UnpackAndVerify(
-        decryptOut.BufOut,
-        &packingInfo,
-    )
-    if err != nil {
-        return err
-    }
-
-    entry.tmpInfo.EntryOp = pdi.EntryOp(0)
-    entry.tmpInfo.EntrySubOp = 0
-    entry.tmpInfo.SupersedesEntryID = entry.tmpInfo.SupersedesEntryID[:0]
-    entry.tmpInfo.Extensions = nil
-    entry.tmpInfo.ChannelID = entry.tmpInfo.ChannelID[:0]
-    entry.tmpInfo.TIDs = entry.tmpInfo.TIDs[:0]
-    err = entry.tmpInfo.Unmarshal(packingInfo.Header)
-    if err != nil {
-        return err
-    }
-
-    numTIDs := len(entry.tmpInfo.TIDs) / plan.TIDSz
-    if numTIDs < int(pdi.EntryTID_NormalNumTIDs) {
-        return plan.Error(nil, plan.ChEntryIsMalformed, "entry missing required TIDs")
-    }
-
-    entryID := entry.tmpInfo.EntryID()
-
-    // The entry ID's latter bytes are rightmost bytes of the entry hashname.  
-    // This has to always be set since the hashname can never be known when the entry is being packed
-    entryID.SetHash(packingInfo.Hash)
-    
-    if ! bytes.Equal(entry.PayloadTxns.PayloadID, entryID) {
-        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload ID was %v but actual is %v", entry.PayloadTxns.PayloadID, entryID)
-    }
+    /*
+    if ! bytes.Equal(entry.PayloadTxnSet.PayloadID, entryID) {
+        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload ID was %v but actual is %v", entry.PayloadTxnSet.PayloadID, entryID)
+    }*/
 
 
     /* TODO: perform timestamp sanity checks
@@ -1003,17 +977,15 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
         return plan.Error(nil, plan.BadTimestamp, "PDI entry has timestamp too far in the future")
     }*/
 
-    // chEntry is our main workhorse structure
-    entry.AssignFromDecrytedEntry(&entry.tmpInfo, packingInfo.Signer.PubKey)
-    entry.Body = append(entry.Body[:0], packingInfo.Body...)
 
     // If this entry appears to be a genesis entry, we def want to verify that.  :)
     if entry.IsWellFormed() && isGenesisEntry {
+        entryID := entry.Info.EntryID()
 
         found := false
         for _, genesisEntryID := range CR.GenesisSeed.StorageEpoch.GenesisEntryIDs {
             if bytes.Equal(entryID, genesisEntryID) {
-                entry.AddFlags(ChEntryFlag_GENESIS_ENTRY_VERIFIED)
+                entry.AddFlags(EntryFlag_GENESIS_ENTRY_VERIFIED)
                 found = true
                 break
             }
@@ -1025,68 +997,40 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
         }
     }
 
-    CR.chMgr.QueueEntryForMerge(entry)
+    CR.chMgr.QueueEntryForMerge(
+        commEpoch,
+        entry.Info.ChID(),
+        entry,
+    )
  
     // At this point, the PDI entry's signature has been verified
     return err
-
 }
 
 
-// StartMemberSession starts a new session for the given member
-func (CR *CommunityRepo) StartMemberSession(in *SessionReq) (*MemberSession, error) {
+// OpenMemberSession starts a new session for the given member
+func (CR *CommunityRepo) OpenMemberSession(
+    inSessReq *MemberSessionReq, 
+    inMsgOutlet Repo_OpenMemberSessionServer,
+) (*MemberSession, error) {
 
     // Sanity check
-    if ! bytes.Equal(in.CommunityID, CR.GenesisSeed.StorageEpoch.CommunityID) {
+    if ! bytes.Equal(inSessReq.CommunityID, CR.GenesisSeed.StorageEpoch.CommunityID) {
         return nil, plan.Error(nil, plan.AssertFailed, "community ID does not match repo's ID")
     }
 
-   // TODO: make repo ski sesson mgr?  use workstation path??  
-    skiDir, err := hive.GetSharedKeyDir()
-    if err != nil { return nil, err }
-
-    // TODO: close prev skiSession
-    // TODO: load pw file w/ pw hash, etc
-    personalSKI, err := hive.StartSession(
-        skiDir,
-        in.MemberEpoch.FormMemberStrID(),
-        nil,
-    )
-    if err != nil { return nil, err }
-
-    ms, err := CR.MemberSessions.StartSession(
-        in,
-        personalSKI,
+    ms, err := CR.MemberSessMgr.StartSession(
+        inSessReq,
+        inMsgOutlet,
         CR.HomePath,
     )
     if err != nil {
         return nil, err
     }
 
-    tomeBuf, pw := ms.ExportCommunityKeyring()
-    _, err = CR.communitySKI.DoCryptOp(&ski.CryptOpArgs{
-        CryptOp: ski.CryptOp_IMPORT_USING_PW,
-        BufIn: tomeBuf,
-        PeerKey: pw,
-    })
-    if err == nil {
-        CR.spSyncActivate()
-    }
-
-    CR.flow.LogErr(err, "error importing community keyring")
-
     return ms, nil
 }
 
-
-/*****************************************************
-** MemberHost (interface)
-**/
-
-// Context -- see interface MemberHost
-func (CR *CommunityRepo) Context() context.Context {
-    return CR.flow.Ctx
-}
 
 // LatestCommunityEpoch -- see interface MemberHost
 func (CR *CommunityRepo) LatestCommunityEpoch() *pdi.CommunityEpoch {
@@ -1103,188 +1047,60 @@ func (CR *CommunityRepo) LatestStorageEpoch() pdi.StorageEpoch {
     return *CR.GenesisSeed.StorageEpoch
 }
 
-// OnSessionEnded -- see interface MemberHost
-func (CR *CommunityRepo) OnSessionEnded(inSession *MemberSession) {
-    CR.MemberSessions.OnSessionEnded(inSession)
-}
-
-
 // FetchCommunityEpoch returns the CommunityEpoch with the matching epoch ID
-func (CR *CommunityRepo) FetchCommunityEpoch(inEpochID []byte) *pdi.CommunityEpoch {
+func (CR *CommunityRepo) FetchCommunityEpoch(inEpochID []byte, inLiveOnly bool) *pdi.CommunityEpoch {
 
     if len(inEpochID) == plan.TIDSz {
         chCE := CR.chMgr.FetchCommunityEpochsChannel()
         if chCE != nil {
-            return chCE.FetchCommunityEpoch(inEpochID)
+            return chCE.FetchCommunityEpoch(inEpochID, inLiveOnly)
         }
     }
 
     // If inEpochID is nil, then the genesis epoch is assumed
-    return CR.GenesisSeed.CommunityEpoch
-}
-
-
-
-/*
-// ChannelID returns this entry's destination channnel ID.
-func (entry *chEntry) ChannelID() plan.ChannelID {
-    return plan.ChannelID(entry.Info.ChannelID)
-}
-*/
-
-type entryIP struct {
-
-    txnPayloadName  []byte
-
-    //timeStart       int64
-
-    // Txn ID of the last/final segment storage provider txn
-   // ParentURID      string
-
-/*
-    entryTxnIndex   int
-    parentTxnName   []byte
-
-    txnWS           []txnWorkspace
-    entryBatch      []*pdi.EntryCrypt // 
-    entryIndex      int               // This is the index number into entryBatch that is currently being processed
-    entryTxn        pdi.StorageTxn */
-
-    entry           *chEntry
-
-
-    //ChannelEpoch    *pdi.ChannelEpoch
-    
- //   authorEpoch     *pdi.MemberEpoch
-
- //   skiSession      ski.Session
-
-/*
-    skiProvider     ski.Provider
-
-    accessCh        *ChannelStore
-    accessChFlags   LoadChannelStoreFlags
-
-    targetCh        *ChannelStore
-    targetChFlags   LoadChannelStoreFlags*/
-
-}
-
-
-/*
-func (eip *entryInProcess) prepChannelAccess() error {
-
-    plan.Assert( eip.targetChFlags == 0 &&  eip.accessChFlags == 0, "channel store lock flags not reset" )
-
-    targetChFlags := LockForWriteAccess
-    accessChFlags := LockForReadAccess | CitedAsAccessChannel
-
-    switch eip.EntryInfo.EntryOp {
-        case pdi.EntryOp_EDIT_ACCESS_GRANTS:
-            targetChFlags |= CitedAsAccessChannel
+    if len(inEpochID) == 0 || bytes.Equal(inEpochID, CR.GenesisSeed.CommunityEpoch.EpochTID) {
+        return CR.GenesisSeed.CommunityEpoch
     }
 
-    // First lock the target channel
-    var err error
-    eip.targetCh, err = eip.CR.LockChannelStore(eip.entryHeader.ChannelId, targetChFlags)
-    if err != nil {
-        return err
-    }
+    return nil
+}
 
-    // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
-    eip.targetChFlags = targetChFlags
 
-    // Step from newest to oldest epoch.
-    var epochMatch *pdi.ChannelEpoch
-    for i, epoch := range eip.targetCh.ChannelEpochs {
-        if epoch.EpochId == eip.entryHeader.ChannelEpochId {
-            if i > 0 {
-                // TODO: ws.targetChannel.ChannelEpoch[i-1].EpochTransitionPeriod
-                {
+func (CR *CommunityRepo) registerCommCrypto(inCommSession *CommunityCrypto) {
 
-                    // TargetChannelEpochExpired
-                }
-            }
+    CR.commSessionsMutex.Lock()
+    found := false
+    for _, commSession := range CR.commSessions {
+        if commSession == inCommSession {
+            found = true
+            break
         }
     }
-    if epochMatch == nil {
-        return plan.Errorf(nil, plan.TargetChannelEpochNotFound, "epoch 0x%x for target channel 0x%x not found", eip.entryHeader.ChannelEpochId, eip.entryHeader.ChannelId)
+    if ! found {
+        CR.commSessions = append(CR.commSessions, inCommSession)
     }
+    CR.commSessionsMutex.Unlock()
 
-    // Lookup the latest 
-    eip.accessCh, err = eip.CR.LockChannelStore(epochMatch.AccessChannelId, accessChFlags)
-    if prr != nil {
-        return err
-    }
-
-    // At this point, ws.targetChannel is locked according to targetChFlags, so we need to track that
-    eip.accessChFlags = accessChFlags
+}
 
 
-    // Ops such as REMOVE_ENTRIES and SUPERCEDE_ENTRY
-    perr = ws.targetCh.FetchRelevantEntriesForOp()
 
-    access := ws.accessCh.LookupAccessForAuthor(ws.entryHeader.AuthorMemberId)
+func (CR *CommunityRepo) unregisterCommCrypto(inCommSession *CommunityCrypto) {
 
-    reqs := entryAccessReqs{
-
-    }
-    switch ws.entryHeader.EntryOp {
-    case POST_NEW_CONTENT:
-        reqs.minAccessLevel = READWRITE_ACCESS
-        case pdi.EntryOp_EDIT_ACCESS_GRANTS:
-            targetChFlags |= CitedAsAccessChannel
-    }
-*/
-
-
-/*
-      // Fetch and lock the data container for the cited access channel, checking all security permissions
-    ws.targetChannel, err = ws.CR.LockChannelStoreForOp(ws.entryHeader)
-    if err != nil {
-        return err
-    }
-
-    accessLevel, err := ws.targetChannel.AccessLevelForMember(ws.entryHeader.
-    var 
-    for i, chEpoch := range ws.targetChannel.ChannelEpochs {
-        if chEpoch.EpochId == ws.entryHeader.ChannelEpochId {
-            for 
+    CR.commSessionsMutex.Lock()
+    N := len(CR.commSessions)
+    for i := 0; i < N; i++ {
+        if CR.commSessions[i] == inCommSession {
+            N--
+            CR.commSessions[i] = CR.commSessions[N]
+            CR.commSessions = CR.commSessions[:N]
         }
     }
+    CR.commSessions = append(CR.commSessions, inCommSession)
+    CR.commSessionsMutex.Unlock()
 
-    fetchFlags := LockForReadAccess
-
-    switch ( ws.entryHeader.EntryOp ) {
-
-        case 
-            EntryOp_UPDATE_ACCESS_GRANTS,
-            EntryOp_EDIT_CHANNEL_EPOCH:
-            
-            fetchFlags = LockForWriteAccess
+    if N == 0 {
+        CR.spSyncStop()
     }
 
-    fetchFlags |= IsAccessChannel
-    ws.targetChannel, err = ws.CR.FetchChannelStore(
-        ws.targetChannel.ChannelEpoch.AccessChannelId, 
-        ws.entryHeader.ChannelEpoch,
-        fetchFlags )
-    
-
-    CitedAsAccessChannel
-
-/*
-    if ws.targetChannel == nil {
-        return plan.Errorf(err, plan.AccessChannelNotFound, "channel 0x%x not found", ws.entryHeader.ChannelId )
-    }
-
-    if ws.targetChannel.ACStore == nil {
-        return plan.Errorf(nil, plan.NotAnAccessChannel, "invalid channel 0x%x", ws.entryHeader.ChannelId )
-    }
-
-    // TODO: do all of ACStore checking!
-*/
-  
-
-
-
+}
