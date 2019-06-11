@@ -14,13 +14,9 @@ import (
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
     sign "golang.org/x/crypto/nacl/sign"
-
 )
 
-
-
 var (
-
     // An Alan Watts invocation....
     // Convenience for having zero data around
     zero64 = [64]byte{
@@ -33,15 +29,11 @@ var (
         +0,+0,+0,+0,-0,+0,+0,-0,
         +0,+0,+0,+0,-0,-0,-0,-0,
     }
-
 )
-
 
 func init() {
     ski.RegisterCryptoKit(&CryptoKit)
 }
-
-
 
 func symEncrypt(
     inRand io.Reader, 
@@ -70,7 +62,6 @@ func symEncrypt(
     return msg, nil
 }
 
-
 func symDecrypt(
     inMsg []byte,
     inKey []byte,
@@ -94,9 +85,6 @@ func symDecrypt(
 
     return msg, err
 }
-
-
-
 
 // CryptoKit is used with ski.RegisterCryptoKit() so it is freely available.
 var CryptoKit = ski.CryptoKit{
@@ -182,7 +170,6 @@ var CryptoKit = ski.CryptoKit{
         return append(salt[:], buf...), nil
     },
 
-
     DecryptUsingPassword: func(
         inMsg []byte,
         inPwd []byte,
@@ -197,7 +184,6 @@ var CryptoKit = ski.CryptoKit{
         privKey := pbkdf2.Key(inPwd, inMsg[2:26], 4096, 32, hasher)
 
         return symDecrypt(inMsg[26:], privKey)
-
     },
 
 	/*****************************************************
@@ -244,7 +230,6 @@ var CryptoKit = ski.CryptoKit{
 
         return msg, nil
     },
-
 
     DecryptFrom: func(
         inMsg []byte,
@@ -295,7 +280,6 @@ var CryptoKit = ski.CryptoKit{
         return sig[:sign.Overhead], nil
     },
 
-
     VerifySignature: func(
         inSig []byte,
         inDigest []byte,
@@ -318,10 +302,5 @@ var CryptoKit = ski.CryptoKit{
         }
                 
         return nil
-        
     },
-
 }
-
-
- 
