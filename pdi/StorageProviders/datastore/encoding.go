@@ -172,7 +172,7 @@ func (enc *dsEncoder) EncodeToTxns(
             }
 
             seg.RawTxn = packingInfo.SignedBuf
-            seg.Info.URID = pdi.URIDFromInfo(packingInfo.Extra, seg.Info.TimeSealed, packingInfo.Hash)
+            seg.Info.URID = pdi.URIDFromTimeAndHash(packingInfo.Extra, seg.Info.TimeSealed, packingInfo.Hash)
         }
 
         if enc.threadsafe {
@@ -223,7 +223,7 @@ func (dec *dsDecoder) DecodeRawTxn(
 	}
 
     txnInfo.From = out.Signer.PubKey
-    txnInfo.URID = pdi.URIDFromInfo(out.Hash[len(out.Hash):], txnInfo.TimeSealed, out.Hash)
+    txnInfo.URID = pdi.URIDFromTimeAndHash(out.Hash[len(out.Hash):], txnInfo.TimeSealed, out.Hash)
 
 	// 2) Isolate the payload buf
 	if txnInfo.SegSz != uint32(len(out.Body)) {

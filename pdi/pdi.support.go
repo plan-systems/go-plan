@@ -181,6 +181,29 @@ type URID []byte
 // URIDBlob is an array buf version of URID
 type URIDBlob [URIDSz]byte
 
+// URID is a convenience function that returns the URID contained within this URIDBlob.
+func (id *URIDBlob) URID() URID {
+    return id[:]
+}
+
+// ExtractTime extracts the time index bourne by this URID
+func (id *URIDBlob) ExtractTime() int64 {
+    return URID(id[:]).ExtractTime()
+}
+
+// ExtractTime extracts the time index bourne by this URID
+func (id URID) ExtractTime() int64 {
+
+    t := int64(id[0]) 
+    t = (t << 8) | int64(id[1]) 
+    t = (t << 8) | int64(id[2]) 
+    t = (t << 8) | int64(id[3]) 
+    t = (t << 8) | int64(id[4]) 
+    t = (t << 8) | int64(id[5]) 
+
+    return t
+}
+
 // Blob is a convenience function that forms a URID byte array from a URID byte slice. 
 func (id URID) Blob() URIDBlob {
 
@@ -207,25 +230,15 @@ func (id URID) String() string {
 	return string(str[:sz])  
 }
 
-
-// ExtractTime extracts the time index bourne by this URID
-func ExtractTime(inURID []byte) int64 {
-
-    t := int64(inURID[0]) 
-    t = (t << 8) | int64(inURID[1]) 
-    t = (t << 8) | int64(inURID[2]) 
-    t = (t << 8) | int64(inURID[3]) 
-    t = (t << 8) | int64(inURID[4]) 
-    t = (t << 8) | int64(inURID[5]) 
-
-    return t
+// SetFromTimeAndHash sets the receiver URID based on time and hash.
+func (id URID) SetFromTimeAndHash(inTimestamp int64, inHash []byte) {
+   URIDFromTimeAndHash(id, inTimestamp, inHash)
 }
 
-
-// URIDFromInfo returns the binary/base256 form of a binary URID aka "Universal Transaction Identifier"
+// URIDFromTimeAndHash returns the binary/base256 form of a binary URID aka "Universal Transaction Identifier"
 //
 // If in is set, the new URID written starting at pos 0 (assuming it has the capacity), otherwise a new buf is allocated.
-func URIDFromInfo(in []byte, inTimestamp int64, inID []byte) URID {
+func URIDFromTimeAndHash(in []byte, inTimestamp int64, inID []byte) URID {
 
     if inTimestamp > URIDTimestampMax {
         inTimestamp = URIDTimestampMax
@@ -339,7 +352,7 @@ func (epoch *MemberEpoch) RegenMemberKeys(
         epoch.FormSigningKeyringName(inCommunityEpoch.CommunityID),
         ski.KeyInfo{
             KeyType: ski.KeyType_SigningKey,
-            CryptoKit: inCommunityEpoch.KeyInfo.CryptoKit,
+            CryptoKit: inCommunityEpoch.SigningCryptoKit,
         },
     )
     if err != nil { return err }
