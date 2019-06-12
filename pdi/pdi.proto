@@ -558,7 +558,6 @@ enum CommunityChID {
 
 
 
-
 // StorageEpoch contains core params req'd for a community (and StorageProviders for that community) 
 // During community genesis, the newly created StorageEpoch is marshalled and signed by OriginKey
 message StorageEpoch {
@@ -602,8 +601,12 @@ message CommunityEpoch {
     // Official community name
                 string              community_name              = 2;
 
+    // Identifies the CryptoKit that members should/must use to sign newly authored entries.
+                ski.CryptoKitID     signing_crypto_kit          = 3;
+
     // The community key associated with this epoch, identifying this epoch.
     // KeyInfo.KeyType_SymmetricKey
+    // Note that KeyInfo.CryptoKit specified here is also used when generating member asymmetric keys 
                 ski.KeyInfo         key_info                    = 4;
 
     // Identifies this CommunityEpoch.
@@ -637,6 +640,9 @@ message CommunityEpoch {
     // Tier 0: posts to reserved community channels
     // Tier 1: posts to public ACCs 
     repeated    int64               max_entry_latency           = 10;
+
+    // This is how "standard" channels are discovered. 
+    repeated    plan.Link           links                       = 20;
 
 }
 

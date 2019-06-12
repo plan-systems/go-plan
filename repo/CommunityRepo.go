@@ -899,8 +899,8 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
 
     tmpCrypt := &CR.tmpCrypt
     err := entry.PayloadTxnSet.UnmarshalPayload(tmpCrypt)
-    if err == nil {
-        // TODO handle me -- plus entry.
+    if err != nil {
+        return plan.Error(err, plan.UnmarshalFailed, "payload txn set unmarshal failed")
     }
 
     commEpoch := CR.FetchCommunityEpoch(tmpCrypt.CommunityEpochID, true)
@@ -934,7 +934,7 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
                     break
                 }
                 if err != nil && plan.IsError(decryptErr, plan.KeyringNotFound, plan.KeyEntryNotFound) {
-                    CR.Errorf("error decrypting incoming entry: %v", decryptErr)
+                    CR.Warnf("error decrypting incoming entry: %v", decryptErr)
                 }
             }
         }
@@ -950,15 +950,21 @@ func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
         }
     }
 
-    err = entry.AssignFromDecrytedEntry(&payload)
+    if err == nil {
+        err = entry.AssignFromDecrytedEntry(&payload)
+    }
+    
+    if err == nil {
+        if commEpoch.SigningCryptoKit != payload.Signer.CryptoKit {
+            err = plan.Errorf(nil, plan.ViolatesCommunityEpoch, "entry signed with unacceptable CryptoKitID: %d", payload.Signer.CryptoKit)
+            entry.ThrowMalformed(err)
+        }
+    }
+        
     if err != nil {
         return err
     }
 
-    /*
-    if ! bytes.Equal(entry.PayloadTxnSet.PayloadID, entryID) {
-        return plan.Errorf(err, plan.TxnNotConsistent, "txn payload ID was %v but actual is %v", entry.PayloadTxnSet.PayloadID, entryID)
-    }*/
 
 
     /* TODO: perform timestamp sanity checks
