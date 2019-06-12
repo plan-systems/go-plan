@@ -162,8 +162,12 @@ type Marshaller interface {
 	Marshal() ([]byte, error)
     MarshalTo([]byte) (int, error)
     Size() int
+}
 
+// Unmarshaller used to generalize deserialization
+type Unmarshaller interface {
 	Unmarshal([]byte) error
 }
+
 
 

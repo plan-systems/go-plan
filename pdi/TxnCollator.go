@@ -102,7 +102,7 @@ func RecycleTxnSet(inTxnSet *PayloadTxnSet) {
 
 // UnmarshalPayload re-assumbles the payload as necessary and unmarshals to the givne item
 func (txnSet *PayloadTxnSet) UnmarshalPayload(
-    outItem plan.Marshaller,
+    outItem plan.Unmarshaller,
 ) error {
 
     info := txnSet.Info()
