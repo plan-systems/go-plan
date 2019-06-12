@@ -727,12 +727,12 @@ func (St *Store) doScanJob(job ScanJob) error {
 
         var (
             scanDir int
-            stopKeyBuf [pdi.URIDSz]byte
-            seekKeyBuf [pdi.URIDSz]byte
+            stopKey pdi.URIDBlob
+            seekKey pdi.URIDBlob
         )
 
-        seekKey := pdi.URIDFromInfo(seekKeyBuf[:], job.TxnScan.TimestampStart, nil)
-        stopKey := pdi.URIDFromInfo(stopKeyBuf[:], job.TxnScan.TimestampStop,  nil)
+        seekKey.URID().SetFromTimeAndHash(job.TxnScan.TimestampStart, nil)
+        stopKey.URID().SetFromTimeAndHash(job.TxnScan.TimestampStop,  nil)
 
         if opts.Reverse {
             scanDir = -1
@@ -745,13 +745,16 @@ func (St *Store) doScanJob(job ScanJob) error {
         // Loop and send batches of txn IDs and interleave and txn updates.
         for  err == nil && (scanDir != 0 || job.TxnScan.SendTxnUpdates) {
 
+            // Track where the seek head started
+            curScanPos := seekKey.ExtractTime()
+
             if scanDir != 0 {
                 dbTxn := St.txnDB.NewTransaction(false)
                 itr := dbTxn.NewIterator(opts)
 
                 // Seek to the next key.  
                 // If we're resuming, step to the next key after where we left off
-                itr.Seek(seekKey)
+                itr.Seek(seekKey[:])
                 if  totalCount > 0 && itr.Valid() {
                     itr.Next()
                 }
@@ -766,7 +769,7 @@ func (St *Store) doScanJob(job ScanJob) error {
 
                     item := itr.Item()
                     itemKey := item.Key()
-                    if scanDir * bytes.Compare(itemKey, stopKey) > 0 {
+                    if scanDir * bytes.Compare(itemKey, stopKey[:]) > 0 {
                         scanDir = 0
                         break
                     }
@@ -804,20 +807,20 @@ func (St *Store) doScanJob(job ScanJob) error {
                         Statuses: statuses[:batchCount],
                     })
 
-                    copy(seekKey, URIDs[batchCount-1])
+                    copy(seekKey[:], URIDs[batchCount-1])
                 }
             }
 
             // At this point, we've sent a healthy batch of scanned txn IDs and we need to also send any pending txn status updates.
             {
                 batchCount := int32(0)
-                
-                // Do a full wait only if we're done with the txn scan (and only waiting for txn update msgs)
-                fullWait := scanDir == 0
+                fullWait := false
 
+                // Do a full wait only if we're done with the txn scan (and only waiting for txn update msgs)
                 wakeTimer := batchDelay.C
-                if fullWait {
+                if scanDir == 0 {
                     wakeTimer = heartbeat.C
+                    fullWait = true
                 }
 
                 // Flush out any queued heartbeats
@@ -832,16 +835,29 @@ func (St *Store) doScanJob(job ScanJob) error {
                     select {
                         case txnUpdate := <- job.txnUpdates:
                             if len(txnUpdate.URID) == pdi.URIDSz {
-                                copy(URIDs[batchCount], txnUpdate.URID)
-                                statuses[batchCount] = byte(txnUpdate.TxnStatus)
-                                batchCount++
+                                txnTime := txnUpdate.URID.ExtractTime()
 
-                                // Once we get one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
-                                if fullWait {
-                                    wakeTimer = batchDelay.C
-                                    fullWait = false
-                                    for len(wakeTimer) > 0 {
-                                        <-wakeTimer
+                                // Only proceed if the txn update is within the time region implied w/ the current scan position.
+                                // If the scan is complete, then the implied time region is complete, so we always proceed in that case.
+                                proceed := true
+                                switch scanDir {
+                                    case +1:
+                                        proceed = curScanPos >= txnTime
+                                    case -1:
+                                        proceed = txnTime >= curScanPos
+                                }
+                                if proceed {
+                                    copy(URIDs[batchCount], txnUpdate.URID)
+                                    statuses[batchCount] = byte(txnUpdate.TxnStatus)
+                                    batchCount++
+
+                                    // Once we get one, don't wait for the heartbeat to end -- only wait a short period for laggards and then send this batch.
+                                    if fullWait {
+                                        wakeTimer = batchDelay.C
+                                        fullWait = false
+                                        for len(wakeTimer) > 0 {
+                                            <-wakeTimer
+                                        }
                                     }
                                 }
                             }
