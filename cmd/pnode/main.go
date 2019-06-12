@@ -34,7 +34,7 @@ func main() {
 
     flag.Parse()
     flag.Set("logtostderr", "true")
-    flag.Set("v", "1")
+    flag.Set("v", "2")
 
     pn, err := NewPnode(basePath, *init)
     if err != nil {

@@ -59,7 +59,7 @@ func main() {
 
     flag.Parse()
     flag.Set("logtostderr", "true")
-    flag.Set("v", "1")
+    flag.Set("v", "2")
 
     ws, err := NewWorkstation(basePath, *init)
     if err != nil {
@@ -345,11 +345,15 @@ func (resp *msgResponder) fetchResponder(inMsgID uint32, inPop bool) *msgItem {
 func (resp *msgResponder) handleCommon(msg *repo.Msg) {
 
     switch msg.Op {
-                        
+
         case repo.MsgOp_CH_NEW_ENTRY_READY:
             if item := resp.fetchResponder(msg.ID, false); item != nil {
-                item.msg = msg
-                resp.clientSess.entriesToCommit <- item
+                if len(msg.Error) > 0 {
+                    // TODO: log err
+                } else {
+                    item.msg = msg
+                    resp.clientSess.entriesToCommit <- item
+                }
             } else {
                 resp.clientSess.Warnf("got CH_NEW_ENTRY_READY but msg ID %d not found", msg.ID)
             }
@@ -358,8 +362,8 @@ func (resp *msgResponder) handleCommon(msg *repo.Msg) {
             if item := resp.fetchResponder(msg.ID, true); item != nil {
                 if item.onCommitComplete != nil {
                     var err error
-                    if len(msg.BUF0) > 0 {
-                        err = plan.Error(nil, plan.FailedToCommitTxns, string(msg.BUF0))
+                    if len(msg.Error) > 0 {
+                        err = plan.Error(nil, plan.FailedToCommitTxns, msg.Error)
                     }
                     go item.onCommitComplete(msg.EntryInfo, msg.EntryState, err)
                 }
@@ -640,7 +644,6 @@ func (sess *ClientSess) openChannel(
     sessInfo, err := sess.repoClient.StartChannelSession(sess.flow.Ctx,
         &repo.ChInvocation{
             ChID: inChID,
-            Mode: repo.ChSessionMode_REPLAY_FROM_T0,
         })
 
     if err != nil {
@@ -677,8 +680,10 @@ func (sess *ClientSess) openChannel(
 
             switch msg.Op {
                 case repo.MsgOp_CH_ENTRY:
-                    fmt.Print(msg.BUF0)
-                case repo.MsgOp_CLOSE_CH_SESSION:
+                    t := time.Unix(msg.EntryInfo.EntryID().ExtractTime(), 0)
+                    fmt.Printf("ChSess#%d %s %s: %s\n", msg.ChSessID, msg.EntryInfo.EntryID().SuffixStr(), t.Format("Jan 02 3:04:05"), string(msg.BUF0))
+
+                case repo.MsgOp_CH_SESSION_CLOSED:
                     cs.CloseSession()
                 default:
                     cs.handleCommon(msg)
@@ -688,8 +693,6 @@ func (sess *ClientSess) openChannel(
 
     return cs, nil
 }
-
-
 
 func (cs *chSess) CloseSession() {
     if cs.isOpen {
@@ -701,7 +704,6 @@ func (cs *chSess) CloseSession() {
         }
     }
 }
-
 
 // OnCommitComplete is a callback when an entry's txn(s) have been merged or rejected by the repo.
 type OnCommitComplete func(
@@ -721,8 +723,7 @@ func (cs *chSess) PostContent(
     onCommitComplete OnCommitComplete,
 ) {
 
-    msg := cs.clientSess.newMsg(repo.MsgOp_CH_NEW_ENTRY_REQ)
-    msg.ChSessID = uint32(cs.chSessID)
+    msg := cs.newMsg(repo.MsgOp_CH_NEW_ENTRY_REQ)
     msg.EntryInfo = &pdi.EntryInfo{
         EntryOp: pdi.EntryOp_POST_CONTENT,
     }
@@ -734,7 +735,20 @@ func (cs *chSess) PostContent(
     })
 
     cs.clientSess.msgOutbox <- msg
+}
 
+
+func (cs *chSess) readerTest(
+) {
+
+    msg := cs.newMsg(repo.MsgOp_RESET_ENTRY_READER)
+    msg.FLAGS |= uint32(1) << byte(repo.ChSessionFlags_INCLUDE_BODY)
+    msg.FLAGS |= uint32(1) << byte(repo.ChSessionFlags_CONTENT_ENTRIES)
+    /*cs.putResponder(&msgItem{
+        msg: msg,
+    })*/
+
+    cs.clientSess.msgOutbox <- msg
 }
 
 
@@ -851,7 +865,9 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
     fmt.Println("ENTER TO START")
     reader.ReadString('\n')
 
-    N := 54
+    N := 1
+    //waiter := sync.WaitGroup
+    //time.Sleep(5 * time.Second)
 
     for i := 0; i < N; i++ {
         idx := i
@@ -864,9 +880,13 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
                 if err != nil {
                     fmt.Print("createNewChannel error: ", inErr)
                 } else {
-                    for i := 0; i < 100000; i++ {
-                        hello := fmt.Sprintf("hello, world!  This is msg #%d in channel %s", i, cs.ChID.Str())
-                        fmt.Println("====> ", hello)
+                    for i := 1; i < 100000; i++ {
+                        hello := fmt.Sprintf("Hello, Universe!  This is msg #%d in channel %s", i, cs.ChID.SuffixStr())
+                        //fmt.Println("=======> ", hello)
+
+                        if i == 6 {
+                            cs.readerTest()
+                        }
 
                         cs.PostContent(
                             []byte(hello),
@@ -882,7 +902,9 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
                                 }
                             },
                         )
-                        time.Sleep(10050 * time.Millisecond)
+                        time.Sleep(5050 * time.Millisecond)
+
+    
                     }
                 }
             })
@@ -890,6 +912,7 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
     }
 
 
+    reader.ReadString('\n')
 
     time.Sleep(1000 * time.Second)
 

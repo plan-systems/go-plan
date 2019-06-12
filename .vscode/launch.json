@@ -14,9 +14,10 @@
             "host": "127.0.0.1",
             "program": "${fileDirname}",
             "env": {},
-            "args": [],
-            //"args": [ "-datadir", "${env:HOME}/PLAN/pnode_test/", "-init" ],
-            //"args": [ "-init" ],
+            //"args": [ "-v", "1" ],
+            "args": [ "-init" ],
+            //"args": ["-init", "-seed", "/Users/aomeara/go/src/github.com/plan-systems/go-plan/cmd/pdi-local/Shrug Island.seed.plan"],
+            //"args": [ "-genesis", "/Users/aomeara/go/src/github.com/plan-systems/go-plan/cmd/pdi-local/Shrug Island.genesis.json" ],
             "showLog": true
         }
     ]

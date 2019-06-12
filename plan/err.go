@@ -186,6 +186,9 @@ const (
 	// FailedToProcessPDIHeader means decryption or unmarshalling of a PDI failed
 	FailedToProcessPDIHeader
 
+    // ViolatesCommunityEpoch means the given entry being processed is inconsistent or violates a constraint established in the governing community epoch.
+    ViolatesCommunityEpoch
+
 	// ChEntryIsMalformed means decryption or unmarshalling of a pdi channel entry failed
 	ChEntryIsMalformed
 

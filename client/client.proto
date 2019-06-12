@@ -7,6 +7,7 @@ package client;
 
 //import "github.com/plan-systems/go-plan/pdi/pdi.proto";
 //import "github.com/plan-systems/go-plan/plan/plan.proto";
+import "github.com/plan-systems/go-plan/plan/plan.proto";
 
 
 
@@ -30,3 +31,96 @@ service Workstation {
 }
 
 
+
+
+enum RgnPts {
+
+    ORIGIN_X                = 0;
+    ORIGIN_Y                = 1;
+    ORIGIN_Z                = 2;
+
+}
+
+
+
+
+enum RegionType {
+
+    // The first three points are the XYZ anchor point, and the 4th is the point gaussian radius (which is optional)
+    POINT                   = 0;
+
+    // The first three points are the XYZ anchor point and the the remaining are a sequence of UV cords that make a polygon.
+    // †he polygon assumed to be closed, so the last point shouldn't be a repeat of the first point.
+    POLYGON_2D              = 1;
+
+    // The first three points are the XYZ anchor point and the the remaining express a R3 spine.
+    SPLINE_2D               = 2;
+
+}
+
+
+message Region {
+
+                RegionType          type                        = 1;
+    repeated    double              pts                         = 2;
+
+    // Specifies the stroke style and color, etc
+                uint32              stroke_style_id             = 3;
+                uint32              fill_style_id               = 4;
+
+                plan.Link           link                        = 5;
+
+    repeated    Region              subs                        = 6;
+
+}
+
+/*
+
+// CordProtocol describes the kind of coordinate data in this data set.
+enum CordType {
+
+    // Each coordinate is 
+    GEO_LAT                     = 0;
+    GEO_LONG                    = 1;
+    GEO_ALTITUDE                = 2;
+    ANGULAR_DEGREES             = 3;
+    METERS                      = 4;
+    UTC_SECS                    = 7;
+
+    // Only channel entries with a matching author member ID and epoch
+    ABSTRACT_X                  = 3;
+    ABSTRACT_Y                  = 4;
+    ABSTRACT_Z                  = 5;
+    ABSTRACT_ANGLE              = 5;
+
+    // Units are in UTC seconds
+
+}
+
+
+message CordComponent {
+
+                CordType            cord_type                   = 1;
+                string              label                       = 2;
+
+
+}
+
+message LocationList {
+
+    // Place protocol (knowing which data sets inherently refer to the same place)
+    // e.g. 
+    //    earth/
+    //    drews-desktop/
+                string              place_protocol              = 1;
+
+    // Coordinate protocol (interoperability amongst data sets and determines UX look and feed)
+    // e.g. 
+    //    geo/lat-long
+    //    abstract/xyz
+                CordProtocol        cord_protocol               = 2;
+
+    
+}
+
+*/

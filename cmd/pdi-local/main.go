@@ -6,6 +6,7 @@ import (
     "flag"
     "os"
     //"path"
+    "fmt"
     "io/ioutil"
     "encoding/json"
     crand "crypto/rand"
@@ -27,7 +28,7 @@ func main() {
 
     flag.Parse()
     flag.Set("logtostderr", "true")
-    flag.Set("v", "1")
+    flag.Set("v", "2")
 
     sn, err := NewSnode(basePath, *init)
     if err != nil {
@@ -112,26 +113,15 @@ func loadGenesisInfo(inPathname string) (*CommunityGenesis, error) {
                 CommunityID: params.CommunityID,
                 CommunityName: params.CommunityName,
                 EntryHashKit: ski.HashKitID_Blake2b_256,
-                //EpochTID: plan.GenerateTID(nil),
+                //SigningCryptoKit: ski.CryptoKitID_ED25519,
+                SigningCryptoKit: ski.CryptoKitID_NaCl,
                 MaxMemberClockDelta: 120,
             },
         },
     }
 
-/*
-    // The genesis community epoch has a randomly generated ID (vs one set from the originating entry hash).
-    // Otherwise, there'd be no way for the genesis entry to be decrypted (since EntryCrypt must specify the epoch ID).
-    randTID := plan.TIDBlob{}
-    crand.Read(randTID[:])
-    genesis.GenesisSeed.CommunityEpoch.EpochTID = make([]byte, plan.TIDSz)
-    plan.TID(genesis.GenesisSeed.CommunityEpoch.EpochTID).SetTimeAndHash(plan.NowFS(), randTID[:])
-*/
-
     return genesis, nil
 }
-
-
-
 
 // CommunityGenesis is a helper for creating a new community
 type CommunityGenesis struct {
@@ -141,8 +131,6 @@ type CommunityGenesis struct {
  
     txnsToCommit        []pdi.RawTxn
 }
-
-
 
 /*****************************************************
 ** MemberHost (interface)
@@ -292,7 +280,7 @@ func (CG *CommunityGenesis) CreateNewCommunity(
                 buf, err = CG.MemberSeed.Marshal()
 
                 // TODO: encrypt this and put keys in it    
-                err = ioutil.WriteFile(CG.GenesisSeed.CommunityEpoch.CommunityName + ".plan.seed", buf, plan.DefaultFileMode)
+                err = ioutil.WriteFile(CG.GenesisSeed.CommunityEpoch.CommunityName + ".seed.plan", buf, plan.DefaultFileMode)
             }
         }
     }
@@ -310,19 +298,18 @@ type chEntry struct {
     whitelist       bool    
     chEpoch         *pdi.ChannelEpoch
     body            plan.Marshaller
-    chID            pdi.CommunityChID
+    assignTo        pdi.CommunityChID
     parentEntry     *chEntry
 }
 
 
 func (CG *CommunityGenesis) emitGenesisEntries(mc *client.MemberCrypto) error {
 
-
     genesisID := uint32(CG.MemberSeed.MemberEpoch.MemberID)
 
     newACC := &chEntry{
         whitelist: true,
-        chID: pdi.CommunityChID_RootACC,
+        assignTo: pdi.CommunityChID_RootACC,
         chEpoch: &pdi.ChannelEpoch{
             ChProtocol: repo.ChProtocolACC,
             DefaultAccessLevel: pdi.AccessLevel_READ_ACCESS,
@@ -334,46 +321,62 @@ func (CG *CommunityGenesis) emitGenesisEntries(mc *client.MemberCrypto) error {
 
     newMemberReg := &chEntry{
         whitelist: true,
-        chID: pdi.CommunityChID_MemberRegistry,
+        assignTo: pdi.CommunityChID_MemberRegistry,
         chEpoch: &pdi.ChannelEpoch{
             ChProtocol: repo.ChProtocolMemberRegistry,
+            ACC: CG.GenesisSeed.StorageEpoch.CommunityChID(pdi.CommunityChID_RootACC),
+        },
+    }
+
+    newEpochHistory := &chEntry{
+        whitelist: true,
+        assignTo: pdi.CommunityChID_EpochHistory,
+        chEpoch: &pdi.ChannelEpoch{
+            ChProtocol: repo.ChProtocolCommunityEpochs,
+            ACC: CG.GenesisSeed.StorageEpoch.CommunityChID(pdi.CommunityChID_RootACC),
         },
     }
 
     postMember := &chEntry{
         whitelist: true,
-        chID: pdi.CommunityChID_MemberRegistry,
         body: CG.MemberSeed.MemberEpoch,
         parentEntry: newMemberReg,
-    }
-
-    newEpochHistory := &chEntry{
-        whitelist: true,
-        chID: pdi.CommunityChID_EpochHistory,
-        chEpoch: &pdi.ChannelEpoch{
-            ChProtocol: repo.ChProtocolCommunityEpochs,
+        Info: pdi.EntryInfo{
+            ChannelID: CG.GenesisSeed.StorageEpoch.CommunityChID(pdi.CommunityChID_MemberRegistry),
         },
     }
 
+    newCommunityHome := &chEntry{
+        whitelist: true,
+        chEpoch: &pdi.ChannelEpoch{
+            ChProtocol: repo.ChProtocolSpace,
+            ACC: CG.GenesisSeed.StorageEpoch.CommunityChID(pdi.CommunityChID_RootACC),
+        },
+    }
+
+    // Do this last so it contains all TIDs resulting from the above
     postGenesisEpoch := &chEntry{
         whitelist: true,
-        chID: pdi.CommunityChID_EpochHistory,
         body: CG.GenesisSeed.CommunityEpoch,
         parentEntry: newEpochHistory,
+        Info: pdi.EntryInfo{
+            ChannelID: CG.GenesisSeed.StorageEpoch.CommunityChID(pdi.CommunityChID_EpochHistory),
+        },
     }
 
     // We do the post CommunityEpoch first so that the entry ID genrated (now the community epoch ID), can be used for subsequent entries
     entries := []*chEntry{
         newACC,
         newMemberReg,
-        postMember,
         newEpochHistory,
+        postMember,
+        newCommunityHome,
         postGenesisEpoch,
     }
 
     nowFS := plan.NowFS()
 
-    for _, entry := range entries {
+    for i, entry := range entries {
 
         entry.Info.TIDs = make([]byte, pdi.EntryTID_NormalNumTIDs * plan.TIDSz)
         entry.Info.EntryID().SetTimeFS(nowFS)
@@ -394,7 +397,6 @@ func (CG *CommunityGenesis) emitGenesisEntries(mc *client.MemberCrypto) error {
             body, _ = entry.chEpoch.Marshal()
         } else {
             entry.Info.EntryOp = pdi.EntryOp_POST_CONTENT
-            entry.Info.ChannelID = CG.GenesisSeed.StorageEpoch.CommunityChID(entry.chID)
 
             body, _ = entry.body.Marshal()
         }
@@ -407,12 +409,20 @@ func (CG *CommunityGenesis) emitGenesisEntries(mc *client.MemberCrypto) error {
         entryID := entry.Info.EntryID()
 
         // Set the channel IDs of the newly generated community channels
-        if entry.chEpoch != nil {
-            CG.GenesisSeed.StorageEpoch.CommunityChID(entry.chID).AssignFromTID(entryID)
+        if i < 3 {
+            fmt.Printf("Created %s: %s\n", pdi.CommunityChID_name[int32(entry.assignTo)], entryID.Str())
+            CG.GenesisSeed.StorageEpoch.CommunityChID(entry.assignTo).AssignFromTID(entryID)
         }
 
         if entry.whitelist {
             CG.GenesisSeed.StorageEpoch.GenesisEntryIDs = append(CG.GenesisSeed.StorageEpoch.GenesisEntryIDs, entryID)
+        }
+
+        if entry == newCommunityHome {
+            CG.GenesisSeed.CommunityEpoch.Links = append(CG.GenesisSeed.CommunityEpoch.Links, &plan.Link{
+                Label: "home",
+                Uri: fmt.Sprintf("/plan/./ch/%s", entryID.Str()),
+            })
         }
 
         for _, seg := range txns.Segs {

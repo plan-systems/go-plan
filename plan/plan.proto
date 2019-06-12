@@ -59,6 +59,25 @@ message Block {
 }
 
 
+// Link is an opaque URI most comparable to a URL, but it's "multiaddr" style, rather than protocol://URI.
+message Link {
+
+    // THis is an optional label that describes this link or serves as an identifying key (and is follows a naming convention so this link can be identified by label)
+    // This value is typically not seen by humans.
+                string              label                       = 1;
+
+    // This describes this link in a meaningful way
+                string              desc                        = 2;
+
+    // E.g.
+    //    /plan/[(CommunityID)|.]/[ch|member|epoch]/(TID)
+    //    /plan/[(CommunityID)|.]/cfi/(hash)
+    //    /http/plan-systems.org
+                string              uri                         = 3;
+
+}
+
+
 enum ValType {
     NONE                    = 0;
     INT                     = 1;

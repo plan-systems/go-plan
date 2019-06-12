@@ -26,6 +26,10 @@ import (
 func init() {
 
     klog.InitFlags(nil)
+    klog.SetFormatter(&klog.FmtConstWidth{
+        FileNameCharWidth: 20,
+        UseColor: true,
+    })
 
 }
 
@@ -54,7 +58,7 @@ func (chID ChID) AssignFromTID(tid TID) {
     copy(chID, tid[TIDSz - ChIDSz:])
 }
 
-// TID is a convenience function that returns the a TID that points to this TIDBlob.
+// TID is a convenience function that returns the TID contained within this TIDBlob.
 func (tid *TIDBlob) TID() TID {
     return tid[:]
 }
@@ -188,6 +192,17 @@ func (tid TID) SelectEarlier(inTime TimeFS) bool {
     }
 
     return false
+}
+
+// CopyNext copies the given TID and increments it by 1, typically useful for seeking the next entry after a given one.
+func (tid TID) CopyNext(inTID TID) {
+    copy(tid, inTID)
+    for j := len(tid) - 1; j > 0; j-- {
+        tid[j]++
+        if tid[j] > 0 {
+            break
+        }
+    }
 }
 
 // SmartMarshal marshals the given item to the given buffer.  If there is not enough space 
@@ -396,9 +411,157 @@ func (F *Flow) LogErr(inErr error, inDesc string) {
     }
 }
 
+// ContextWorker is used by Context as the model of subcontrol.
+type ContextWorker interface {
+
+    CtxInternalStart() error
+    CtxInternalStop()
+}
+
+// Context is a service helper.
+type Context struct {
+    Logger
+
+    worker          ContextWorker
+
+    Ctx             context.Context
+    ctxCancel       context.CancelFunc
+
+    StopComplete    sync.WaitGroup
+    stopMutex       sync.Mutex
+    stopReason      string
+
+    FaultLog        []error
+    FaultLimit      int
+
+}
+
+// CtxStart blocks until this Context is started up or stopped (if an err is returned).
+func (C *Context) CtxStart(
+    inParentCtx context.Context,
+    inDesc      string,
+    inWorker    ContextWorker,              
+) error {
+
+    C.SetLogLabel(inDesc)
+    C.worker = inWorker
+
+    C.StopComplete.Wait()
+    C.StopComplete.Add(1)
+
+    C.FaultLimit = 3
+    C.Ctx, C.ctxCancel = context.WithCancel(inParentCtx)
+
+    err := C.worker.CtxInternalStart()
+    if err != nil {
+        C.Errorf("CtxStart failed: %v", err)
+        C.CtxInitiateStop("CtxStart failed")
+    }
+
+    go func() {
+
+        select {
+            case <- C.Ctx.Done():
+        }
+
+        C.Info(2, "plan.Context done: ", C.Ctx.Err())
+
+        C.worker.CtxInternalStop()
+  
+        C.stopMutex.Lock()
+        C.ctxCancel = nil
+        C.stopMutex.Unlock()
+
+        C.Info(2, "plan.Context stopped")
+
+        C.StopComplete.Done()
+    }()
 
 
+    if err != nil {
+        C.StopComplete.Wait()
+    }
 
+    return err
+}
+
+
+// CtxStatus returns an error if this Context is shut down or shutting down.
+//
+// THREADSAFE
+func (C *Context) CtxStatus() error {
+
+    if C.Ctx == nil {
+        return Error(nil, ServiceShutdown, "context not running") 
+    }
+
+    select {
+        case <-C.Ctx.Done():
+            return C.Ctx.Err()
+        default:
+            // still running baby!
+    }
+
+    return nil
+}
+
+
+// CtxRunning returns true if this Context has not yet been shutdown.
+//
+// THREADSAFE
+func (C *Context) CtxRunning() bool {
+
+    if C.Ctx == nil {
+        return false 
+    }
+
+    select {
+        case <-C.Ctx.Done():
+            return false
+        default:
+    }
+
+    return true
+}
+
+// CtxInitiateStop initiates a polite shutdown of this Context, returning immediately after.
+//
+// If Shutdown() has already been called, behavior is consistent but inReason will be dropped.
+//
+// THREADSAFE
+func (C *Context) CtxInitiateStop(
+    inReason string,
+) bool {
+
+    initiated := false
+
+    C.stopMutex.Lock()
+    if C.CtxRunning() && C.ctxCancel != nil {
+        C.stopReason = inReason
+        C.Infof(2, "initiating CtxStop (%s)", C.stopReason)
+        C.ctxCancel()
+        C.ctxCancel = nil
+        initiated = true
+    }
+    C.stopMutex.Unlock()
+
+    return initiated
+}
+
+// CtxStop calls InitiateShutdown() and blocks until complete.
+//
+// Retruns true if this call initiated the shutdown (vs another cause)
+//
+// THREADSAFE
+func (C *Context) CtxStop(
+    inReason string,
+) bool {
+    initiated := C.CtxInitiateStop(inReason)
+
+    C.StopComplete.Wait()
+
+    return initiated
+}
 
 
 // ClientSession represents a client session over gRPC
@@ -751,6 +914,9 @@ func (l *Logger) Infof(inV klog.Level, inFormat string, args ...interface{}) {
 
 // Warn logs to the WARNING and INFO logs.
 // Arguments are handled in the manner of fmt.Print(); a newline is appended if missing.
+//
+// Warnings are reserved for situations that indicate an inconsistency or an error that 
+// won't result in a departure of specifications, correctness, or expected behavior. 
 func (l *Logger) Warn(args ...interface{}) {
     {
         if l.hasPrefix { 
@@ -764,8 +930,7 @@ func (l *Logger) Warn(args ...interface{}) {
 // Warnf logs to the WARNING and INFO logs.
 // Arguments are handled in the manner of fmt.Printf(); a newline is appended if missing.
 //
-// Warnings are reserved for situations that indicate an inconsistency or an error that 
-// won't result in a departure of specifications, correctness, or expected behavior. 
+// See comments above for Warn() for guidelines on errors vs warnings.
 func (l *Logger) Warnf(inFormat string, args ...interface{}) {
     {
         if l.hasPrefix { 
@@ -776,12 +941,26 @@ func (l *Logger) Warnf(inFormat string, args ...interface{}) {
     }
 }
 
-// Errorf logs to the ERROR, WARNING, and INFO logs.
-// Arguments are handled in the manner of fmt.Print; a newline is appended if missing.
+// Error logs to the ERROR, WARNING, and INFO logs.
+// Arguments are handled in the manner of fmt.Print(); a newline is appended if missing.
 //
 // Errors are reserved for situations that indicate an implementation deficiency, a
 // corruption of data or resources, or an issue that if not addressed could spiral into deeper issues.
 // Logging an error reflects that correctness or expected behavior is either broken or under threat.
+func (l *Logger) Error(args ...interface{}) {
+    {
+        if l.hasPrefix { 
+            klog.ErrorDepth(1, l.logPrefix, fmt.Sprint(args...))
+        } else {
+            klog.ErrorDepth(1, args...)
+        }
+    }
+}
+
+// Errorf logs to the ERROR, WARNING, and INFO logs.
+// Arguments are handled in the manner of fmt.Print; a newline is appended if missing.
+//
+// See comments above for Error() for guidelines on errors vs warnings.
 func (l *Logger) Errorf(inFormat string, args ...interface{}) {
     {
         if l.hasPrefix { 
@@ -804,18 +983,55 @@ func (l *Logger) Fatalf(inFormat string, args ...interface{}) {
     }
 }
 
-
-var gLogger = Logger{}
-
 // Fatalf -- see Fatalf (above)
 func Fatalf(inFormat string, args ...interface{}) {
     gLogger.Fatalf(inFormat, args...)
 }
 
+var gLogger = Logger{}
+
+// Buf is a flexible buffer designed for reuse.
+type Buf struct {
+    Unmarshaller
+
+    Bytes []byte
+}
+
+// Unmarshal effectively copies the src buffer.
+func (buf *Buf) Unmarshal(inSrc []byte) error {
+    N := len(inSrc)
+    if cap(buf.Bytes) < N {
+        allocSz := ((N+127)>>7)<<7
+        buf.Bytes = make([]byte, N, allocSz)
+    } else {
+        buf.Bytes = buf.Bytes[:N]
+    }
+    copy(buf.Bytes, inSrc)
+
+    return nil
+}
 
 
+/*
+type SessionList struct {
+
+    orderMatters bool
+    items        []interface{}
+    itemsMutex   sync.Mutex
+}
 
 
+   N := len(mgr.List)
+    for i := 0; i < N; i++ {
+        if mgr.List[i] == inSess {
+            N--
+            mgr.List[i] = mgr.List[N]
+            mgr.List[N] = nil
+            mgr.List = mgr.List[:N]
+            break
+        }
+    }
+*/
 
 
 /*****************************************************

@@ -94,10 +94,6 @@ message ChInvocation {
 
                 bytes               chID                        = 1;
 
-                ChSessionMode       mode                        = 2;
-                uint32              flags                       = 3;
-                int64               T0                          = 4;
-
                 string              ch_adapter_desc             = 10;
 
 }
@@ -121,14 +117,6 @@ enum ChSessionFlags {
 }
 
 
-enum ChSessionMode {
-
-    // The ChSession will seek to T0 and start returning a stream of Msgs, each reflecting a live entry in the channel.
-    REPLAY_FROM_T0              = 0;
-
-}
-
-
 
 
 enum MsgOp {
@@ -136,47 +124,68 @@ enum MsgOp {
     // This Msg functionally does nothing but serves as a heartbeat to indicate the channel session is open and operating normally. 
     OK                          = 0;
 
-    /*****************************************************
-    ** Msgs to/from the MemberSession (sessID == 0)
+   /*****************************************************
+    ** Client -> MemberSession (sessID == 0)
     **/
 
-    // Sent to the client following OpenMemberSession.
-    MEMBER_SESSION_READY        = 1;
-
-    // Sent in response to a CH_NEW_ENTRY_READY (to the repo)
-    // Msg.ITEMS is a list of raw txns of an entry ready to be committed.
-    COMMIT_TXNS                 = 2;
-
-    // Sent in response to a CH_NEW_ENTRY_COMMIT (to the client)
-    // msg.EntryInfo and msg EntryState contain info associated with the given txn (may be nil)
-    // BUF0 contains is a UTF8 striing containing any error message (len() == 0 means the txns were accepted)
-    COMMIT_COMPLETE             = 3;
-
     // Msg.BUF0 is a ski.KeyTome protobuf that contains community keys that should be added to the member session on the repo side.
-    ADD_COMMUNITY_KEYS          = 4;
+    ADD_COMMUNITY_KEYS          = 1;
 
     // When the repo sees this op, it will retain the community keyring up to the given unix timestamp in T0.
     // If the community keyring should not be retained, set T0 to 0 (or any timestamp in the past),
-    RETAIN_COMMUNITY_KEYS       = 5;
+    RETAIN_COMMUNITY_KEYS       = 2;
 
-    RESERVED_6                  = 6;
-    RESERVED_7                  = 7;
+    // Sent in response to a CH_NEW_ENTRY_READY (to the repo)
+    // Msg.ITEMS is a list of raw txns of an entry ready to be committed.
+    COMMIT_TXNS                 = 3;
+
+    RESERVED_4                  = 4;
+    RESERVED_5                  = 5;
+
+   /*****************************************************
+    ** MemberSession (sessID == 0) -> Client
+    **/
+
+    // Sent to the client following OpenMemberSession.
+    MEMBER_SESSION_READY        = 6;
+
+    // Sent in response to a CH_NEW_ENTRY_COMMIT (to the client)
+    // msg.EntryInfo and msg EntryState contain info associated with the given txn (may be nil)
+    COMMIT_COMPLETE             = 7;
+
     RESERVED_8                  = 8;
     RESERVED_9                  = 9;
 
    /*****************************************************
-    ** Msgs to/from ChSessions (sessID > 0)
+    ** Client -> ChSession (sessID > 0)
     **/
 
     // Closes the session associated with the session ID.  Any subsequent Msgs addressed to this session ID will be ignored/dropped.
     CLOSE_CH_SESSION            = 10;
 
-    // The msg's EntryInfo is set and reflects an entry in the channel and BUF0 is the body.
-    CH_ENTRY                    = 11;
-
     // Sent by the client when the user wishes to author a new content entry in the channel assocated with this sessID.
     // The msg's EntryInfo contains basic info about the entry to build from.
-    CH_NEW_ENTRY_REQ            = 12;
+    CH_NEW_ENTRY_REQ            = 11;
+
+    // The ChSession seek to T0 and start returning a stream of CH_ENTRY msgs, effectively "replaying" the channel.
+    // The param FLAGS contains number of ChSessionFlags
+    RESET_ENTRY_READER          = 12;
+
+    RESERVED_13                 = 13;
+    RESERVED_14                 = 14;
+
+   /*****************************************************
+    ** ChSession -> Client
+    **/
+
+    // Sent to the client when the channel is closed
+    CH_SESSION_CLOSED           = 15;
+
+    // The msg's EntryInfo is set and reflects an entry in the channel and BUF0 is the body.
+    CH_ENTRY                    = 16;
+
+    // Sent when an entry changes liveness
+    CH_ENTRY_UPDATE             = 17;
 
     // Sent in response to a CH_NEW_ENTRY_REQ or CH_GENESIS_REQ to the client.
     // The msg's EntryInfo is ready to be encoded and encrypted with the body.
@@ -186,10 +195,10 @@ enum MsgOp {
     //   3) Marshal the encrypted payload and community epoch ID into the final EntryCrypt.
     //   4) Encode the EntryCrypt into StorageProvider txns
     //   5) Submit the resulting txn(s) to the repo via COMMIT_TXNS.
-    CH_NEW_ENTRY_READY          = 13;
+    CH_NEW_ENTRY_READY          = 18;
 
-
-
+    RESERVED_19                 = 19;
+    RESERVED_20                 = 20;
 }
 
 
@@ -213,10 +222,14 @@ message Msg {
                 pdi.EntryInfo       entry_info                  = 10;
                 EntryState          entry_state                 = 11;
 
+    // If set, the op failed for the given reason
+                string              error                       = 12;
+
     // Params for the given MsgOp
                 int64               T0                          = 20;
-                bytes               BUF0                        = 21;
-    repeated    bytes               ITEMS                       = 22;
+                uint32              FLAGS                       = 21;
+                bytes               BUF0                        = 22;
+    repeated    bytes               ITEMS                       = 23;
 
 }
 
@@ -327,7 +340,7 @@ message EntryState {
 
                 uint32              flags                       = 1;       // Union of ChEntryFlags
 
-                EntryStatus       status                      = 2;
+                EntryStatus         status                      = 2;
 
     // IF len() == 0, the implied body TID is the same as the entry info's TID (done to save space)
     // When entry 1 is superseded by entry 2, entry 2's TID appears in entry 1's EntryState.
@@ -373,14 +386,6 @@ message ChStoreState {
 
 
 
-
-
-message MemberEpochRefList {
-    repeated    uint32              memberIDs                   = 1;
-    repeated    uint32              epochIDs                    = 2;
-}
-
-
 message IntSet {
 
     repeated    uint64              ints                        = 1;
@@ -401,55 +406,3 @@ message ChDependency {
 }
 
 
-
-
-/*
-
-// CordProtocol describes the kind of coordinate data in this data set.
-enum CordType {
-
-    // Each coordinate is 
-    GEO_LAT                     = 0;
-    GEO_LONG                    = 1;
-    GEO_ALTITUDE                = 2;
-    ANGULAR_DEGREES             = 3;
-    METERS                      = 4;
-    UTC_SECS                    = 7;
-
-    // Only channel entries with a matching author member ID and epoch
-    ABSTRACT_X                  = 3;
-    ABSTRACT_Y                  = 4;
-    ABSTRACT_Z                  = 5;
-    ABSTRACT_ANGLE              = 5;
-
-    // Units are in UTC seconds
-
-}
-
-
-message CordComponent {
-
-                CordType            cord_type                   = 1;
-                string              label                       = 2;
-
-
-}
-
-message LocationList {
-
-    // Place protocol (knowing which data sets inherently refer to the same place)
-    // e.g. 
-    //    earth/
-    //    drews-desktop/
-                string              place_protocol              = 1;
-
-    // Coordinate protocol (interoperability amongst data sets and determines UX look and feed)
-    // e.g. 
-    //    geo/lat-long
-    //    abstract/xyz
-                CordProtocol        cord_protocol               = 2;
-
-    
-}
-
-*/
