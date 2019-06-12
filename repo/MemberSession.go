@@ -7,7 +7,7 @@ import (
     //"io/ioutil"
     //"strings"
     "sync"
-    "time"
+    //"time"
     //"sort"
     //"encoding/hex"
     //"encoding/json"
@@ -314,12 +314,9 @@ func (ms *MemberSession) onInternalStartup() error {
     ms.ChSessions = make(map[ChSessID]*ChSession)
 
     var err error
-
-
     if err = os.MkdirAll(ms.WorkstationPath, plan.DefaultFileMode); err != nil {
         return err
     }
-
 
     // Create a heap-only key hive used for the community keyring
     if ms.commCrypto.Keys, err = hive.StartSession("", "", nil); err != nil {
@@ -349,10 +346,8 @@ func (ms *MemberSession) onInternalStartup() error {
                 }
             }
         }
-// TODO: end comm keys session
 
         ms.sessMgr.detachSession(ms)
-
         ms.sessMgr.CR.unregisterCommCrypto(ms.commCrypto)
 
         ms.flow.ShutdownComplete.Done()
@@ -367,24 +362,20 @@ func (ms *MemberSession) onInternalShutdown() {
 
     // Shutdown all channel sessions
     {
+        waiter := sync.WaitGroup{}
+
         // First, cause end all client ch sessions
         ms.ChSessionsMutex.RLock()
+        waiter.Add(len(ms.ChSessions))
         for _, cs := range ms.ChSessions {
-            cs.CloseSession(ms.flow.ShutdownReason)
+            go func(cs *ChSession) {
+                cs.CtxStop(ms.flow.ShutdownReason)
+                waiter.Done()
+            }(cs)
         }
         ms.ChSessionsMutex.RUnlock()
 
-        for {
-            time.Sleep(10 * time.Millisecond)
-
-            ms.ChSessionsMutex.RLock()
-            N := len(ms.ChSessions)
-            ms.ChSessionsMutex.RUnlock()
-
-            if N == 0 {
-                break
-            }
-        }
+        waiter.Wait()
     }    
 
     // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
@@ -403,12 +394,6 @@ func (ms *MemberSession) detachChSession(cs *ChSession) {
 func (ms *MemberSession) EndSession(inReason string) {
     ms.flow.Shutdown(inReason)
 }
-
-
-
-
-
-
 
 
 
@@ -432,15 +417,11 @@ func (ms *MemberSession) StartChannelSession(
 
     cs, err := ms.sessMgr.CR.chMgr.StartChannelSession(ms, inInvocation)
     if err != nil {
-        ms.Infof(1, "error opening channel session: %v", err)
+        ms.Infof(1, "channel session failed to start: %v", err)
         return nil, err
     }
 
-    if cs.ChAgent != nil {
-        cs.MemberSession.Infof(1, "channel session opened on %v (ID %d)", cs.ChAgent.Store().ChID().SuffixStr(), cs.ChSessID)
-    } else {
-        cs.MemberSession.Infof(1, "channel genesis (ID %d)", cs.ChSessID)
-    }
+    cs.MemberSession.Infof(1, "channel session opened on ch %v (ChSessID %d)", cs.Agent.Store().ChID().SuffixStr(), cs.ChSessID)
 
     ms.ChSessionsMutex.Lock()
     ms.ChSessions[cs.ChSessID] = cs
@@ -471,7 +452,7 @@ func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
 
                 if cs == nil {
                     ms.Warnf("channel session %d not found", chSessID)
-                } else if cs.isOpen {
+                } else if cs.CtxRunning() {
                     cs.msgInbox <- msg
                 }
             }
@@ -517,7 +498,7 @@ func (ms *MemberSession) handleTopLevelMsgs(msg *Msg) bool {
                     msg.EntryState = entry.State.Clone()
                 }
                 if inErr != nil {
-                    msg.BUF0 = append(msg.BUF0[:0], []byte(inErr.Error())...)
+                    msg.Error = inErr.Error()
                 }
                 ms.msgOutbox <- msg
             }

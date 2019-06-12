@@ -28,6 +28,7 @@ import (
 
 )
 
+// ChSessID identifies a sub session within/under MemberSession, the obj associated with a client that is connected.
 type ChSessID uint32
 
 // ChMgr is the top level interface for a community's channels.
@@ -711,7 +712,7 @@ func (chMgr *ChMgr) loadChannel(
 
     if ! inAutoCreate {
         if _, err := os.Stat(opts.Dir); os.IsNotExist(err) {
-            return nil, plan.Error(nil, plan.ChannelNotFound, "channel not found")
+            return nil, plan.Errorf(nil, plan.ChannelNotFound, "channel %v not found", inChID.Str())
         }
     }
 
@@ -871,7 +872,6 @@ func (chMgr *ChMgr) StartChannelSession(
     inInvocation *ChInvocation, 
 ) (*ChSession, error) {
 
- 
     ch, err := chMgr.FetchChannel(inInvocation.ChID)
     if err != nil {
         return nil, err
@@ -880,64 +880,58 @@ func (chMgr *ChMgr) StartChannelSession(
     cs := &ChSession{
         MemberSession: inMemberSession,
         ChSessID: ChSessID(atomic.AddUint32(&chMgr.prevSessID, 1)),
-        ChAgent: ch,
-        msgInbox: make(chan *Msg, 3),
-        isOpen: true,
-        //OnComplete: make(chan error),
+        Agent: ch,
+        Invocation: *inInvocation,
+        msgInbox: make(chan *Msg, 1),
+        entryUpdates: make(chan plan.TIDBlob, 1),
+        readerCmdQueue: make(chan uint32, 1),
     }
 
-
-    err = cs.startup(inInvocation)
-    if err != nil {
-        return nil, err
-    }
-    
-    cs.SetLogLabel(fmt.Sprint("ChSess_", cs.ChSessID))
+    err = cs.CtxStart(
+        inMemberSession.flow.Ctx,
+        fmt.Sprint("ChSess_", cs.ChSessID),
+        cs,
+    )
  
     return cs, err
 }
 
 
-
+// ChSession instances correspond to client rpc calls to StartChannelSession().
+//
+// A ChSession is the bridge between a ChAgent and a MemberSession
 type ChSession struct {
-    plan.Logger
+    plan.Context
+    //plan.ContextWorker
 
-    ChSessID             ChSessID
+    ChSessID            ChSessID
 
+    // Parent member session
     MemberSession       *MemberSession
 
-    ChAgent             ChAgent
+    Invocation          ChInvocation
 
-    //OnComplete          chan error
-    //isComplete          bool
+    Agent               ChAgent
 
-    isOpen              bool
-
-    // The currently open pipes 
-    //Pipe                pservice.CommunityRepo_OpenMsgPipeServer
-
-    // Close the Inbox to end the channel session.
-    // When closure is complete, the sessions msg outbox will be closed.
     msgInbox            chan *Msg
- 
 
+    readerCmdQueue      chan uint32
+
+
+    // EntryTIDs that have changed liveness.
+    entryUpdates        chan plan.TIDBlob  
 }
 
+func (cs *ChSession) CtxInternalStart() error {
 
-func (cs *ChSession) startup(
-    inInvocation *ChInvocation,
-) error {
+    cs.Agent.Store().attachChSession(cs)
 
+    cs.StopComplete.Add(1)
     go func() {
+        for cs.CtxRunning() {
 
-        var (
-            //ctxErr error
-        )
-
-        for { 
             msg := <- cs.msgInbox
             if msg == nil {
-                cs.MemberSession.detachChSession(cs)
                 break
             }
 
@@ -945,26 +939,44 @@ func (cs *ChSession) startup(
                 case MsgOp_CH_NEW_ENTRY_REQ:
                     cs.AuthorNewEntry(msg)
                 case MsgOp_CLOSE_CH_SESSION:
-                    cs.CloseSession("closed by client")
+                    cs.CtxInitiateStop("closed by client")
+                case MsgOp_RESET_ENTRY_READER:
+                    cs.readerCmdQueue <- msg.FLAGS
             }
         }
+
+        cs.MemberSession.detachChSession(cs)
+        cs.Agent.Store().detachChSession(cs)
+
+        close(cs.entryUpdates)
+
+        cs.StopComplete.Done()
+    }()
+
+    cs.StopComplete.Add(1)
+    go func() {
+        chSessionEntryReader(cs)
+        cs.StopComplete.Done()
     }()
 
     return nil
-} 
+}
 
+func (cs *ChSession) CtxInternalStop() {
 
-func (cs *ChSession) CloseSession(inReason string) {
-    if cs.isOpen {
-        cs.isOpen = false
-        close(cs.msgInbox)
+    if cs.MemberSession.flow.IsRunning() {
+        cs.MemberSession.msgOutbox <- &Msg{
+            Op: MsgOp_CH_SESSION_CLOSED,
+            ChSessID: uint32(cs.ChSessID),
+        }
     }
+    close(cs.msgInbox)
 }
 
 
 func (cs *ChSession) AuthorNewEntry(
     msg *Msg,
-) error {
+) {
 
     var (
         err error
@@ -977,7 +989,7 @@ func (cs *ChSession) AuthorNewEntry(
     info.AuthorSig = nil
     copy(info.AuthorEntryID(), cs.MemberSession.MemberEpoch.EpochTID)
 
-    chSt = cs.ChAgent.Store()
+    chSt = cs.Agent.Store()
     info.ChannelID = append(info.ChannelID[:0], chSt.ChID()...)
 
     err = chSt.FetchAuthoringTIDs(
@@ -986,10 +998,14 @@ func (cs *ChSession) AuthorNewEntry(
     )
 
     msg.Op = MsgOp_CH_NEW_ENTRY_READY
+
+    // TODO: on err, return msg w/ err, etc.
+    if err != nil {
+        msg.Error = err.Error()
+    }
     //msg.BUF0 = plan.SmartMarshal(&info, msg.BUF0)
     cs.MemberSession.msgOutbox <- msg
 
-    return err
 }
 
 

@@ -88,7 +88,6 @@ const (
 )
 
 
-
 // ChAgent is a protocol-specific implementation built to interact with a ChStore
 type ChAgent interface {
 
@@ -237,7 +236,8 @@ type ChStore struct {
     State                   ChStoreState
     
     // A Ch store needs to have each active channel sessions available so changes/notifications can be sent out.
-    ChSessions              []*ChSession
+    chSessions              []*ChSession
+    chSessionsMutex         sync.RWMutex 
 
     // ChEntry keyed by entry URID
     db                     *badger.DB
@@ -275,11 +275,40 @@ type ChStore struct {
 }
 
 
+func (chSt *ChStore) attachChSession(inChSess *ChSession) {
+    
+    chSt.chSessionsMutex.Lock()
+    chSt.chSessions = append(chSt.chSessions, inChSess)
+    chSt.chSessionsMutex.Unlock()
+}
+
+
+func (chSt *ChStore) detachChSession(inChSess *ChSession) {
+    
+    chSt.chSessionsMutex.Lock()
+    found := -1
+    for i, cs := range chSt.chSessions {
+        if cs == inChSess {
+            found = i
+            break
+        }
+    }
+    if found >= 0 {
+        N := len(chSt.chSessions)
+        copy(chSt.chSessions[found:], chSt.chSessions[found+1:N])
+        N--
+        chSt.chSessions[N] = nil
+        chSt.chSessions = chSt.chSessions[:N]
+    }
+    chSt.chSessionsMutex.Unlock()
+}
+
+
 // Log is a convenience function to log errors.  
 // This function has no effect if inErr == nil.
 func (chSt *ChStore) Log(inErr error, inMsg string) {
     if inErr != nil {
-        chSt.chMgr.flow.LogErr(inErr, inMsg)
+        chSt.Error(inMsg, ": ", inErr)
     }
 }
 
@@ -438,7 +467,9 @@ func (chSt *ChStore) loadEntry(
             if err == nil {
                 err = item.Value(loadBody)
             }
-            chSt.Log(err, "loading entry body")
+            if err != nil {
+                chSt.Errorf("entry %v load body error: %v", inEntryID.SuffixStr(), err)  
+            }
         }
     }
 
@@ -457,10 +488,6 @@ func (chSt *ChStore) loadNextEntry(
         entryKey plan.TIDBlob
     )
 
-    entry.stateStatus = partNotLoaded
-    entry.bodyStatus  = partNotLoaded
-    entry.Body = entry.Body[:0]
-
     chTxn := inTxn
     if chTxn == nil {
         chTxn = chSt.db.NewTransaction(false)
@@ -472,9 +499,35 @@ func (chSt *ChStore) loadNextEntry(
         return false, nil
     }
 
+    err := chSt.loadEntryHL(
+        inTxn,
+        entryKey[:], 
+        entry)
+
+    return true, err
+}
+
+
+
+func (chSt *ChStore) loadEntryHL(
+    inTxn *badger.Txn,
+    inEntryID plan.TID,
+    entry *chEntry,
+) error {
+
+    entry.stateStatus = partNotLoaded
+    entry.bodyStatus  = partNotLoaded
+    entry.Body = entry.Body[:0]
+
+    chTxn := inTxn
+    if chTxn == nil {
+        chTxn = chSt.db.NewTransaction(false)
+        defer chTxn.Discard()
+    }
+
     entry.Reset()
     err := chSt.loadEntry(
-        entryKey[:], 
+        inEntryID, 
         chTxn,
         &entry.Info,
         &entry.State,
@@ -487,12 +540,9 @@ func (chSt *ChStore) loadNextEntry(
     entry.StatePrev = entry.State
     entry.stateStatus = partLoaded
 
-    return true, err
+    return err
 
 }
-
-
-
 
 
 func (chSt *ChStore) seekToNextEntry(
@@ -509,13 +559,7 @@ func (chSt *ChStore) seekToNextEntry(
 
     // Increment to the the next entry
     if len(inPrevTID) >= 8 && bytes.Compare(inPrevTID, chEntryStart) > 0 {
-        copy(outEntryTID, inPrevTID)
-        for j := plan.TIDSz - 1; j > 0; j-- {
-            outEntryTID[j]++
-            if outEntryTID[j] > 0 {
-                break
-            }
-        }
+        outEntryTID.CopyNext(inPrevTID)
     } else {
         copy(outEntryTID, chEntryStart)
     }
@@ -534,7 +578,6 @@ func (chSt *ChStore) seekToNextEntry(
     return true
 
 }
-
 
 
 // loadNextEntryToValidate reads the given entry from this ChStore that requires validation
@@ -557,7 +600,7 @@ func (chSt *ChStore) loadNextEntryToValidate(entry *chEntry) bool {
 
 func (chSt *ChStore) loadOriginalEntryBody(
     entry *chEntry,
-    outBody plan.Marshaller,
+    outBody plan.Unmarshaller,
 ) error {
 
     var err error
@@ -597,7 +640,7 @@ func (chSt *ChStore) loadLatestEntryBody(
     inTxn *badger.Txn,
     inEntryID plan.TID,
     outInfo *pdi.EntryInfo,
-    outBody plan.Marshaller,
+    outBody plan.Unmarshaller,
 ) error {
 
   // If we didn't find the epoch already loaded, look it up in the db
@@ -928,10 +971,10 @@ func (chSt *ChStore) FetchAuthoringTIDs(
 
     if epochNode.Epoch.HasACC() {
         acc, fetchErr := chSt.chMgr.FetchACC(epochNode.Epoch.ACC)
-        if err == nil {
+        if fetchErr == nil {
             accEpoch := acc.Store().GetActiveChEpoch()
             if accEpoch == nil {
-                return plan.Error(nil, plan.ChannelEpochNotFound, "failed to find live ACC epoch")
+                err = plan.Error(nil, plan.ChannelEpochNotFound, "failed to find live ACC epoch")
             }
 
             copy(outACCEntryTID, accEpoch.Epoch.EpochTID)
@@ -1154,13 +1197,10 @@ const chEntryScrapSz = 256
 const chEntryStateScrapSz = 32
 const chDepScrapSz = 64
 
-
-
 // ValidateEntry checks that the conditions needed for an entry to go live. 
 func (chSt *ChStore) ValidateEntry(
     entry *chEntry,
 ) {
-
 
     var (
         valErr error
@@ -1277,12 +1317,18 @@ func (chSt *ChStore) ValidateEntry(
             errStr = fmt.Sprintf(" (%v)", valErr)
         }
 
-        chSt.Info(1, "entry ", entry.Info.EntryID().SuffixStr(), " => ", EntryStatus_name[int32(entry.State.Status)], errStr)
+        chSt.Info(1, "entry ", entry.Info.EntryID().SuffixStr(), " => ", gEntryStatusDesc[entry.State.Status], errStr)
     }
 
 }
 
-
+var gEntryStatusDesc = map[EntryStatus]string{
+	EntryStatus_DISBARRED: "\x1b[31mDISBARRED\x1b[0m",
+	EntryStatus_AWAITING_MERGE: "\x1b[37mAWAITING_MERGE\x1b[0m",
+	EntryStatus_MERGED: "\x1b[36mMERGED\x1b[0m",
+	EntryStatus_DEFERRED: "\x1b[34mDEFERRED\x1b[0m",
+	EntryStatus_LIVE: "\x1b[32mLIVE\x1b[0m",
+}
 
 
 /*
@@ -1534,15 +1580,11 @@ func chEntryProcessor(ch ChAgent) {
     chSt := ch.Store()
 
     var (
-       // revalMsg revalMsg
         shuttingDown bool
         entryTmp *chEntry
     )
 
     moreToValidate := true
-
-    //opts := badger.DefaultIteratorOptions
-    //opts.PrefetchValues = false
 
     chSt.processingEntries = true
     chSt.chShutdown.Add(1)
@@ -1553,7 +1595,7 @@ func chEntryProcessor(ch ChAgent) {
             entry *chEntry
         )
 
-        // Prioritize entries that are ready to merge over entries pending valiation
+        // Prioritize entries that are ready to merge over entries pending validation
         select {
             case entry = <- chSt.entriesToMerge:
                 if entry == nil {
@@ -1595,9 +1637,9 @@ func chEntryProcessor(ch ChAgent) {
                     entryTmp = NewChEntry(entryRevalidating)
                 }
 
-                if chSt.loadNextEntryToValidate(entryTmp) {
+                moreToValidate = chSt.loadNextEntryToValidate(entryTmp)
+                if moreToValidate {
                     entry = entryTmp
-                    moreToValidate = true
 
                     logInfo =  "validating"
 
@@ -1607,8 +1649,7 @@ func chEntryProcessor(ch ChAgent) {
                         chSt.loadOriginalEntryBody(entry, nil)
                     }
                 } else {
-                    chSt.Info(1, "loadNextEntryToValidate() -> false") 
-                    moreToValidate = false
+                    chSt.Info(1, "validation complete") 
                 }
             }
 
@@ -1678,64 +1719,169 @@ func chEntryProcessor(ch ChAgent) {
     }
 
     chSt.chShutdown.Done()
-
 }
 
 
+func chSessionEntryReader(cs *ChSession) {
 
-func (state *EntryState) getLiveIndex(
-    inID plan.TID,
-) int {
+    const batchMax = 10
 
-    const sz = plan.TIDSz
-    N := len(state.LiveIDs)
+    chSt := cs.Agent.Store()
 
-    idx := 0
+    var (
+        includeDeferred,includeBody,includeContent, includeChEpochs bool
+    )
 
-    if len(inID) != sz {
-        for i := 0; i < N; {
-            if bytes.Equal(inID, state.LiveIDs[i:i+sz]) {
-                return idx 
+    autoReading := false
+
+    for cs.CtxRunning() {
+
+        var (
+            entry chEntry
+            body plan.Buf
+            curPos, updatedEntry plan.TIDBlob
+            chTxn *badger.Txn
+        )
+
+        batchCount := 0
+
+        // Scan a batch
+        for cs.CtxRunning() || batchCount < batchMax {
+
+            gotUpdate := false
+
+            var readerCmd uint32
+            if len(cs.readerCmdQueue) > 0 {
+                readerCmd = <- cs.readerCmdQueue
+            } else if len(cs.entryUpdates) > 0 {
+                updatedEntry, gotUpdate = <- cs.entryUpdates
+            } else if ! autoReading {
+                select {
+                    case updatedEntry, gotUpdate = <- cs.entryUpdates:
+                    case readerCmd = <- cs.readerCmdQueue:
+                }
             }
-            idx++
-            i += sz
+
+
+            if readerCmd != 0 {
+                flags := readerCmd
+                includeDeferred = 0 != (flags & (uint32(1)<<byte(ChSessionFlags_DEFERRED_ENTRIES)))
+                includeBody     = 0 != (flags & (uint32(1)<<byte(ChSessionFlags_INCLUDE_BODY)))
+                includeContent  = 0 != (flags & (uint32(1)<<byte(ChSessionFlags_CONTENT_ENTRIES)))
+                includeChEpochs = 0 != (flags & (uint32(1)<<byte(ChSessionFlags_NEW_EPOCH_ENTRIES)))
+
+                curPos.TID().SetTimeFS(0)
+                autoReading = true
+                // Stop this batch and restart
+                break
+
+            }
+            
+            if gotUpdate {
+                // Ignore the updated entry if it's ahead of the current read pos
+                if autoReading && bytes.Compare(updatedEntry.TID(), curPos.TID()) >= 0 {
+                    gotUpdate = false
+                }
+                
+                if chTxn != nil {
+                    chTxn.Discard()
+                    chTxn = nil
+                }
+            }
+
+            if chTxn == nil {
+                chTxn = chSt.db.NewTransaction(false)
+            }
+
+            gotEntry := false
+            var err error
+
+            var next plan.TID
+            if gotUpdate {
+                next = updatedEntry.TID()
+
+                err = chSt.loadEntryHL(
+                    chTxn,
+                    next,
+                    &entry)
+
+                gotEntry = err == nil
+
+            } else if autoReading {
+                next = curPos.TID()
+
+                gotEntry, err = chSt.loadNextEntry(
+                    chTxn,
+                    next,
+                    &entry,
+                )
+
+                if gotEntry {
+                    copy(curPos[:], entry.Info.EntryID())
+                } else {
+                    autoReading = false
+                }
+
+            }
+
+            if err != nil {
+                chSt.Errorf("read entry failed for entry %v: %v", entry.Info.EntryID().Str(), err)
+                continue
+            }
+
+            if ! gotEntry {
+                break
+            }
+
+
+            send := true
+
+            switch entry.State.Status {
+                case EntryStatus_LIVE:
+                case EntryStatus_DEFERRED:
+                    if ! includeDeferred {
+                        send = false
+                    }
+                default:
+                    send = false
+            }
+
+            switch entry.Info.EntryOp {
+                case pdi.EntryOp_POST_CONTENT:
+                    if ! includeContent {
+                        send = false
+                    }
+                case pdi.EntryOp_NEW_CHANNEL_EPOCH:
+                    if ! includeChEpochs {
+                        send = false
+                    }
+            }
+
+            if send && err == nil {
+                if includeBody {
+                    err = chSt.loadOriginalEntryBody(&entry, &body)
+                }
+                
+                if err != nil {
+                    chSt.Errorf("load body failed for entry %v: %v", entry.Info.EntryID().Str(), err)
+                } else {
+                    cs.MemberSession.msgOutbox <- &Msg{
+                        Op: MsgOp_CH_ENTRY,
+                        ChSessID: uint32(cs.ChSessID),
+                        EntryInfo: entry.Info.Clone(),
+                        EntryState: entry.State.Clone(),
+                        BUF0: append([]byte{}, body.Bytes...),
+                    }
+                }
+            }
         }
-    }
 
-    return -1
-}
-
-
-func (state *EntryState) AddLiveID(inID plan.TID) bool {
-
-    if state.getLiveIndex(inID) < 0 {
-        return false
-    }
-
-    state.LiveIDs = append(state.LiveIDs, inID...)  
-    return true
-}
-
-
-func (state *EntryState) StrikeLiveID(inID plan.TID) bool {
-
-    changed := false
-
-    const sz = plan.TIDSz
-    N := len(state.LiveIDs)
-
-    for i := 0; i < N; {
-        if bytes.Equal(inID, state.LiveIDs[i:i+sz]) {
-            changed = true
-            copy(state.LiveIDs[i:], state.LiveIDs[i+sz:])
-            N -= sz
-            state.LiveIDs = state.LiveIDs[:N]
-        } else {
-            i += sz
+        if chTxn != nil {
+            chTxn.Discard()
         }
+
     }
 
-    return changed
 }
 
 /*
@@ -1824,6 +1970,9 @@ func init() {
     }
     gChAgentRegistry[ChProtocolTalk] = func(inChProtocol string) ChAgent {
         return &ChTalk{}
+    }
+    gChAgentRegistry[ChProtocolSpace] = func(inChProtocol string) ChAgent {
+        return &ChSpace{}
     }
     gChAgentRegistry[ChProtocolCommunityEpochs] = func(inChProtocol string) ChAgent {
         return &ChCommunityEpochs{
@@ -2035,17 +2184,12 @@ func (chSt *ChStore) onLivenessChangedInternal(entry *chEntry) {
 
         node := chSt.FetchChEpoch(entry.Info.EntryID())
 
-        if node != nil {
-            node.Status = entry.State.Status
-        } else {
-
-            node := &ChEpochNode{}
+        if node == nil {
+            node = &ChEpochNode{}
             err := chSt.loadOriginalEntryBody(entry, &node.Epoch)
             chSt.Log(err, "failed to load ch epoch")
 
             if err == nil {
-                node.Status = entry.State.Status
-
                 // Append the new node and resort the them (so FetchChEpoch works)
                 chSt.chEpochNodes = append(chSt.chEpochNodes, node)
                 sort.Sort(ByEpochTID(chSt.chEpochNodes))
@@ -2055,7 +2199,17 @@ func (chSt *ChStore) onLivenessChangedInternal(entry *chEntry) {
             }
         }
 
+        // Propigate the entry status to the epoch instance
+        node.Status = entry.State.Status
     }
+
+    // TODO: pass entry and use AddRef/ReleaseRef()?
+    chSt.chSessionsMutex.RLock()
+    for _, cs := range chSt.chSessions {
+        cs.entryUpdates <- entry.Info.EntryID().Blob()
+    }
+    chSt.chSessionsMutex.RUnlock()
+
 }
 
 
@@ -2237,7 +2391,6 @@ type ChTalk struct {
 
 }
 
-
 // MergePost -- see ChAgent.MergePost
 func (ch *ChTalk) MergePost(
     entry *chEntry,
@@ -2245,6 +2398,25 @@ func (ch *ChTalk) MergePost(
 
     return nil
 }
+
+
+
+// ChSpace -- ChAgent for ChProtocolTalk 
+type ChSpace struct {
+    ChStore
+
+}
+
+// MergePost -- see ChAgent.MergePost
+func (ch *ChSpace) MergePost(
+    entry *chEntry,
+) error {
+
+    return nil
+}
+
+
+
 
 
 
