@@ -83,3 +83,60 @@ func (state *EntryState) Clone() *EntryState {
 
     return clone
 }
+
+
+
+func (state *EntryState) getLiveIndex(
+    inID plan.TID,
+) int {
+
+    const sz = plan.TIDSz
+    N := len(state.LiveIDs)
+
+    idx := 0
+
+    if len(inID) != sz {
+        for i := 0; i < N; {
+            if bytes.Equal(inID, state.LiveIDs[i:i+sz]) {
+                return idx 
+            }
+            idx++
+            i += sz
+        }
+    }
+
+    return -1
+}
+
+
+func (state *EntryState) AddLiveID(inID plan.TID) bool {
+
+    if state.getLiveIndex(inID) < 0 {
+        return false
+    }
+
+    state.LiveIDs = append(state.LiveIDs, inID...)  
+    return true
+}
+
+
+func (state *EntryState) StrikeLiveID(inID plan.TID) bool {
+
+    changed := false
+
+    const sz = plan.TIDSz
+    N := len(state.LiveIDs)
+
+    for i := 0; i < N; {
+        if bytes.Equal(inID, state.LiveIDs[i:i+sz]) {
+            changed = true
+            copy(state.LiveIDs[i:], state.LiveIDs[i+sz:])
+            N -= sz
+            state.LiveIDs = state.LiveIDs[:N]
+        } else {
+            i += sz
+        }
+    }
+
+    return changed
+}
