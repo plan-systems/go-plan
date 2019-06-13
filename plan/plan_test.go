@@ -1,31 +1,28 @@
-
 package plan // import "github.com/plan-systems/go-plan/plan"
-
 
 import (
 	//"bytes"
-    "testing"
-    "io/ioutil"
-    "os"
+	"io/ioutil"
+	"os"
+	"testing"
 )
-
 
 func TestErrors(t *testing.T) {
 
-    _, err := ioutil.ReadFile("FileNotHere.yo")
-    if os.IsNotExist(err) {
+	_, err := ioutil.ReadFile("FileNotHere.yo")
+	if os.IsNotExist(err) {
 
-        num := 55
-        perr := Errorf(err, GenericErrorFamily, "custom msg {val:%d}", num)
+		num := 55
+		perr := Errorf(err, GenericErrorFamily, "custom msg {val:%d}", num)
 
-        actual := perr.Error()
+		actual := perr.Error()
 
-        expected := "custom msg {val:55} {code:5000, err:{open FileNotHere.yo: no such file or directory}}"
-        if actual != expected {
-            t.Fatalf("got \"%v\", expected \"%v\"", actual, expected)
-        }
-    } else {
-        t.Fatal()
-    }
+		expected := "custom msg {val:55} {code:5000, err:{open FileNotHere.yo: no such file or directory}}"
+		if actual != expected {
+			t.Fatalf("got \"%v\", expected \"%v\"", actual, expected)
+		}
+	} else {
+		t.Fatal()
+	}
 
 }

@@ -6,7 +6,7 @@ package plan
 type BlockSearchScope int
 
 // CodecCodeForBlock signals that the associated buffer was created from plan.Block.Marshal()
-const CodecCodeForBlock      = 0x0201
+const CodecCodeForBlock = 0x0201
 
 // CodecCodeForEntryCrypt signals that the associated buffer was created from pdi.EntryCrypt.Marshal()
 const CodecCodeForEntryCrypt = 0x0202
@@ -92,25 +92,24 @@ func (block *Block) GetBlockWithLabel(inLabel string) *Block {
 // GetBlockWithCodec returns the first-appearing Block with a matching codec string (self and shallow search only)
 func (block *Block) GetBlockWithCodec(inCodec string, inCodecCode uint32) *Block {
 
-    checkCodecStr := len(inCodec) > 0
+	checkCodecStr := len(inCodec) > 0
 
-    // Start w/ the "self" block
-    b := block
-    
-    N := len(block.Subs)
-    for i := -1; i < N; i++ {
-        if i >= 0 {
-            b = block.Subs[i]
-        }
+	// Start w/ the "self" block
+	b := block
 
-        if (inCodecCode != 0 && inCodecCode == b.CodecCode) || (checkCodecStr && inCodec == b.Codec) {
-            return b
-        }
-    }
+	N := len(block.Subs)
+	for i := -1; i < N; i++ {
+		if i >= 0 {
+			b = block.Subs[i]
+		}
 
-    return nil
+		if (inCodecCode != 0 && inCodecCode == b.CodecCode) || (checkCodecStr && inCodec == b.Codec) {
+			return b
+		}
+	}
+
+	return nil
 }
-
 
 // GetContentWithLabel returns the content of the first-appearing Block with a matching label/name
 func (block *Block) GetContentWithLabel(inLabel string) []byte {
@@ -155,33 +154,31 @@ func (block *Block) AddContentWithCodec(inContent []byte, inCodec string) {
 	})
 }
 
-
-
 // InvokeBlocksWithCodec performs a self and shallow search for matching Blocks.
 // If an error is encountered, iteration stops and the error is returned.
 func (block *Block) InvokeBlocksWithCodec(
-    inCodec string,
-    inCodecCode uint32,
-    inCallback func(inMatch *Block) error,
+	inCodec string,
+	inCodecCode uint32,
+	inCallback func(inMatch *Block) error,
 ) error {
 
-    checkCodecStr := len(inCodec) > 0
+	checkCodecStr := len(inCodec) > 0
 
-    var err error
+	var err error
 
-    // Start w/ the "self" block
-    b := block
-    
-    N := len(block.Subs)
-    for i := -1; i < N && err == nil; i++ {
-        if i >= 0 {
-            b = block.Subs[i]
-        }
+	// Start w/ the "self" block
+	b := block
 
-        if (inCodecCode != 0 && inCodecCode == b.CodecCode) || (checkCodecStr && inCodec == b.Codec) {
-            err = inCallback(b)
-        }
-    } 
+	N := len(block.Subs)
+	for i := -1; i < N && err == nil; i++ {
+		if i >= 0 {
+			b = block.Subs[i]
+		}
+
+		if (inCodecCode != 0 && inCodecCode == b.CodecCode) || (checkCodecStr && inCodec == b.Codec) {
+			err = inCallback(b)
+		}
+	}
 
 	return err
 }

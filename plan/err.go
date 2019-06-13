@@ -16,15 +16,13 @@ func Assert(inCond bool, inMsg string) {
 // Assertf asserts essential assumptions
 func Assertf(inCond bool, inFormat string, inArgs ...interface{}) {
 
-    Assert(inCond, fmt.Sprintf(inFormat, inArgs...))
+	Assert(inCond, fmt.Sprintf(inFormat, inArgs...))
 
 }
 
 /*****************************************************
 ** Err / plan.Error()
 **/
-
-// GUI error philosophy: errors can be suppressed by type or by item that they are for.
 
 // Err is PLAN's common error struct.  Err.Code allows easy matching while allowing error strings to contain useful contextual information.
 type Err struct {
@@ -87,18 +85,18 @@ func (e *Err) Error() string {
 
 // IsError tests if the given error is a PLAN error code (below)
 func IsError(inErr error, inErrCodes ...int32) bool {
-    if inErr == nil {
-        return false
-    }
-    if perr, ok := inErr.(*Err); ok && perr != nil {
-        for _, errCode := range inErrCodes {
-            if perr.Code == errCode {
-                return true
-            }
-        }
-    }
+	if inErr == nil {
+		return false
+	}
+	if perr, ok := inErr.(*Err); ok && perr != nil {
+		for _, errCode := range inErrCodes {
+			if perr.Code == errCode {
+				return true
+			}
+		}
+	}
 
-    return false
+	return false
 }
 
 const (
@@ -150,26 +148,26 @@ const (
 	// CommunityEpochNotFound means the community epoch ID cited was not found in this repo.
 	CommunityEpochNotFound
 
-    // CommunityKeyNotAvailable means no community key sessions knew of the given community key.
-    CommunityKeyNotAvailable
+	// CommunityKeyNotAvailable means no community key sessions knew of the given community key.
+	CommunityKeyNotAvailable
 
 	// FailedToConnectStorageProvider means the connection attempt the StorageProvider failed
 	FailedToConnectStorageProvider
 
-    // MemberEpochNotFound means the given member ID and/or member epoch num was not found
-    MemberEpochNotFound
-    
+	// MemberEpochNotFound means the given member ID and/or member epoch num was not found
+	MemberEpochNotFound
+
 	// ChannelNotFound means the given ChannelID was not found in the community repo
 	ChannelNotFound
 
-    // ChannelSessionNotFound means the given channel session ID did not reference an active channel session.
-    ChannelSessionNotFound
+	// ChannelSessionNotFound means the given channel session ID did not reference an active channel session.
+	ChannelSessionNotFound
 
 	// FailedToLoadChannel means a channel failed to load all its files from its host community repo
 	FailedToLoadChannel
 
-    // ChAgentNotFound means the requested channel agent was not found
-    ChAgentNotFound
+	// ChAgentNotFound means the requested channel agent was not found
+	ChAgentNotFound
 
 	// InvalidEntrySignature means the entry did not match the signature computed for the given entry body and the author's corresponding verify sig
 	InvalidEntrySignature
@@ -186,8 +184,8 @@ const (
 	// FailedToProcessPDIHeader means decryption or unmarshalling of a PDI failed
 	FailedToProcessPDIHeader
 
-    // ViolatesCommunityEpoch means the given entry being processed is inconsistent or violates a constraint established in the governing community epoch.
-    ViolatesCommunityEpoch
+	// ViolatesCommunityEpoch means the given entry being processed is inconsistent or violates a constraint established in the governing community epoch.
+	ViolatesCommunityEpoch
 
 	// ChEntryIsMalformed means decryption or unmarshalling of a pdi channel entry failed
 	ChEntryIsMalformed
@@ -195,8 +193,8 @@ const (
 	// ChEntryNotMerged means the given entry cannot yet be merged and must wait
 	ChEntryNotMerged
 
-    // ChEntryIsNotLive means the requested entry is not currently live 
-    ChEntryIsNotLive
+	// ChEntryIsNotLive means the requested entry is not currently live
+	ChEntryIsNotLive
 
 	// AuthorLacksWritePermission means the given PDI entry's author does not have write permission to the specified channel
 	AuthorLacksWritePermission
@@ -207,17 +205,17 @@ const (
 	// ChannelEpochNotFound means the cited epoch of the target channel did not match any known epochs locally.
 	ChannelEpochNotFound
 
-    // ChannelEpochNotLive means the cited channel epoch is not currently live
-    ChannelEpochNotLive
+	// ChannelEpochNotLive means the cited channel epoch is not currently live
+	ChannelEpochNotLive
 
-    // ChannelEpochDisallows means the entry does not conform to its cited channel epoch
-    ChannelEpochDisallows
+	// ChannelEpochDisallows means the entry does not conform to its cited channel epoch
+	ChannelEpochDisallows
 
-    // ChannelEpochExpired means the cited channel epoch has been superseded and does not allow the given entry.
-    ChannelEpochExpired
+	// ChannelEpochExpired means the cited channel epoch has been superseded and does not allow the given entry.
+	ChannelEpochExpired
 
-    // GenesisEntryNotVerified means an entry was marked as a genesis entry but could not be verified.
-    GenesisEntryNotVerified
+	// GenesisEntryNotVerified means an entry was marked as a genesis entry but could not be verified.
+	GenesisEntryNotVerified
 
 	// TxnDBNotReady means the txnDB failed to read or write txn data
 	TxnDBNotReady
@@ -225,8 +223,8 @@ const (
 	// TxnNotConsistent means info in one or more txns is at odds, meaning malicious txn packaging may be in play
 	TxnNotConsistent
 
-    // StorageNotConsistent means the storae provider returned info that is suspect or inconsistent
-    StorageNotConsistent
+	// StorageNotConsistent means the storae provider returned info that is suspect or inconsistent
+	StorageNotConsistent
 
 	// TxnDecodeFailed means the given txn failed to be decoded
 	TxnDecodeFailed
@@ -244,8 +242,8 @@ const (
 	// SecurityErrorFamily errors relate to PLAN's Secure Key Interface (SKI)
 	SecurityErrorFamily = 5200 + iota
 
-    // KeyringNotFound means the given key set was not found
-    KeyringNotFound
+	// KeyringNotFound means the given key set was not found
+	KeyringNotFound
 
 	// KeyEntryNotFound means a key source did not contain the requested pub key (or pub key fragment)
 	KeyEntryNotFound

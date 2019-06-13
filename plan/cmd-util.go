@@ -75,5 +75,3 @@ func SetupInterruptHandler(ctx context.Context) (io.Closer, context.Context) {
 
 	return intrh, ctx
 }
-
-
