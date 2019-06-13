@@ -104,10 +104,6 @@ var CryptoKit = ski.CryptoKit{
         var err error
 
         keyInfo := ioEntry.KeyInfo
-        if keyInfo == nil {
-            return plan.Errorf(nil, plan.KeyGenerationFailed, "KeyInfo not set")
-        }
-
         switch keyInfo.KeyType {
 
             case ski.KeyType_SymmetricKey: {
@@ -120,7 +116,8 @@ var CryptoKit = ski.CryptoKit{
             }
         
             case ski.KeyType_AsymmetricKey: {
-                pubKey, privKey, err := box.GenerateKey(inRand)
+                var pubKey, privKey *[32]byte
+                pubKey, privKey, err = box.GenerateKey(inRand)
                 if err == nil {
                     keyInfo.PubKey = pubKey[:]
                     ioEntry.PrivKey = privKey[:]
@@ -128,7 +125,9 @@ var CryptoKit = ski.CryptoKit{
             }
 
             case ski.KeyType_SigningKey: {
-                pubKey, privKey, err := sign.GenerateKey(inRand)
+                var privKey *[64]byte
+                var pubKey *[32]byte
+                pubKey, privKey, err = sign.GenerateKey(inRand)
                 if err == nil {
                     keyInfo.PubKey = pubKey[:]
                     ioEntry.PrivKey = privKey[:]
@@ -136,11 +135,11 @@ var CryptoKit = ski.CryptoKit{
             }
 
             default:
-                return plan.Errorf(nil, plan.KeyGenerationFailed, "unrecognized key type KeyType: %v}", keyInfo.KeyType)
+                return plan.Error(nil, plan.Unimplemented, "unknown KeyType")
         }
 
         if err != nil {
-            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed {KeyType: %v}", keyInfo.KeyType)
+            return plan.Errorf(err, plan.KeyGenerationFailed, "key generation failed for KeyType %v", keyInfo.KeyType)
         }
 
         return nil
@@ -247,7 +246,7 @@ var CryptoKit = ski.CryptoKit{
         var err error
         msg, ok := box.Open(nil, inMsg[24:], &salt, &peerPubKey, &privKey)
         if ! ok {
-            err = plan.Errorf(nil, plan.FailedToDecryptData, "secretbox.Open failed to decrypt for peer %v", inPeerPubKey)
+            err = plan.Errorf(nil, plan.FailedToDecryptData, "NaCl failed to decrypt for peer %v", inPeerPubKey)
         }
 
         // Don't leave any private key bytes in memory
@@ -266,7 +265,7 @@ var CryptoKit = ski.CryptoKit{
     ) ([]byte, error) {
 
         if len(inSignerPrivKey) != 64 {
-            return nil, plan.Errorf(nil, plan.BadKeyFormat, "unexpected sign key size, want %v, got %v", 64, len(inSignerPrivKey))
+            return nil, plan.Errorf(nil, plan.BadKeyFormat, "bad signing key size, got %v", len(inSignerPrivKey))
         }
 
         var privKey [64]byte
@@ -298,7 +297,7 @@ var CryptoKit = ski.CryptoKit{
         _, ok := sign.Open(nil, signedMsg, &pubKey)
 
         if ! ok {
-            return plan.Error(nil, plan.VerifySignatureFailed, "nacl sig verification failed")
+            return plan.Error(nil, plan.VerifySignatureFailed, "NaCl sig verification failed")
         }
                 
         return nil
