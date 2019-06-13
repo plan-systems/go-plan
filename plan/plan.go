@@ -5,25 +5,15 @@
          A rchitecture
 P  L  A  N etwork
 
-May PLAN support her users, the members of PLAN Systems, and myself so that I could not wish for more.
-
-~ proto, summer 2018  */
+May PLAN support her users, the members of PLAN Systems, and myself so that I could not wish for more.  ~ Drew  */
 
 package plan
 
 import (
+	"encoding/base64"
+	"os"
 	"time"
-    "os"
-    "encoding/base64"
-
-    //"github.com/plan-systems/go-plan/pcore"
 )
-
-// DataHandler is a deferred data handler function
-type DataHandler func(inParam []byte, inErr error)
-
-// Action is a deferred generic handler.
-type Action func(inParam interface{}, inErr error)
 
 const (
 
@@ -38,29 +28,28 @@ const (
 	SymmetricPubKeySz = 16
 
 	// WorkstationIDSz is the number of bytes used to to identify a PLAN workstation ID.
-    WorkstationIDSz = 16
+	WorkstationIDSz = 16
 
 	// ChIDSz specifies the byte size of a PLAN channel ID (and is the right-most bytes of a TID.
-    ChIDSz = 18
+	ChIDSz = 18
 
-    // TIDSz is the number of bytes for a TID ("time ID")
-    // Having 20 hash bytes is as strong as Ethereum and Bitcoin's address system.
-    //
-    // Byte layout is designed so that TIDs are sortable by an embedded timestamp:
-    //    0:6   - Standard UTC timestamp in unix seconds (BE)
-    //    6:8   - Timestamp fraction (BE)
-    //    8:27  - Signature/hash bytes
-    TIDSz = 27
+	// TIDSz is the number of bytes for a TID ("time ID")
+	// Having 20 hash bytes is as strong as Ethereum and Bitcoin's address system.
+	//
+	// Byte layout is designed so that TIDs are sortable by an embedded timestamp:
+	//    0:6   - Standard UTC timestamp in unix seconds (BE)
+	//    6:8   - Timestamp fraction (BE)
+	//    8:27  - Signature/hash bytes
+	TIDSz = 27
 
-    // MemberIDSz is the byte size of a MemberID
-    MemberIDSz = 4
+	// MemberIDSz is the byte size of a MemberID
+	MemberIDSz = 4
 
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
 	MemberAliasMaxLen = 127
 
-    // Base64pCharSet is the base 64 char set used in PLAN, chosen such that 0 maps to '0' and is monotonic increasing (which can be sorted).
-    Base64pCharSet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~"
-
+	// Base64pCharSet is the base 64 char set used in PLAN, chosen such that 0 maps to '0' and is monotonic increasing (which can be sorted).
+	Base64pCharSet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~"
 )
 
 // CommunityID identifies a PLAN community and is randomly generated during its genesis.
@@ -72,12 +61,12 @@ type CommunityID [CommunityIDSz]byte
 //    the community's new member registration process (which will reject a collision).
 type MemberID uint32
 
-// StorageID identifies a storage instance within a given community.  
+// StorageID identifies a storage instance within a given community.
 //
-// When a storage network/provider is created to host a given community, it is identified from other (previous) 
+// When a storage network/provider is created to host a given community, it is identified from other (previous)
 // instances by ensuring that the newly assigned StorageID is unique in community's history,
 // something trivially done by the person(s) leading the storage switchover.  In the lifetime of a community, there would
-// only need to be a new StorageID generated when the community moved to a new storage provider/network.  
+// only need to be a new StorageID generated when the community moved to a new storage provider/network.
 type StorageID uint16
 
 // MemberAlias is a self-given community member name and is how they are seen by humans in the community,
@@ -87,7 +76,6 @@ type StorageID uint16
 //    with the member's first chosen alias (or an alternatively entered "member ID generation phrase").  This
 //    scheme makes the member ID recoverable from human memory, even if there is no network access.
 type MemberAlias string
-
 
 // TID identifies a specific PLAN channel, channel entry, or anything else labeled via plan.GenerateIID()
 type TID []byte
@@ -101,24 +89,22 @@ type ChID []byte
 // ChIDBlob is a fixed-length buffer that contains a ChID
 type ChIDBlob [ChIDSz]byte
 
-
 var (
 
-    // DefaultFileMode is used to express the default mode of file creation.
-    DefaultFileMode = os.FileMode(0775)
+	// DefaultFileMode is used to express the default mode of file creation.
+	DefaultFileMode = os.FileMode(0775)
 
-    // Base64p encodes/decodes binary strings.
-    Base64p = base64.NewEncoding(Base64pCharSet).WithPadding(base64.NoPadding)
+	// Base64p encodes/decodes binary strings.
+	Base64p = base64.NewEncoding(Base64pCharSet).WithPadding(base64.NoPadding)
 
-    // GenesisMemberID is the genesis member ID 
-    GenesisMemberID = uint32(1)
-    
+	// GenesisMemberID is the genesis member ID
+	GenesisMemberID = uint32(1)
 )
 
-// TimeFS is the UTC in 1/1<<16 seconds elapsed since Jan 1, 1970 UTC ("FS" = fractional seconds)   
+// TimeFS is the UTC in 1/1<<16 seconds elapsed since Jan 1, 1970 UTC ("FS" = fractional seconds)
 //
 // Shifting this right 16 bits will yield stanard Unix time.
-// This means there are 47 bits dedicated for seconds, implying max timestamp of 4.4 million years.  
+// This means there are 47 bits dedicated for seconds, implying max timestamp of 4.4 million years.
 //
 // Note: if a precision deeper than one seconds is not available or n/a, then the best available precision should be used (or 0).
 type TimeFS int64
@@ -127,9 +113,9 @@ type TimeFS int64
 func NowFS() TimeFS {
 	t := time.Now()
 
-    timeFS := t.Unix() << 16
-    frac := uint16((2199 * (uint32(t.Nanosecond()) >> 10)) >> 15)
-    return TimeFS(timeFS | int64(frac))
+	timeFS := t.Unix() << 16
+	frac := uint16((2199 * (uint32(t.Nanosecond()) >> 10)) >> 15)
+	return TimeFS(timeFS | int64(frac))
 }
 
 // Now returns the current time as a standard unix UTC timestamp.
@@ -139,8 +125,8 @@ func Now() int64 {
 
 const (
 
-    // TimeFSMax is the largest possible TimeFS value
-    TimeFSMax = TimeFS(DistantFuture)
+	// TimeFSMax is the largest possible TimeFS value
+	TimeFSMax = TimeFS(DistantFuture)
 
 	// DistantFuture is a const used to express the "distant future" in unix time.
 	DistantFuture int64 = (1 << 63) - 1
@@ -151,23 +137,19 @@ const (
 
 // NilTID is a reserved TID that denotes a void/nil/zero value of a TID
 var NilTID = TIDBlob{
-    0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0,
 }
-
 
 // Marshaller used to generalize serialization
 type Marshaller interface {
 	Marshal() ([]byte, error)
-    MarshalTo([]byte) (int, error)
-    Size() int
+	MarshalTo([]byte) (int, error)
+	Size() int
 }
 
 // Unmarshaller used to generalize deserialization
 type Unmarshaller interface {
 	Unmarshal([]byte) error
 }
-
-
-
