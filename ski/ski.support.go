@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	//"crypto/rand"
-    log "github.com/sirupsen/logrus"
 
 	"golang.org/x/crypto/sha3"
 
@@ -295,10 +294,9 @@ func (kr *Keyring) MergeKeys(srcKeyring *Keyring) {
 		match := kr.FetchKey(keyInfo.PubKey)
         if match != nil {
 
-    		// If a key has a matching pub key but any other field is different, this considered a collision
+    		// If a key has a matching pub key but any other field is different, this considered a collision (and so unlikely that it's basically impossible).
             if CompareKeyEntry(match, srcEntry) != 0 || len(keyInfo.PubKey) < MinPubKeyPrefixSz {
                 problems = append(problems, srcEntry)
-                log.WithField("KeyInfo", keyInfo).Warnf("rejecting KeyEntry")
             }
 
 			keysToAdd--
@@ -826,6 +824,8 @@ func GenerateNewKey(
 
 // SessionTool is a small set of util functions for creating a SKI session.
 type SessionTool struct {
+    plan.Logger
+
 	UserID        string
 	Session       Session
 	CryptoKitID   CryptoKitID
@@ -850,6 +850,8 @@ func NewSessionTool(
             KeyringName: append([]byte(inUserID), inCommunityID...),
         },
 	}
+
+    st.SetLogLabel("ski_" + inUserID)
 
     err := st.GetLatestKey(&st.P2PKey, KeyType_AsymmetricKey)
 	if err != nil {
@@ -892,7 +894,7 @@ func (st *SessionTool) GetLatestKey(
                 },
             )
             if err == nil {
-                log.Infof("%10s: created %v %v", st.UserID, KeyType_name[int32(inAutoCreate)], BinDesc(keyInfo.PubKey))
+                st.Infof(1, "created %v %v", KeyType_name[int32(inAutoCreate)], BinDesc(keyInfo.PubKey))
             }
         }
     }
