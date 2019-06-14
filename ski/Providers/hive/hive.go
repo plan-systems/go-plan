@@ -2,74 +2,74 @@
 package hive
 
 import (
-    //"encoding/json"
-    log "github.com/sirupsen/logrus"
-    "path"
-    "io/ioutil"
-    "os"
-    "time"
-    //io"
-    "sync"
+	//"encoding/json"
+	"path"
+	"io/ioutil"
+	"os"
+	"time"
+	//io"
+	"sync"
 	crypto_rand "crypto/rand"
 
 	"github.com/plan-systems/go-plan/ski"
 	"github.com/plan-systems/go-plan/plan"
 
-    // CryptoKits always available
+	// CryptoKits always available
 	_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
+	_ "github.com/plan-systems/go-plan/ski/CryptoKits/ed25519"
 )
 
 
 const (
 
-    // ProviderInvocation should be passed for inInvocation when calling SKI.provider.StartSession()
-    providerInvocation = "/plan/ski/Provider/hive/1"
+	// ProviderInvocation should be passed for inInvocation when calling SKI.provider.StartSession()
+	providerInvocation = "/plan/ski/Provider/hive/1"
 )
 
 // GetSharedKeyDir returns the local dir of where keys are commonly stored
 func GetSharedKeyDir() (string, error) {
-    return plan.UseLocalDir("ski.hive")
+	return plan.UseLocalDir("ski.hive")
 }
 
 /*
 // CryptoProvider is a local implemention of ski.Provider
 type CryptoProvider struct {
-    ski.CryptoProvider
+	ski.CryptoProvider
 
-    sessions            []*Session
+	sessions			[]*Session
 }
 
 // NewCryptoProvider creates a new hive Provider (a ski.Provider implemented via a file in the OS)
 func NewCryptoProvider() *CryptoProvider {
 
-    var provider = &CryptoProvider{
-        sessions: nil,
-    }
+	var provider = &CryptoProvider{
+		sessions: nil,
+	}
 
-    return provider
+	return provider
 }
 
 // NewSession starts a new hive SKI session locally, using a locally encrypted file.
 // If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
 func NewSession(
 	BaseDir   string,
-    StoreName string,
-    Passhash  []byte,
+	StoreName string,
+	Passhash  []byte,
 ) *Session {
 	session := &Session{
-        parentProvider: provider,
-        Params: inPB,
-        nextAutoSave: time.Now(),
-        //fsStatus: 0,
-        keyTomeMgr: ski.NewKeyTomeMgr(),
-    }
+		parentProvider: provider,
+		Params: inPB,
+		nextAutoSave: time.Now(),
+		//fsStatus: 0,
+		keyTomeMgr: ski.NewKeyTomeMgr(),
+	}
 	return session
 }
 
-    
+	
 // InvocationStr -- see interface ski.Provider
 func (provider *CryptoProvider) InvocationStr() string {
-    return providerInvocation
+	return providerInvocation
 } 
 */
 
@@ -77,163 +77,165 @@ func (provider *CryptoProvider) InvocationStr() string {
 // If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
 func StartSession(
 	inBaseDir   string,
-    inStoreName string,
-    Passhash  []byte,
+	inStoreName string,
+	Passhash  []byte,
 ) (ski.Session, error) {
 
-	session := &Session{
-        nextAutoSave: time.Now(),
-        BaseDir: inBaseDir,
-        StoreName: inStoreName,
-        keyTomeMgr: ski.NewKeyTomeMgr(),
-    }
+	sess := &Session{
+		nextAutoSave: time.Now(),
+		BaseDir: inBaseDir,
+		StoreName: inStoreName,
+		keyTomeMgr: ski.NewKeyTomeMgr(),
+	}
 
-    // Bind the request op scope -- TODO
-    /*
-    for i, domain := range inPB.AccessScopes {
-        allowedOpsForDomain := session.allowedOps[i]
-        for _, opName := range domain {
-            allowedOpsForDomain[opName] = true
-        }
-    } */
+	sess.SetLogLabel("ski.hive") 
 
-    if err := session.loadFromFile(); err != nil {
-        return nil, err
-    }
+	// Bind the request op scope -- TODO
+	/*
+	for i, domain := range inPB.AccessScopes {
+		allowedOpsForDomain := sess.allowedOps[i]
+		for _, opName := range domain {
+			allowedOpsForDomain[opName] = true
+		}
+	} */
 
-    return session, nil
+	if err := sess.loadFromFile(); err != nil {
+		return nil, err
+	}
+
+	return sess, nil
 }
 
 
 // Session represents a local implementation of the SKI
 type Session struct {
-    ski.Session
+	ski.Session
+	plan.Logger
 
-    autoSaveMutex       sync.Mutex
-    nextAutoSave        time.Time
-    //fsStatus            fsStatus
+	autoSaveMutex	   sync.Mutex
+	nextAutoSave		time.Time
+	//fsStatus			fsStatus
 
-    StoreName           string
-	BaseDir             string
+	StoreName		   string
+	BaseDir			 string
 
-    //allowedOps          [ski.NumKeyDomains]map[string]bool
+	//allowedOps		  [ski.NumKeyDomains]map[string]bool
 
-    keyTomeMgr          *ski.KeyTomeMgr       
+	keyTomeMgr		  *ski.KeyTomeMgr	   
 
-    autoSave            *time.Ticker
+	autoSave			*time.Ticker
 }
 
 
 
-func (session *Session) dbPathname() string {
+func (sess *Session) dbPathname() string {
 
-    if len(session.BaseDir) == 0 || len(session.StoreName) == 0 {
-        return ""
-    }
+	if len(sess.BaseDir) == 0 || len(sess.StoreName) == 0 {
+		return ""
+	}
 
-    filename := session.StoreName + ".CryptoProvider.hive.pb"
-    
-    return path.Join(session.BaseDir, filename)
+	filename := sess.StoreName + ".CryptoProvider.hive.pb"
+	
+	return path.Join(sess.BaseDir, filename)
 }
 
 
 
 
-func (session *Session) loadFromFile() error {
+func (sess *Session) loadFromFile() error {
 
-    session.autoSaveMutex.Lock()
-    defer session.autoSaveMutex.Unlock()
+	sess.autoSaveMutex.Lock()
+	defer sess.autoSaveMutex.Unlock()
 
-    session.resetAutoSave()
+	sess.resetAutoSave()
 
-    doClear := true
-    var err error
+	doClear := true
+	var err error
 
-    pathname := session.dbPathname()
-    if len(pathname) > 0 {
-        var buf []byte
-        buf, err = ioutil.ReadFile(pathname)
-        if err != nil {
+	pathname := sess.dbPathname()
+	if len(pathname) > 0 {
+		var buf []byte
+		buf, err = ioutil.ReadFile(pathname)
+		if err != nil {
 
-            // If file doesn't exist, don't consider it an error
-            if os.IsNotExist(err) {
-                err = nil //os.MkdirAll(path.Dir(pathname), plan.DefaultFileMode)
-            } else {
-                err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key tome %v", pathname)
-            }
-        }
+			// If file doesn't exist, don't consider it an error
+			if os.IsNotExist(err) {
+				err = nil //os.MkdirAll(path.Dir(pathname), plan.DefaultFileMode)
+			} else {
+				err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key tome %v", pathname)
+			}
+		}
 
-        // TODO: decrypt file buf!
-        {
+		// TODO: decrypt file buf!
+		{
 
-        }
+		}
 
-        if err == nil && len(buf) > 0 {
-            err = session.keyTomeMgr.Unmarshal(buf)
-            doClear = false
-        }
+		if err == nil && len(buf) > 0 {
+			err = sess.keyTomeMgr.Unmarshal(buf)
+			doClear = false
+		}
 
-        // Zero out sensitive bytes
-        for i := range buf {
-            buf[i] = 0
-        }
-    }
+		// Zero out sensitive bytes
+		for i := range buf {
+			buf[i] = 0
+		}
+	}
 
-    if doClear {
-        session.keyTomeMgr.Clear()
-    }
+	if doClear {
+		sess.keyTomeMgr.Clear()
+	}
 
-    return err
+	return err
 }
 
 
 
-func (session *Session) saveToFile() error {
+func (sess *Session) saveToFile() error {
 
-    session.autoSaveMutex.Lock()
-    defer session.autoSaveMutex.Unlock()
+	sess.autoSaveMutex.Lock()
+	defer sess.autoSaveMutex.Unlock()
 
-    if session.autoSave != nil {
-        pathname := session.dbPathname()
-        if len(pathname) > 0 {
+	if sess.autoSave != nil {
+		pathname := sess.dbPathname()
+		if len(pathname) > 0 {
 
-            buf, err := session.keyTomeMgr.Marshal()
+			buf, err := sess.keyTomeMgr.Marshal()
 
-            // TODO: encrypt file buf!
-            if err == nil {
+			// TODO: encrypt file buf!
+			if err == nil {
 
-            }
+			}
 
-            if err == nil {
-                err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
-                if err != nil {
-                    err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write hive")
-                }
-            }
+			if err == nil {
+				err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
+				if err != nil {
+					err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write hive")
+				}
+			}
 
-            if err != nil {
-                log.WithError(err).Warn("saveToFile() err")
-            }
+			if err != nil {
+				sess.Error("couldn't save to file: ", err)
+			}
 
-            return err
+			return err
+		}
+		sess.resetAutoSave()
+	}
 
-        }
-        session.resetAutoSave()
-    }
-
-    return nil
+	return nil
 }
 
 
-func (session *Session) resetAutoSave() {
+func (sess *Session) resetAutoSave() {
 
-    // When we save out successfully, stop the autosave gor outine
-    {
-        if session.autoSave != nil {
-            session.autoSave.Stop()
-            session.autoSave = nil
-        }
-    }
+	// When we save out successfully, stop the autosave gor outine
+	{
+		if sess.autoSave != nil {
+			sess.autoSave.Stop()
+			sess.autoSave = nil
+		}
+	}
 
 }
 
@@ -241,217 +243,217 @@ func (session *Session) resetAutoSave() {
 
 
 // EndSession -- see ski.Session
-func (session *Session) EndSession(inReason string) {
+func (sess *Session) EndSession(inReason string) {
 
-    session.saveToFile()
+	sess.saveToFile()
 
 }
 
 
 // GenerateKeys -- see ski.Session
-func (session *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
+func (sess *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
 
-    // The ONLY reason we'd need to keep trying is natural key collisions. 
-    // If this ever happened, congratulations, you've beaten the odds of a meteor hitting your house.
-    tries := 5
-    
-    for ; tries > 0; tries-- {
-        newKeys, err := srcTome.GenerateFork(crypto_rand.Reader, 32)
-        if err != nil {
-            return nil, err
-        }
+	// The ONLY reason we'd need to keep trying is natural key collisions. 
+	// If this ever happened, congratulations, you've beaten the odds of a meteor hitting your house millions of times in a row.
+	tries := 3
+	
+	for ; tries > 0; tries-- {
+		newKeys, err := srcTome.GenerateFork(crypto_rand.Reader, 32)
+		if err != nil {
+			return nil, err
+		}
 
-        session.keyTomeMgr.MergeTome(newKeys)
-        if len(newKeys.Keyrings) == 0 {
+		sess.keyTomeMgr.MergeTome(newKeys)
+		if failCount := len(newKeys.Keyrings); failCount > 0 {
+    		sess.Warnf("%d generated keys failed to merge", failCount) 
+		} else {
             break
         }
+	}
 
-        log.WithField("Keyrings", newKeys.Keyrings).Warn("generated keys failed to merge") 
-    }
+	if tries == 0 {
+		return nil, plan.Error(nil, plan.AssertFailed, "generated keys failed to merge")
+	}
 
-    if tries == 0 {
-        return nil, plan.Error(nil, plan.AssertFailed, "generated keys failed to merge")
-    }
-
-    session.bumpAutoSave()
-    
-    return srcTome, nil
+	sess.bumpAutoSave()
+	
+	return srcTome, nil
 }
 
 
 // FetchKeyInfo -- see ski.Session
-func (session *Session) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
+func (sess *Session) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
 
-    opKey, err := session.keyTomeMgr.FetchKey(inKeyRef.KeyringName, nil)
-    if err != nil {
-        return nil, err
-    }
+	opKey, err := sess.keyTomeMgr.FetchKey(inKeyRef.KeyringName, nil)
+	if err != nil {
+		return nil, err
+	}
 
-    return opKey.KeyInfo, nil
+	return opKey.KeyInfo, nil
 
 }
 
 
 
 // DoCryptOp -- see ski.Session
-func (session *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
+func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
 
-    var err error
-    opOut := &ski.CryptOpOut{}
+	var err error
+	opOut := &ski.CryptOpOut{}
 
-    /*****************************************************
-    ** 0) PRE-OP
-    **/
-    if err == nil {
-        switch opArgs.CryptOp {
+	/*****************************************************
+	** 0) PRE-OP
+	**/
+	if err == nil {
+		switch opArgs.CryptOp {
 
-            case ski.CryptOp_EXPORT_TO_PEER, ski.CryptOp_EXPORT_USING_PW: {
-                if opArgs.TomeIn == nil {
-                    err = plan.Error(nil, plan.AssertFailed, "op requires TomeIn")
-                } else {
-                    opArgs.BufIn, err = session.keyTomeMgr.ExportUsingGuide(opArgs.TomeIn, ski.ErrorOnKeyNotFound)
-                }
-            }
-        }
-    }
+			case ski.CryptOp_EXPORT_TO_PEER, ski.CryptOp_EXPORT_USING_PW: {
+				if opArgs.TomeIn == nil {
+					err = plan.Error(nil, plan.AssertFailed, "op requires TomeIn")
+				} else {
+					opArgs.BufIn, err = sess.keyTomeMgr.ExportUsingGuide(opArgs.TomeIn, ski.ErrorOnKeyNotFound)
+				}
+			}
+		}
+	}
 
   
-    /*****************************************************
-    ** 1) LOAD OP CRYPTO KEY & KIT
-    **/
+	/*****************************************************
+	** 1) LOAD OP CRYPTO KEY & KIT
+	**/
 
-    var (
-        opKey *ski.KeyEntry
-        cryptoKit *ski.CryptoKit
-    )
-    if err == nil {
-        switch opArgs.CryptOp {
-            case ski.CryptOp_EXPORT_USING_PW, 
-                 ski.CryptOp_IMPORT_USING_PW:
-                cryptoKit, err = ski.GetCryptoKit(opArgs.DefaultCryptoKit)
+	var (
+		opKey *ski.KeyEntry
+		cryptoKit *ski.CryptoKit
+	)
+	if err == nil {
+		switch opArgs.CryptOp {
+			case ski.CryptOp_EXPORT_USING_PW, 
+				 ski.CryptOp_IMPORT_USING_PW:
+				cryptoKit, err = ski.GetCryptoKit(opArgs.DefaultCryptoKit)
 
-            default:
-                if opArgs.OpKey == nil {
-                    err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
-                } else {
-                    opKey, err = session.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
-                    if err == nil {
-                        opOut.OpPubKey = opKey.KeyInfo.PubKey
-                        cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKit)
-                    }
-                }
-        }
-    }
+			default:
+				if opArgs.OpKey == nil {
+					err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
+				} else {
+					opKey, err = sess.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
+					if err == nil {
+						opOut.OpPubKey = opKey.KeyInfo.PubKey
+						cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKit)
+					}
+				}
+		}
+	}
 
-    /*****************************************************
-    ** 2) DO OP
-    **/
+	/*****************************************************
+	** 2) DO OP
+	**/
 
-    if err == nil {
-        switch opArgs.CryptOp {
+	if err == nil {
+		switch opArgs.CryptOp {
 
-            case ski.CryptOp_SIGN:
-                opOut.BufOut, err = cryptoKit.Sign(
-                    opArgs.BufIn, 
-                    opKey.PrivKey)
-            
-            case ski.CryptOp_ENCRYPT_SYM:
-                opOut.BufOut, err = cryptoKit.Encrypt(
-                    crypto_rand.Reader, 
-                    opArgs.BufIn, 
-                    opKey.PrivKey)
+			case ski.CryptOp_SIGN:
+				opOut.BufOut, err = cryptoKit.Sign(
+					opArgs.BufIn, 
+					opKey.PrivKey)
+			
+			case ski.CryptOp_ENCRYPT_SYM:
+				opOut.BufOut, err = cryptoKit.Encrypt(
+					crypto_rand.Reader, 
+					opArgs.BufIn, 
+					opKey.PrivKey)
 
-            case ski.CryptOp_DECRYPT_SYM:
-                opOut.BufOut, err = cryptoKit.Decrypt(
-                    opArgs.BufIn, 
-                    opKey.PrivKey)
+			case ski.CryptOp_DECRYPT_SYM:
+				opOut.BufOut, err = cryptoKit.Decrypt(
+					opArgs.BufIn, 
+					opKey.PrivKey)
 
-            case ski.CryptOp_ENCRYPT_TO_PEER, 
-                 ski.CryptOp_EXPORT_TO_PEER:
-                opOut.BufOut, err = cryptoKit.EncryptFor(
-                    crypto_rand.Reader, 
-                    opArgs.BufIn, 
-                    opArgs.PeerKey,
-                    opKey.PrivKey)
+			case ski.CryptOp_ENCRYPT_TO_PEER, 
+				 ski.CryptOp_EXPORT_TO_PEER:
+				opOut.BufOut, err = cryptoKit.EncryptFor(
+					crypto_rand.Reader, 
+					opArgs.BufIn, 
+					opArgs.PeerKey,
+					opKey.PrivKey)
 
-            case ski.CryptOp_DECRYPT_FROM_PEER,
-                 ski.CryptOp_IMPORT_FROM_PEER:
-                opOut.BufOut, err = cryptoKit.DecryptFrom(
-                    opArgs.BufIn, 
-                    opArgs.PeerKey,
-                    opKey.PrivKey)
+			case ski.CryptOp_DECRYPT_FROM_PEER,
+				 ski.CryptOp_IMPORT_FROM_PEER:
+				opOut.BufOut, err = cryptoKit.DecryptFrom(
+					opArgs.BufIn, 
+					opArgs.PeerKey,
+					opKey.PrivKey)
 
-            case ski.CryptOp_EXPORT_USING_PW:
-                opOut.BufOut, err = cryptoKit.EncryptUsingPassword(
-                    crypto_rand.Reader, 
-                    opArgs.BufIn, 
-                    opArgs.PeerKey)
+			case ski.CryptOp_EXPORT_USING_PW:
+				opOut.BufOut, err = cryptoKit.EncryptUsingPassword(
+					crypto_rand.Reader, 
+					opArgs.BufIn, 
+					opArgs.PeerKey)
 
-            case ski.CryptOp_IMPORT_USING_PW:
-                opOut.BufOut, err = cryptoKit.DecryptUsingPassword(
-                    opArgs.BufIn, 
-                    opArgs.PeerKey)
-                
-            default:
-                err = plan.Errorf(nil, plan.UnknownSKIOpName, "unrecognized SKI operation %v", opArgs.CryptOp)
-        }
-    }
+			case ski.CryptOp_IMPORT_USING_PW:
+				opOut.BufOut, err = cryptoKit.DecryptUsingPassword(
+					opArgs.BufIn, 
+					opArgs.PeerKey)
+				
+			default:
+				err = plan.Errorf(nil, plan.UnknownSKIOpName, "unrecognized SKI operation %v", opArgs.CryptOp)
+		}
+	}
 
 
-    /*****************************************************
-    ** 3) POST OP
-    **/
-    if err == nil {
-        switch opArgs.CryptOp {
+	/*****************************************************
+	** 3) POST OP
+	**/
+	if err == nil {
+		switch opArgs.CryptOp {
 
-            case ski.CryptOp_EXPORT_TO_PEER:
-                ski.Zero(opArgs.BufIn)
+			case ski.CryptOp_EXPORT_TO_PEER:
+				ski.Zero(opArgs.BufIn)
 
-            case ski.CryptOp_IMPORT_FROM_PEER,
-                 ski.CryptOp_IMPORT_USING_PW: {
-                newTome := ski.KeyTome{}
-                err = newTome.Unmarshal(opOut.BufOut)
-                ski.Zero(opOut.BufOut)
-                ski.Zero(opArgs.PeerKey)
+			case ski.CryptOp_IMPORT_FROM_PEER,
+				 ski.CryptOp_IMPORT_USING_PW: {
+				newTome := ski.KeyTome{}
+				err = newTome.Unmarshal(opOut.BufOut)
+				ski.Zero(opOut.BufOut)
+				ski.Zero(opArgs.PeerKey)
 
-                if err == nil {
-                    session.keyTomeMgr.MergeTome(&newTome)
-                    session.bumpAutoSave()
-                }
-                newTome.ZeroOut()
-                if err != nil {
-                    return nil, err
-                }
-            }
-        }
-    }
+				if err == nil {
+					sess.keyTomeMgr.MergeTome(&newTome)
+					sess.bumpAutoSave()
+				}
+				newTome.ZeroOut()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 
-    if err != nil {
-        return nil, err
-    }   
+	if err != nil {
+		return nil, err
+	}   
 
-    return opOut, nil
+	return opOut, nil
 
 }
  
-func (session *Session) bumpAutoSave() {
+func (sess *Session) bumpAutoSave() {
 
-    session.autoSaveMutex.Lock()
-    session.nextAutoSave = time.Now().Add(1600 * time.Millisecond)
-    if session.autoSave == nil {
-        session.autoSave = time.NewTicker(500 * time.Millisecond)
-        go func() {
-            for t := range session.autoSave.C {
-                session.autoSaveMutex.Lock()
-                saveNow := t.After(session.nextAutoSave)
-                session.autoSaveMutex.Unlock()
-                if saveNow {
-                    session.saveToFile()
-                    break
-                }
-            }
-        }()
-    }
-    session.autoSaveMutex.Unlock()
-    
+	sess.autoSaveMutex.Lock()
+	sess.nextAutoSave = time.Now().Add(1600 * time.Millisecond)
+	if sess.autoSave == nil {
+		sess.autoSave = time.NewTicker(500 * time.Millisecond)
+		go func() {
+			for t := range sess.autoSave.C {
+				sess.autoSaveMutex.Lock()
+				saveNow := t.After(sess.nextAutoSave)
+				sess.autoSaveMutex.Unlock()
+				if saveNow {
+					sess.saveToFile()
+					break
+				}
+			}
+		}()
+	}
+	sess.autoSaveMutex.Unlock()
+	
 }
