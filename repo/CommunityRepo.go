@@ -55,9 +55,7 @@ type CommunityRepoState struct {
 
 // CommunityRepo wraps a community's data repository and responds to queries for the given community.
 type CommunityRepo struct {
-    plan.Logger
-
-    flow                    plan.Flow
+    plan.Context
 
     GenesisSeed             GenesisSeed    
     Config                 *Config
@@ -173,7 +171,7 @@ func NewCommunityRepo(
         spSyncStatus: spSyncStopped,
     }
 
-    name := fmt.Sprintf("repo %v", path.Base(CR.HomePath))
+    name := fmt.Sprintf(path.Base(CR.HomePath))
     CR.SetLogLabel(name)
 
     seedPathname := CR.GenesisSeedPathname()
@@ -224,39 +222,29 @@ func (CR *CommunityRepo) flushState() error {
     return err
 }
 
-
-
 // Startup starts this repo
 func (CR *CommunityRepo) Startup(
     inCtx context.Context,
 ) error {
 
-    if CR.flow.IsRunning() {
+    if CR.CtxRunning() {
         panic("repo is already running")
     }
 
-    err := CR.flow.Startup(
+    err := CR.CtxStart(
         inCtx,
-        CR.GetLogLabel(),
         CR.onInternalStartup,
         CR.onInternalShutdown,
+        nil,
     )
 
     return err
-}
-
-// Shutdown initiates a full shutdown of this repo, blocking until complete.
-func (CR *CommunityRepo) Shutdown(inReason string) {
-
-    CR.flow.Shutdown(inReason)
-
 }
 
 // GenesisSeedPathname returns the pathname of the signed genesis seed.
 func (CR *CommunityRepo) GenesisSeedPathname() string {
     return path.Join(CR.HomePath, "GenesisSeed.signed")
 } 
-
 
 func (CR *CommunityRepo) onInternalStartup() error {
     
@@ -285,7 +273,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Receives txns ready to be committed to the community's storage
     CR.txnsToCommit = make(chan *pdi.PayloadTxnSet, 16)
-    go func() {
+    CR.CtxGo(func(*plan.Context) {
 
         for payload := range CR.txnsToCommit {
 
@@ -324,7 +312,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
             CR.commSessionsMutex.Lock()
             N := len(CR.commSessions)
             for i := 0; i < N; i++ {
-                CR.commSessions[i].EndSession(CR.flow.ShutdownReason)
+                CR.commSessions[i].EndSession(CR.CtxStopReason())
                 CR.commSessions[i] = nil
             }
             CR.commSessions = nil
@@ -332,13 +320,11 @@ func (CR *CommunityRepo) onInternalStartup() error {
         }
 
         CR.Info(0, "shutdown complete")
-
-        CR.flow.ShutdownComplete.Done()
         
     // TODO: fix this so fetching stop asap but commit is last to disconnect.
     // Or, we can stop asap once we have txn logging such that uncommited txns get to the server
         CR.spSyncStop()        
-    }()
+    })
     //
     //
     //
@@ -347,7 +333,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Writes incoming raw txns to the txn DB
     CR.txnsToWrite = make(chan *pdi.PayloadTxnSet, 8)
-    go func() {
+    CR.CtxGo(func(*plan.Context) {
         var err error
 
         for payload := range CR.txnsToWrite {
@@ -372,7 +358,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
         }
 
         close(CR.txnsToCommit)
-    }()
+    })
     //
     //
     //
@@ -381,20 +367,21 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Processes a new pdi.EntryCrypt and dispatches it to the appropriate channel pipeline
     CR.entriesToMerge = make(chan *chEntry, 1)
-    CR.flow.ShutdownComplete.Add(1)
-    go func() {
+    CR.CtxGo(func(*plan.Context) {
 
         for entry := range CR.entriesToMerge {
-            err := CR.decryptAndMergeEntry(entry)
-            CR.flow.LogErr(err, "entry failed to process")
+            err := CR.DecryptAndMergeEntry(entry)
+            if err != nil {
+                CR.Warn("failed to process entry: ", err)
+            }
         }
 
         // Now that all entries have been inserted into the chMgr, we can shut that down
-        CR.chMgr.flow.Shutdown(CR.flow.ShutdownReason)
+        CR.chMgr.CtxStop(CR.CtxStopReason())
 
         close(CR.txnsToWrite)
 
-    }()
+    })
     //
     //
     //
@@ -403,7 +390,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Decodes incoming raw txns and inserts them into the collator, which performs callbacks to merge payloads (entries)
     CR.txnsToDecode = make(chan pdi.RawTxn, 1)
-    go func() {
+    CR.CtxGo(func(*plan.Context) {
 
         // TODO: choose different encoder based on spInfo
         txnDecoder := ds.NewTxnDecoder(false)
@@ -428,7 +415,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
         }
 
         close(CR.entriesToMerge)
-    }()
+    })
     //
     //
     //
@@ -437,17 +424,17 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Dispatches txn ID requests to the community's (remote) StorageProvider(s), managing connections etc.
     CR.txnsToFetch = make(chan *pdi.TxnList, 16)
-    go func() {
+    CR.CtxGo(func(*plan.Context) {
 
         for txnList := range CR.txnsToFetch {
             
             // Drop requests until the channel closes.  This prevents shutdown being blocked b/c of a full channel.
-            if ! CR.flow.IsRunning() {
+            if ! CR.CtxRunning() {
                 continue
             }
 
             spReader, err := CR.spClient.FetchTxns(CR.spContext, txnList)
-            for err == nil && CR.flow.IsRunning() {
+            for err == nil && CR.CtxRunning() {
                 var txnIn *pdi.RawTxn
                 txnIn, err = spReader.Recv()
                 if txnIn != nil {
@@ -460,14 +447,13 @@ func (CR *CommunityRepo) onInternalStartup() error {
         }
 
         close(CR.txnsToDecode)
-    }()
+    })
 
-    if err = CR.chMgr.Startup(CR.flow.Ctx); err != nil {
+    if err = CR.chMgr.Startup(CR.Ctx); err != nil {
         return err
     }
     
-    // This kicks off the top-level SP sync controller
-    go CR.spSyncController()
+    CR.CtxGo(CR.spSyncController)
 
     return nil
 }
@@ -476,7 +462,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
 func (CR *CommunityRepo) onInternalShutdown() {
 
     // First, end all member sessions (and channel sessions)
-    CR.MemberSessMgr.Shutdown(CR.flow.ShutdownReason, nil)
+    CR.MemberSessMgr.Shutdown(CR.CtxStopReason(), nil)
 
     CR.Infof(1, "all member sessions ended")
 
@@ -538,11 +524,9 @@ func (CR *CommunityRepo) disconnectFromStorage() {
 }
 
 
-func (CR *CommunityRepo) spSyncController() {
+func (CR *CommunityRepo) spSyncController(inParent *plan.Context) {
 
     sleep := true
-
-    CR.flow.ShutdownComplete.Add(1)
 
     // The objective is for the StorageProvider sync subsystem to be active or inactive (stopped).
     // That is a complex network evolution, so this loop serves to control the smaller pieces,
@@ -551,7 +535,7 @@ func (CR *CommunityRepo) spSyncController() {
     for {
 
         // Are we stopping?  Before we break this loop, we must get back to a stopped state.
-        if ! CR.flow.IsRunning() {
+        if ! CR.CtxRunning() {
             if ! CR.spSyncActive {
                 CR.spSyncActive = false
             }
@@ -594,10 +578,7 @@ func (CR *CommunityRepo) spSyncController() {
         }
     }
 
-    CR.flow.ShutdownComplete.Done()
-
 }
-
 
 
 
@@ -605,7 +586,7 @@ func (CR *CommunityRepo) connectToStorage() {
 
     CR.spSyncStatus = spSyncConnecting
 
-	CR.spContext, CR.spCancel = context.WithCancel(CR.flow.Ctx)
+	CR.spContext, CR.spCancel = context.WithCancel(CR.Ctx)
 
     addr := CR.State.Services[0].Addr
 	clientConn, err := grpc.DialContext(CR.spContext, addr, grpc.WithInsecure())
@@ -743,9 +724,13 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
 
     count := 0
     N := len(ioTxnList.URIDs)
-    if N != len(ioTxnList.Statuses) {
-        err = plan.Error(nil, plan.StorageNotConsistent, "received bad TxnList")
-        CR.Errorf("received bad TxnList")
+    Ns := len(ioTxnList.Statuses)
+    if N != Ns {
+        if N > Ns {
+            N = Ns
+        }
+        err = plan.Error(nil, plan.StorageNotConsistent, "received inconsistent TxnList")
+        CR.Warn(err)
         return err
     }
 
@@ -766,8 +751,8 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
                         ioTxnList.URIDs[count] = URID
                         count++
                     } else {
-                        err = plan.Errorf(itemErr, plan.TxnDBNotReady, "error reading txn DB key %v", URID)
-                        err = CR.flow.FilterFault(err)
+                        itemErr = plan.Errorf(itemErr, plan.TxnDBNotReady, "error reading txn DB key %v", pdi.URID(URID).Str())
+                        CR.CtxOnFault(itemErr, "reading txn db key")
                     }
             }
         }
@@ -825,7 +810,7 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             var txnList *pdi.TxnList
             txnList, err = scanner.Recv()
         
-            if ! CR.flow.IsRunning() {
+            if ! CR.CtxRunning() {
                 doingScan = false
                 break
             } else if err != nil {
@@ -853,46 +838,10 @@ func (CR *CommunityRepo) forwardTxnScanner() {
     CR.spSyncWorkers.Done()
 }
 
-// Tracef records the given msg to the trace log/console
-func (CR *CommunityRepo) Tracef(inFormat string, inArgs ...interface{}) {
-	CR.flow.Log.Tracef(inFormat, inArgs...)
-}
-
-// Trace records the given msg to the trace log/console
-func (CR *CommunityRepo) Trace(inMsg string) {
-	CR.flow.Log.Trace(inMsg)
-}
-
-/*
-// DispatchPayload unpacks a decoded txn which is given to be a single/sole segment.
-func (CR *CommunityRepo) DispatchPayload(txn *pdi.DecodedTxn) error {
-
-    if txn.Info.SegTotal != 1 || txn.Info.SegIndex != 0 {
-        return plan.Errorf(nil, plan.CannotExtractTxnPayload, "segments missing or txn ill-formed")
-    }
-
-    switch txn.Info.PayloadEncoding {
-
-        case plan.Encoding_Pb_EntryCrypt:
-            eip := &entryIP{
-                entry: chEntryAlloc(),
-            }
-            err := eip.EntryCrypt.Unmarshal(txn.PayloadSeg)
-            if err != nil {
-                return plan.Errorf(nil, plan.CannotExtractTxnPayload, "failed to unmarshal EntryCrypt from txn payload")
-            }
-            eip.txnPayloadName = txn.Info.PayloadName
-            CR.entriesToMerge <- eip
-
-        default:
-            return plan.Errorf(nil, plan.UnsupportedPayloadCodec, "txn payload codec %v not supported", txn.Info.PayloadEncoding)
-    }
-
-    return nil
-}
-*/
-
-func (CR *CommunityRepo) decryptAndMergeEntry(entry *chEntry) error {
+// DecryptAndMergeEntry decrypts the given entry and then merges it with this repo.
+//
+// If an error is returned, it means the entry is malformed (and never can be merged).
+func (CR *CommunityRepo) DecryptAndMergeEntry(entry *chEntry) error {
 
     var (
     )

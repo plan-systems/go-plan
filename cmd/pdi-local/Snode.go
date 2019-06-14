@@ -19,7 +19,6 @@ import (
     "github.com/plan-systems/go-plan/pdi"
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
-    _ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"    
 
     "github.com/ethereum/go-ethereum/common/hexutil"
 
@@ -36,8 +35,6 @@ type GenesisParams struct {
     CommunityID             hexutil.Bytes           `json:"community_id"`
     //GenesisAddr             hexutil.Bytes           `json:"genesis_addr"`
 }
-
-
 
 
 const (
@@ -62,9 +59,7 @@ const (
 //     can be instantiated and offer service in parallel, this is not typical operation. Rather,
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
-    plan.Logger
-
-    flow                        plan.Flow
+    plan.Context
 
     storesMutex                 sync.RWMutex
     stores                      map[plan.CommunityID]*ds.Store
@@ -76,7 +71,6 @@ type Snode struct {
 
     grpcServer                  *grpc.Server
     listener                    net.Listener
-    grpcDone                    chan struct{}
 }
 
 
@@ -146,26 +140,17 @@ func NewSnode(
 }
 
 // Startup -- see plan.Flow.Startup()
-func (sn *Snode) Startup(inCtx context.Context) (context.Context, error) {
+func (sn *Snode) Startup(inCtx context.Context) error {
 
-    err := sn.flow.Startup(
+    err := sn.CtxStart(
         inCtx,
-        sn.GetLogLabel(),
         sn.onInternalStartup,
         sn.onInternalShutdown,
+        nil,
     )
 
-    return sn.flow.Ctx, err
+    return err
 }
-
-// Shutdown -- see plan.Flow.Shutdown()
-func (sn *Snode) Shutdown(
-    inReason string,
-) {
-
-    sn.flow.Shutdown(inReason)
-}
-
 
 func (sn *Snode) onInternalStartup() error {
 
@@ -181,11 +166,29 @@ func (sn *Snode) onInternalStartup() error {
     }
 
     for _, St := range sn.stores {
-        St.Startup(sn.flow.Ctx, false)
+        St.Startup(sn.Ctx, false)
     }
 
     if err == nil {
-        err = sn.startServer()
+        sn.Infof(0, "starting service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+        listener, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
+        if err != nil {
+            return err
+        }
+
+        // TODO: turn off compression since we're dealing w/ encrypted data
+        sn.grpcServer = grpc.NewServer()
+        pdi.RegisterStorageProviderServer(sn.grpcServer, sn)
+        
+        // Register reflection service on gRPC server.
+        reflection.Register(sn.grpcServer)
+        sn.CtxGo(func(*plan.Context) {
+            if err := sn.grpcServer.Serve(listener); err != nil {
+                sn.Error("grpc server error: ", err)
+            }
+            sn.CtxInitiateStop("grpc server stopped")
+            listener.Close()
+        })
     }
 
     return err
@@ -199,27 +202,21 @@ func (sn *Snode) onInternalShutdown() {
     storesRunning := &sync.WaitGroup{}
 
     storesRunning.Add(len(sn.stores))
-    
     for _, v := range sn.stores {
         St := v
         go func() {
-            St.Shutdown(sn.flow.ShutdownReason)
+            St.CtxStop(sn.CtxStopReason())
             storesRunning.Done()
         }()
     }
 
     if sn.grpcServer != nil {
-        sn.Info(0, "stopping StorageProvider grpc service")
+        sn.Info(1, "stopping grpc service")
         sn.grpcServer.GracefulStop()
-
-        _, _ = <- sn.grpcDone
-        sn.Info(1, "StorageProvider service stopped")
     }
 
     storesRunning.Wait()
-
 }
-
 
 
 
@@ -275,7 +272,7 @@ func (sn *Snode) CreateNewStore(
     inEpoch pdi.StorageEpoch,
 ) error {
     
-    if sn.flow.IsRunning() {
+    if sn.CtxRunning() {
         return plan.Error(nil, plan.AssertFailed, "can't create store while running")
     }
 
@@ -323,7 +320,7 @@ func (sn *Snode) CreateNewStore(
     // Sleep a little so the log messages show up in a nice order for such an important occasion!
     time.Sleep(100 * time.Millisecond)
 
-    St.Shutdown("creation complete")
+    St.CtxStop("creation complete")
 
     return nil
 }
@@ -348,38 +345,6 @@ func (sn *Snode) fetchStore(inCommunityID []byte) *ds.Store {
     return St
 
 }
-
-
-func (sn *Snode) startServer() error {
-
-    sn.grpcDone = make(chan struct{})
-
-    sn.Infof(0, "starting StorageProvider service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
-    listener, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
-    if err != nil {
-        return err
-    }
-
-    // TODO: turn off compression since we're dealing w/ encrypted data
-    sn.grpcServer = grpc.NewServer()
-    pdi.RegisterStorageProviderServer(sn.grpcServer, sn)
-    
-    // Register reflection service on gRPC server.
-    reflection.Register(sn.grpcServer)
-    go func() {
-
-        if err := sn.grpcServer.Serve(listener); err != nil {
-            sn.flow.LogErr(err, "grpc Serve() failed")
-        }
-        
-        listener.Close()
-
-        close(sn.grpcDone)
-    }()
-
-    return nil
-}
-
 // StartSession -- see service StorageProvider in pdi.proto
 func (sn *Snode) StartSession(ctx context.Context, in *pdi.SessionReq) (*pdi.StorageInfo, error) {
     if in.StorageEpoch == nil {
@@ -413,7 +378,7 @@ func (sn *Snode) FetchSessionStore(ctx context.Context) (*ds.Store, error) {
         return nil, plan.Errorf(nil, plan.AssertFailed, "internal type assertion err")
     }
 
-    err = St.CheckStatus()
+    err = St.CtxStatus()
     if err != nil {
         return nil, err
     }

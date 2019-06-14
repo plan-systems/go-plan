@@ -33,7 +33,7 @@ type ChSessID uint32
 
 // ChMgr is the top level interface for a community's channels.
 type ChMgr struct {
-    flow                    plan.Flow
+    plan.Context
 
     HomePath                string
 
@@ -66,8 +66,9 @@ func NewChMgr(
         prevSessID: 0,
         StorageEpoch: *CR.GenesisSeed.StorageEpoch,
         CR: CR,
-        //fsNameEncoding: plan.Base64
     }
+
+    chMgr.SetLogLabel(CR.GetLogLabel())
 
     return chMgr
 
@@ -78,11 +79,11 @@ func (chMgr *ChMgr) Startup(
     inCtx context.Context,
 ) error {
 
-    err := chMgr.flow.Startup(
+    err := chMgr.CtxStart(
         inCtx,
-        "chMgr",
         chMgr.onInternalStartup,
         chMgr.onInternalShutdown,
+        nil,
     )
 
     return err
@@ -514,16 +515,6 @@ func (chMgr *ChMgr) QueueEntryForMerge(
 }
 
 
-
-
-
-
-func (chMgr *ChMgr) Log(inErr error, inMsg string) {
-    if inErr != nil {
-        chMgr.flow.LogErr(inErr, inMsg)
-    }
-}
-
 // FetchACC returns the given channel known/presumed to be an ACC.
 func (chMgr *ChMgr) FetchACC(
     inChID plan.ChID,
@@ -651,7 +642,7 @@ func (chMgr *ChMgr) fetchChannel(
         return ch, nil
     }
 
-    if ! chMgr.flow.IsRunning() {
+    if ! chMgr.CtxRunning() {
         return nil, plan.Error(nil, plan.ServiceShutdown, "chMgr is shutting down")
     }
 
@@ -887,11 +878,16 @@ func (chMgr *ChMgr) StartChannelSession(
         readerCmdQueue: make(chan uint32, 1),
     }
 
+    cs.SetLogLabel(fmt.Sprint("ChSess_", cs.ChSessID))
+
     err = cs.CtxStart(
-        inMemberSession.flow.Ctx,
-        fmt.Sprint("ChSess_", cs.ChSessID),
-        cs,
+        inMemberSession.Ctx,
+        cs.ctxInternalStart,
+        cs.ctxInternalStop,
+        nil,
     )
+
+    //inMemberSession.CtxAddChild(cs)
  
     return cs, err
 }
@@ -922,12 +918,12 @@ type ChSession struct {
     entryUpdates        chan plan.TIDBlob  
 }
 
-func (cs *ChSession) CtxInternalStart() error {
+func (cs *ChSession) ctxInternalStart() error {
 
     cs.Agent.Store().attachChSession(cs)
 
-    cs.StopComplete.Add(1)
-    go func() {
+    cs.CtxGo(func(*plan.Context) {
+
         for cs.CtxRunning() {
 
             msg := <- cs.msgInbox
@@ -949,22 +945,18 @@ func (cs *ChSession) CtxInternalStart() error {
         cs.Agent.Store().detachChSession(cs)
 
         close(cs.entryUpdates)
+    })
 
-        cs.StopComplete.Done()
-    }()
-
-    cs.StopComplete.Add(1)
-    go func() {
+    cs.CtxGo(func(*plan.Context) {
         chSessionEntryReader(cs)
-        cs.StopComplete.Done()
-    }()
+    })
 
     return nil
 }
 
-func (cs *ChSession) CtxInternalStop() {
+func (cs *ChSession) ctxInternalStop() {
 
-    if cs.MemberSession.flow.IsRunning() {
+    if cs.MemberSession.CtxRunning() {
         cs.MemberSession.msgOutbox <- &Msg{
             Op: MsgOp_CH_SESSION_CLOSED,
             ChSessID: uint32(cs.ChSessID),

@@ -40,9 +40,7 @@ type StorageConfig struct {
 
 // Store wraps a PLAN community UUID and a datastore
 type Store struct {
-    plan.Logger
-
-    flow                        plan.Flow
+    plan.Context
 
     AgentDesc                   string    
     Config                      *StorageConfig
@@ -117,16 +115,15 @@ func (St *Store) Startup(
 
     St.Info(0, "starting up store ", St.AbsPath)
 
-    err := St.flow.Startup(
+    err := St.CtxStart(
         inCtx,
-        St.GetLogLabel(),
         St.internalStartup,
         St.internalShutdown,
+        nil,
     )
 
     return err
 }
-
 
 
 func (St *Store) internalStartup() error {
@@ -181,9 +178,9 @@ func (St *Store) internalStartup() error {
     //
     //
     // Small buffer needed for the txn notifications to ensure that the txn writer doesn't get blocked
-    St.flow.ShutdownComplete.Add(1)
     St.txnUpdates = make(chan txnUpdate, 8)
-    go func() {
+    St.CtxGo(func(*plan.Context) {
+
         for update := range St.txnUpdates {
             St.subsMutex.Lock()
             for _, sub := range St.subs {
@@ -206,9 +203,7 @@ func (St *Store) internalStartup() error {
 
         St.acctDB.Close()
         St.acctDB = nil
-
-        St.flow.ShutdownComplete.Done()
-    }()
+    })
     //
     //
     //
@@ -251,36 +246,6 @@ func (St *Store) internalShutdown() {
     close(St.DecodedCommits)
 
 }
-
-
-// Shutdown -- see plan.Flow.Shutdown
-func (St *Store) Shutdown(
-    inReason string,
-) {
-
-    St.flow.Shutdown(inReason)
-
-}
-
-
-
-// CheckStatus -- see plan.Flow.CheckStatus
-func (St *Store) CheckStatus() error {
-
-    return St.flow.CheckStatus()
-
-}
-
-
-// IsRunning -- see plan.Flow.IsRunning
-func (St *Store) IsRunning() bool {
-
-    return St.flow.IsRunning()
-
-}
-
-
-
 
 // ScanJob represents a pending Query() call to a StorageProvider
 type ScanJob struct {
@@ -494,7 +459,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
             if err != nil {
                 err = plan.Error(err, plan.StorageNotReady, "failed to write raw txn data to db")
             } else {
-                St.Infof(1, "committed txn %v", job.Txn.URIDstring())
+                St.Infof(1, "committed txn %v", job.Txn.URIDStr())
             }
 
             batch.Finish(err)
@@ -513,7 +478,7 @@ func (St *Store) doCommitJob(job CommitJob) error {
                 perr = plan.Error(err, plan.FailedToCommitTxns, "txn commit failed")
             }
 
-            St.Errorf("CommitJob failed: %v, URID: %s", err, job.Txn.URIDstring())
+            St.Errorf("CommitJob failed: %v, URID: %s", err, job.Txn.URIDStr())
         
             err = perr
         }
@@ -563,7 +528,7 @@ func (St *Store) DoScanJob(job ScanJob) {
 
     atomic.AddInt32(&St.numScanJobs, 1)
 
-    err := St.CheckStatus()
+    err := St.CtxStatus()
     if err != nil {
         job.OnComplete <- err
         atomic.AddInt32(&St.numScanJobs, -1)
@@ -574,7 +539,7 @@ func (St *Store) DoScanJob(job ScanJob) {
     go func() {
         err := St.doScanJob(job)
 
-        if err != nil && St.IsRunning() {
+        if err != nil && St.CtxRunning() {
             St.Errorf("scan job error: %v", err)
         }
 
@@ -588,7 +553,7 @@ func (St *Store) DoScanJob(job ScanJob) {
 func (St *Store) DoSendJob(job SendJob) {
     atomic.AddInt32(&St.numSendJobs, 1)
 
-    err := St.CheckStatus()
+    err := St.CtxStatus()
     if err != nil {
         job.OnComplete <- err
         atomic.AddInt32(&St.numSendJobs, -1)
@@ -598,7 +563,7 @@ func (St *Store) DoSendJob(job SendJob) {
     go func() {
         err := St.doSendJob(job)
 
-        if err != nil && St.IsRunning() {
+        if err != nil && St.CtxRunning() {
             St.Errorf("send job error: %v", err)
         }
 
@@ -613,7 +578,7 @@ func (St *Store) DoSendJob(job SendJob) {
 func (St *Store) DoCommitJob(job CommitJob) error {
     atomic.AddInt32(&St.numCommitJobs, 1)
 
-    err := St.flow.CheckStatus()
+    err := St.CtxStatus()
     if err == nil {
         err = job.Txn.DecodeRawTxn(St.txnDecoder)
     }
@@ -671,7 +636,7 @@ func (St *Store) doSendJob(job SendJob) error {
                 continue
             }
 
-            err = St.CheckStatus()
+            err = St.CtxStatus()
             if err == nil && txnOut != nil {
                 err = job.Outlet.Send(txnOut)
             }
@@ -763,7 +728,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                 
                 for  ; itr.Valid(); itr.Next() {
 
-                    if err = St.CheckStatus(); err != nil {
+                    if err = St.CtxStatus(); err != nil {
                         break
                     }
 
@@ -796,7 +761,7 @@ func (St *Store) doScanJob(job ScanJob) error {
                 dbTxn = nil
 
                 if err == nil {
-                    err = St.CheckStatus()
+                    err = St.CtxStatus()
                 }
 
                 if batchCount == 0 {
@@ -865,8 +830,8 @@ func (St *Store) doScanJob(job ScanJob) error {
                         case <- wakeTimer:
                             doneWaiting = true
 
-                        case <- St.flow.Ctx.Done():
-                            err = St.CheckStatus()
+                        case <- St.Ctx.Done():
+                            err = St.CtxStatus()
                     }
 
                     if doneWaiting || batchCount == batchMax {

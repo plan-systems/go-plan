@@ -167,12 +167,14 @@ func (mgr *MemberSessMgr) StartSession(
     } else {
         ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64p.EncodeToString(ms.WorkstationID[:15]))
     }
+
+    ms.SetLogLabel(fmt.Sprintf("MemSess_%v", ms.MemberIDStr))
     
-    err = ms.flow.Startup(
+    err = ms.CtxStart(
         inMsgOutlet.Context(),
-        fmt.Sprintf("MemberSess_%v", ms.MemberIDStr),
         ms.onInternalStartup,
         ms.onInternalShutdown,
+        nil,
     )
 
     if err != nil {
@@ -257,12 +259,7 @@ func (cc *CommunityCrypto) EndSession(
 
 // MemberSession represents a user/member "logged in", meaning a SKI session is active.
 type MemberSession struct {
-    plan.Logger
-
-    flow            plan.Flow
-
-    // The current community epoch
-    //CommunityEpoch  pdi.CommunityEpoch
+    plan.Context
 
     sessMgr         *MemberSessMgr
 
@@ -329,9 +326,9 @@ func (ms *MemberSession) onInternalStartup() error {
     // 
     // outbound client msg sender
     //
-    ms.flow.ShutdownComplete.Add(1)
     ms.msgOutbox = make(chan *Msg, 8)
-    go func() {
+    ms.CtxGo(func(*plan.Context) {
+
         for msg := range ms.msgOutbox {
 
             //ms.Infof(1, "msgOutlet -> (sess %d, ID %d, %s)", msg.ChSessID, msg.ID, MsgOp_name[int32(msg.Op)])
@@ -341,17 +338,16 @@ func (ms *MemberSession) onInternalStartup() error {
                 ms.Info(1, "msgOutlet error: ", err)
                 // TODO
 
-                if ms.msgOutlet.Context().Err() != nil {
-                    ms.flow.InitiateShutdown("msgOutlet closed")
+                err = ms.msgOutlet.Context().Err()
+                if err != nil {
+                    ms.CtxInitiateStop(err.Error())
                 }
             }
         }
 
         ms.sessMgr.detachSession(ms)
         ms.sessMgr.CR.unregisterCommCrypto(ms.commCrypto)
-
-        ms.flow.ShutdownComplete.Done()
-    }()
+    })
 
     return nil
 }
@@ -369,7 +365,7 @@ func (ms *MemberSession) onInternalShutdown() {
         waiter.Add(len(ms.ChSessions))
         for _, cs := range ms.ChSessions {
             go func(cs *ChSession) {
-                cs.CtxStop(ms.flow.ShutdownReason)
+                cs.CtxStop(ms.CtxStopReason())
                 waiter.Done()
             }(cs)
         }
@@ -392,17 +388,8 @@ func (ms *MemberSession) detachChSession(cs *ChSession) {
 
 // EndSession shutsdown this MemberSession, blocking until the session has been completely removed from use.
 func (ms *MemberSession) EndSession(inReason string) {
-    ms.flow.Shutdown(inReason)
+    ms.CtxStop(inReason)
 }
-
-
-
-// CheckStatus -- see Flow.CheckStatus()
-func (ms *MemberSession) CheckStatus() error {
-    return ms.flow.CheckStatus()
-}
-
-
 
 // StartChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
 func (ms *MemberSession) StartChannelSession(
@@ -410,7 +397,7 @@ func (ms *MemberSession) StartChannelSession(
 ) (*ChSession, error) {
 
     // If this member session is shutting down, this will return an error (and prevent new sessions from starting)
-    err := ms.flow.CheckStatus()
+    err := ms.CtxStatus()
     if err != nil {
         return nil, err
     }
@@ -438,7 +425,7 @@ func (ms *MemberSession) StartChannelSession(
 // WARNING: a client can create multiple pipes, so ensure that all activity is threadsafe.
 func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
 
-    for ms.flow.IsRunning() {
+    for ms.CtxRunning() {
         msg, err := inPipe.Recv()
 
         if msg != nil {
@@ -450,9 +437,7 @@ func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
                 cs := ms.ChSessions[chSessID]
                 ms.ChSessionsMutex.RUnlock()
 
-                if cs == nil {
-                    ms.Warnf("channel session %d not found", chSessID)
-                } else if cs.CtxRunning() {
+                if cs.CtxRunning() {
                     cs.msgInbox <- msg
                 }
             }

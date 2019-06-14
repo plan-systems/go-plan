@@ -6,16 +6,13 @@ import (
     "flag"
     "os"
 
-    log "github.com/sirupsen/logrus"
-    //"time"
+    "log"
     //"io"
     //"bytes"
     //"fmt"
 	//"os/user"
     //"path"
     //"crypto/md5"
-    //"github.com/plan-systems/go-plan/ski/Providers/hive"
-	//_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
     //"encoding/hex"
 
     "github.com/plan-systems/go-plan/plan"
@@ -24,7 +21,6 @@ import (
     //"github.com/plan-systems/go-plan/pservice"
 
     "context"
-
 )
 
 func main() {
@@ -47,17 +43,17 @@ func main() {
 
         //intrCtx, _ := context.WithTimeout(context.Background(), 30 * time.Second)
         
-        pnCtx, err := pn.Startup(intrCtx)
+        err := pn.Startup(intrCtx)
         if err != nil {
             pn.Fatalf("failed to startup repo node")
         } else {
             pn.Infof(0, "to stop: kill -s SIGINT %d", os.Getpid())
 
             select {
-                case <- pnCtx.Done():
+                case <- pn.Ctx.Done():
             }
 
-            pn.Shutdown("pnode complete")
+            pn.CtxStop("pnode complete")
         }
     }
 }

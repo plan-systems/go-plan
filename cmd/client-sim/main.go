@@ -6,8 +6,8 @@ import (
     "flag"
     "io/ioutil"
     "os"
+    "log"
 
-    log "github.com/sirupsen/logrus"
     "time"
     //"io"
     "bufio"
@@ -19,7 +19,6 @@ import (
     "path"
     //"crypto/md5"
     "github.com/plan-systems/go-plan/ski/Providers/hive"
-	//_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
     //"encoding/hex"
     "encoding/json"
     "strings"
@@ -80,23 +79,23 @@ func main() {
         intr, intrCtx := plan.SetupInterruptHandler(context.Background())
         defer intr.Close()
         
-        wsCtx, err := ws.Startup(intrCtx)
+        err := ws.Startup(intrCtx)
         if err != nil {
-            log.WithError(err).Fatalf("failed to startup client-sim")
+            ws.Fatalf("failed to startup: %v", err)
         }
 
-        log.Infof("to stop service: kill -s SIGINT %d\n", os.Getpid())
+        ws.Infof(0, "to stop service: kill -s SIGINT %d", os.Getpid())
 
         err = ws.Login(0, seedMember)
         if err != nil {
-            log.WithError(err).Fatalf("client-sim fail")
+            ws.Fatalf("client-sim fatal err: %v", err)
         }
 
         select {
-            case <- wsCtx.Done():
+            case <- ws.Ctx.Done():
         }
 
-        ws.Shutdown("client done")
+        ws.CtxStop("client done")
     }   
 
 }
@@ -113,7 +112,7 @@ func main() {
 // (c) A User has any number of communities (repos) seeded, meaning it has established an
 //     account on a given pnode for a given community. 
 type Workstation struct {
-    flow                        plan.Flow
+    plan.Context
 
     BasePath                    string
     UsersPath                   string
@@ -141,6 +140,8 @@ func NewWorkstation(
     ws := &Workstation{
 
     }
+
+    ws.SetLogLabel("client-sim")
 /*
 id, err := machineid.ProtectedID("myAppName")
   if err != nil {
@@ -203,25 +204,17 @@ func (ws *Workstation) readConfig(inFirstTime bool) error {
 // Startup --
 func (ws *Workstation) Startup(
     inCtx context.Context,
-) (context.Context, error) {
+) error {
 
-    err := ws.flow.Startup(
+    err := ws.CtxStart(
         inCtx, 
-        "Workstaion",
         ws.internalStartup,
         ws.internalShutdown,
+        nil,
     )
 
-    return ws.flow.Ctx, err
+    return err
 }
-
-// Shutdown --
-func (ws *Workstation) Shutdown(inReason string) {
-
-    ws.flow.Shutdown(inReason)
-
-}
-
 
 func (ws *Workstation) internalStartup() error {
 
@@ -241,9 +234,7 @@ func (ws *Workstation) internalStartup() error {
 }
 
 
-
 func (ws *Workstation) internalShutdown() {
-
 
 }
 
@@ -386,10 +377,9 @@ type chSess struct {
 }
 
 
+// ClientSess is user using this workstation -- only one client session per workstation is allowed/possible.
 type ClientSess struct {
-    plan.Logger
-
-    flow                plan.Flow
+    plan.Context
 
     ws                  *Workstation
 
@@ -402,7 +392,6 @@ type ClientSess struct {
     entriesToCommit     chan *msgItem
             
     msgOutbox           chan *repo.Msg
-    //msInbbox           chan *repo.Msg
 
     msgInlet            repo.Repo_OpenMemberSessionClient
     msgOutlet           repo.Repo_OpenMsgPipeClient
@@ -416,21 +405,21 @@ type ClientSess struct {
 }
 
 
-
+// Startup initiates connection to the repo
 func (sess *ClientSess) Startup(
     inCtx context.Context,
-) (context.Context, error) {
+) error {
 
     sess.SetLogLabel("ClientSession")
 
-    err := sess.flow.Startup(
+    err := sess.CtxStart(
         inCtx, 
-        sess.GetLogLabel(),
         sess.internalStartup,
         sess.internalShutdown,
+        nil,
     )
 
-    return sess.flow.Ctx, err
+    return err
 }
 
 
@@ -456,7 +445,7 @@ func (sess *ClientSess) internalStartup() error {
     //
     //
     //
-    go func() {
+    sess.CtxGo(func(*plan.Context) {
 
         for item := range sess.entriesToCommit {
             txnSet, err := sess.MemberCrypto.EncryptAndEncodeEntry(item.msg.EntryInfo, item.entryBody)
@@ -479,16 +468,14 @@ func (sess *ClientSess) internalStartup() error {
             }
         }
 
-        sess.MemberCrypto.EndSession(sess.flow.ShutdownReason)
-
-        sess.flow.ShutdownComplete.Done()
-    }()
+        sess.MemberCrypto.EndSession(sess.CtxStopReason())
+    })
 
 
     //
     //
     //
-    go func() {
+    sess.CtxGo(func(*plan.Context) {
 
         for msg := range sess.msgOutbox {
 
@@ -502,10 +489,9 @@ func (sess *ClientSess) internalStartup() error {
             }
         }
 
-        sess.MemberCrypto.EndSession(sess.flow.ShutdownReason)
+        sess.MemberCrypto.EndSession(sess.CtxStopReason())
 
-        sess.flow.ShutdownComplete.Done()
-    }()
+    })
 
     return nil
 }
@@ -537,7 +523,7 @@ func (sess *ClientSess) detachChSess(cs *chSess) {
 
 func (sess *ClientSess) connectToRepo(inAddr string) error {
 
-    repoConn, err := grpc.DialContext(sess.flow.Ctx, inAddr, grpc.WithInsecure())
+    repoConn, err := grpc.DialContext(sess.Ctx, inAddr, grpc.WithInsecure())
     if err != nil {
         return err
     }
@@ -560,7 +546,7 @@ func (sess *ClientSess) openMemberSession() error {
         err error
     )
 
-    sess.msgInlet, err = sess.repoClient.OpenMemberSession(sess.flow.Ctx, 
+    sess.msgInlet, err = sess.repoClient.OpenMemberSession(sess.Ctx, 
         &repo.MemberSessionReq{
             WorkstationID: sess.ws.Info.InstallID,
             CommunityID: sess.Info.CommunityEpoch.CommunityID,
@@ -583,9 +569,9 @@ func (sess *ClientSess) openMemberSession() error {
     sess.sessToken = msg.BUF0
  
     // Since OpenMemberSession() uses a stream responder, the trailer is never set, so we use this guy as the sesh token.
-    sess.flow.Ctx = plan.ApplyTokenOutgoingContext(sess.flow.Ctx, sess.sessToken)
+    sess.Ctx = plan.ApplyTokenOutgoingContext(sess.Ctx, sess.sessToken)
 
-    sess.msgOutlet, err = sess.repoClient.OpenMsgPipe(sess.flow.Ctx)
+    sess.msgOutlet, err = sess.repoClient.OpenMsgPipe(sess.Ctx)
     if err != nil {
         return err
     }
@@ -606,11 +592,9 @@ func (sess *ClientSess) openMemberSession() error {
     }
 
     go func() {
-        for sess.flow.IsRunning() {
+        for sess.CtxRunning() {
             msg, err := sess.msgInlet.Recv()
-            if err != nil {
-                sess.flow.FilterFault(err)
-            } else {
+            if err == nil {
     
                 //sess.Infof(1, "(sess %d, ID %d, %s) <- sess.msgInlet", msg.ChSessID, msg.ID, repo.MsgOp_name[int32(msg.Op)])
 
@@ -641,7 +625,7 @@ func (sess *ClientSess) openChannel(
     inChID plan.ChID,
 ) (*chSess, error) {
 
-    sessInfo, err := sess.repoClient.StartChannelSession(sess.flow.Ctx,
+    sessInfo, err := sess.repoClient.StartChannelSession(sess.Ctx,
         &repo.ChInvocation{
             ChID: inChID,
         })
@@ -795,7 +779,7 @@ func (sess *ClientSess) createNewChannel(
 
 
 
-
+// Login is a test login
 func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
 
     seedPathname := path.Join(ws.UsersPath, ws.Seeds[inNum], seedFilename)
@@ -834,7 +818,7 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
     }
 
 
-    sess.Startup(ws.flow.Ctx)
+    sess.Startup(ws.Ctx)
     if err != nil {
         return err
     }
@@ -848,7 +832,7 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
 
     // TODO: move this to ImportSeed()
     if inSeedMember {
-        _, err := sess.repoClient.SeedRepo(sess.flow.Ctx, sess.MemberSeed.RepoSeed)
+        _, err := sess.repoClient.SeedRepo(sess.Ctx, sess.MemberSeed.RepoSeed)
         if err != nil {
             return err
 

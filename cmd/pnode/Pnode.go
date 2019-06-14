@@ -66,9 +66,7 @@ func (config *PnodeConfig) ApplyDefaults() {
 
 // Pnode wraps one or more communities replicated to a local dir.
 type Pnode struct {
-    plan.Logger
-
-    flow                        plan.Flow
+    plan.Context
 
     reposMutex                  sync.RWMutex
     repos                       map[plan.CommunityID]*repo.CommunityRepo
@@ -81,7 +79,6 @@ type Pnode struct {
 
     grpcServer                  *grpc.Server
     listener                    net.Listener
-    grpcDone                    chan struct{}
 }
 
 
@@ -189,14 +186,36 @@ func (pn *Pnode) internalStartup() error {
     }
 
     for _, CR := range pn.repos {
-        err = CR.Startup(pn.flow.Ctx)
+        err = CR.Startup(pn.Ctx)
         if err != nil {
             break
         }
     }
 
+    //
+    //
+    //
+    // grpc service
+    //
     if err == nil {
-        err = pn.startServer()
+        pn.Infof(0, "starting service on %v %v", pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
+        listener, err := net.Listen(pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
+        if err != nil {
+            return err
+        }
+
+        pn.grpcServer = grpc.NewServer()
+        repo.RegisterRepoServer(pn.grpcServer, pn)
+        
+        // Register reflection service on gRPC server.
+        reflection.Register(pn.grpcServer)
+        pn.CtxGo(func(*plan.Context) {
+            if err := pn.grpcServer.Serve(listener); err != nil {
+                pn.Error("grpc server error: ", err)
+            }
+            pn.CtxInitiateStop("grpc server stopped")
+            listener.Close()
+        })
     }
 
     return err
@@ -215,18 +234,15 @@ func (pn *Pnode) internalShutdown() {
     for _, v := range pn.repos {
         CR := v
         go func() {
-            CR.Shutdown(pn.flow.ShutdownReason)
+            CR.CtxStop(pn.CtxStopReason())
             reposRunning.Done()
         }()
     }
     pn.reposMutex.RUnlock()
 
     if pn.grpcServer != nil {
-        pn.flow.Log.Info("Stopping Repo grpc service")
+        pn.Info(1, "stopping grpc service")
         pn.grpcServer.GracefulStop()
-
-        _, _ = <- pn.grpcDone
-        pn.flow.Log.Debug("Repo stopped")
     }
 
     reposRunning.Wait()
@@ -237,29 +253,24 @@ func (pn *Pnode) internalShutdown() {
 // Startup -- see pcore.Flow.Startup
 func (pn *Pnode) Startup(
     inCtx context.Context,
-) (context.Context, error) {
+) error {
 
-    err := pn.flow.Startup(
+    err := pn.CtxStart(
         inCtx, 
-        pn.GetLogLabel(),
         pn.internalStartup,
         pn.internalShutdown,
+        nil,
     )
 
-    return pn.flow.Ctx, err
-}
-
-// Shutdown -- see pcore.Flow.Startup
-func (pn *Pnode) Shutdown(inReason string) {
-
-    pn.flow.Shutdown(inReason)
-
+    return err
 }
 
 // seedRepo adds a new repo (if it doesn't already exist)
 func (pn *Pnode) seedRepo(
     inSeed *repo.RepoSeed,
 ) error {
+
+    var CR *repo.CommunityRepo
 
     {
         genesis, err := inSeed.ExtractAndVerifyGenesisSeed()
@@ -268,18 +279,13 @@ func (pn *Pnode) seedRepo(
         }
 
         // If the repo is already seed, nothing further required
-        CR := pn.fetchRepo(genesis.StorageEpoch.CommunityID)
+        CR = pn.fetchRepo(genesis.StorageEpoch.CommunityID)
         if CR != nil {
             return nil
         }
     }
 
-    // In the unlikely event that pn.Shutdown() is called while this is all happening, 
-    //    prevent the rug from being snatched out from under us.
-    pn.flow.ShutdownComplete.Add(1)
-    defer pn.flow.ShutdownComplete.Done()
-
-    if ! pn.flow.IsRunning() {
+    if ! pn.CtxRunning() {
         return plan.Error(nil, plan.AssertFailed, "pnode must be running to seed a new repo")
     }
 
@@ -288,12 +294,23 @@ func (pn *Pnode) seedRepo(
     repoPath, err := plan.CreateNewDir(pn.ReposPath, inSeed.SuggestedDirName)
     if err != nil { return err }
 
+    // In the unlikely event that pn.Shutdown() is called while this is all happening, 
+    //    prevent the rug from being snatched out from under us.
+    hold := make(chan struct{})
+    defer func() {
+        hold <- struct{}{}
+    }()
+    pn.CtxGo(func(*plan.Context) {
+        <- hold
+    })
+
     // When we pass the seed, it means create from scratch
-    CR, err := repo.NewCommunityRepo(repoPath, inSeed)
-    if err != nil { return err }
+    if err == nil {
+        CR, err = repo.NewCommunityRepo(repoPath, inSeed)
+    }
 
     if err == nil {
-        err = CR.Startup(pn.flow.Ctx)
+        err = CR.Startup(pn.Ctx)
     }
 
     if err == nil {
@@ -302,12 +319,11 @@ func (pn *Pnode) seedRepo(
 
     if err == nil {
         pn.Info(0, "seeding new repo at ", repoPath)
+        pn.registerRepo(CR)
+    } else {
+        CR.CtxStop("seed failed")
 
-        if pn.flow.IsRunning() {
-            pn.registerRepo(CR)
-        } else {
-            CR.Shutdown("creation complete")
-        }
+        // TODO: clean up
     }
 
     return err
@@ -325,7 +341,7 @@ func (pn *Pnode) fetchMemberSession(ctx context.Context) (*repo.MemberSession, e
         return nil, plan.Errorf(nil, plan.AssertFailed, "internal type assertion err")
     }
 
-    err = ms.CheckStatus()
+    err = ms.CtxStatus()
     if err != nil {
         return nil, err
     }
@@ -355,36 +371,6 @@ func (pn *Pnode) fetchRepo(inID []byte) *repo.CommunityRepo {
 
     return CR
 
-}
-
-
-func (pn *Pnode) startServer() error {
-
-    pn.grpcDone = make(chan struct{})
-
-    pn.flow.Log.Infof("starting Repo service on %v %v", pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
-    listener, err := net.Listen(pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
-    if err != nil {
-        return err
-    }
-
-    pn.grpcServer = grpc.NewServer()
-    repo.RegisterRepoServer(pn.grpcServer, pn)
-    
-    // Register reflection service on gRPC server.
-    reflection.Register(pn.grpcServer)
-    go func() {
-
-        if err := pn.grpcServer.Serve(listener); err != nil {
-            pn.flow.LogErr(err, "grpc Serve() failed")
-        }
-        
-        listener.Close()
-
-        close(pn.grpcDone)
-    }()
-
-    return nil
 }
 
 /*****************************************************
@@ -441,7 +427,7 @@ func (pn *Pnode) OpenMemberSession(
     sess := pn.activeSessions.NewSession(inMsgOutlet.Context(), ms.SessionToken)
     sess.Cookie = ms
 
-    // Should this be waiting on ms.flow.ShutdownComplete instead?
+    // Should this be waiting on ms.flow.StopComplete instead?
     select {
         case <- inMsgOutlet.Context().Done():
     }
