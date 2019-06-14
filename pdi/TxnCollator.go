@@ -175,9 +175,9 @@ func (txnSet *PayloadTxnSet) Verify() error {
             if seg == nil {
                 return plan.Error(nil, plan.TxnNotConsistent, "missing at least one txn")
             } else if seg.Info.SegTotal != info.SegTotal || seg.Info.PayloadEncoding != info.PayloadEncoding {
-                return plan.Errorf(nil, plan.TxnNotConsistent, "txn set %v not consistent", seg.URIDstring())
+                return plan.Errorf(nil, plan.TxnNotConsistent, "txn set %v not consistent", seg.URIDStr())
             } else if ! bytes.Equal(seg.Info.PrevURID, prevURID) {
-                return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg URID %v, got %v", seg.URIDstring(), seg.Info.PrevURID, prevURID)
+                return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg URID %v, got %v", seg.URIDStr(), seg.Info.PrevURID, prevURID)
             }
 
             prevURID = seg.Info.URID
@@ -197,11 +197,11 @@ func (txnSet *PayloadTxnSet) MergeSegment(seg *DecodedTxn) error {
  
     // Check segment/txn info is well-formed
 	if idx < 0 || seg.Info.SegTotal < 1 || idx >= seg.Info.SegTotal {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.URIDstring(), seg.Info.SegIndex, seg.Info.SegTotal)
+		return plan.Errorf(nil, plan.TxnNotConsistent, "bad txn %v, SegIndex=%d SegTotal=%d", seg.URIDStr(), seg.Info.SegIndex, seg.Info.SegTotal)
     } else if seg.Info.SegSz != segSz {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.URIDstring(), seg.Info.SegSz, segSz)
+		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v bad seg len: expected %d, got %d", seg.URIDStr(), seg.Info.SegSz, segSz)
     } else if uint32(len(txnSet.Segs)) != seg.Info.SegTotal {
-		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: total segments (%d) is not consistent with txnSet", seg.URIDstring(), seg.Info.SegTotal)
+		return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: total segments (%d) is not consistent with txnSet", seg.URIDStr(), seg.Info.SegTotal)
     }
 
     // Put the segment in it's place.
@@ -264,9 +264,9 @@ func (seg *DecodedTxn) TxnURID() URID {
     return URID(seg.Info.URID)
 }
 
-// URIDstring returns the string-ified URID associated with this txn
-func (seg *DecodedTxn) URIDstring() string {
-    return URID(seg.Info.URID).String()
+// URIDStr returns the string-ified URID associated with this txn
+func (seg *DecodedTxn) URIDStr() string {
+    return URID(seg.Info.URID).Str()
 }
 
 // TxnCollater helps desegment/"collate" txns from multi-segment pieces into a single segment (that can be unmarshalled).

@@ -1459,7 +1459,7 @@ func (chSt *ChStore) RevalidateDependencies(
                 return chDep.Unmarshal(v)
             })
             if err != nil {
-                chSt.chMgr.flow.LogErr(err, "error loading ch dep")
+                chSt.chMgr.CtxOnFault(err, "loading ch dep")
             } else {
                 depCh, _ := chSt.chMgr.FetchChannel(depChID)
                 if depCh == nil {
@@ -1666,6 +1666,7 @@ func chEntryProcessor(ch ChAgent) {
             // Does the entry need to be merged?
             if entry.State.Status == EntryStatus_AWAITING_MERGE {
                 err = mergeEntry(ch, entry)
+                chSt.chMgr.CtxOnFault(err, "merging entry")
             }
 
             switch entry.State.Status {
@@ -1684,7 +1685,6 @@ func chEntryProcessor(ch ChAgent) {
             }
 
             if err != nil {
-                err = chSt.chMgr.flow.FilterFault(err)
 
                 // TODO: handle entry.txnSet
                 { }

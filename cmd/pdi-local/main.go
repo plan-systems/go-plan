@@ -56,23 +56,22 @@ func main() {
             intr, intrCtx := plan.SetupInterruptHandler(context.Background())
             defer intr.Close()
 
-            snCtx, err := sn.Startup(intrCtx)
+            err := sn.Startup(intrCtx)
             if err != nil {
                 sn.Fatalf("failed to startup: %v", err)
             } else {
                 sn.Infof(0, "to stop: kill -s SIGINT %d", os.Getpid())
 
                 select {
-                    case <-snCtx.Done():
+                    case <- sn.Ctx.Done():
                 }
 
-                sn.Shutdown("task complete")
+                sn.CtxStop("snode complete")
             }     
         }
     }
 
 }
-
 
 
 
@@ -124,33 +123,13 @@ func loadGenesisInfo(inPathname string) (*CommunityGenesis, error) {
 
 // CommunityGenesis is a helper for creating a new community
 type CommunityGenesis struct {
+    plan.Logger
 
     GenesisSeed         repo.GenesisSeed
     MemberSeed          repo.MemberSeed
  
     txnsToCommit        []pdi.RawTxn
 }
-
-/*****************************************************
-** MemberHost (interface)
-**/
-
-// Context -- see interface MemberHost
-func (CG *CommunityGenesis) Context() context.Context {
-    return context.Background()
-}
-
-// LatestCommunityEpoch -- see interface MemberHost
-func (CG *CommunityGenesis) LatestCommunityEpoch() *pdi.CommunityEpoch {
-    return CG.GenesisSeed.CommunityEpoch
-}
-
-// LatestStorageEpoch -- see interface MemberHost
-func (CG *CommunityGenesis) LatestStorageEpoch() pdi.StorageEpoch {
-    return *CG.GenesisSeed.StorageEpoch
-}
-
-
 
 
 // CreateNewCommunity creates a new community.
@@ -159,6 +138,8 @@ func (CG *CommunityGenesis) LatestStorageEpoch() pdi.StorageEpoch {
 func (CG *CommunityGenesis) CreateNewCommunity(
     sn *Snode,
 ) error {
+
+    CG.SetLogLabel("genesis")
 
     CG.MemberSeed = repo.MemberSeed{
         RepoSeed: &repo.RepoSeed{
@@ -409,7 +390,7 @@ func (CG *CommunityGenesis) emitGenesisEntries(mc *client.MemberCrypto) error {
 
         // Set the channel IDs of the newly generated community channels
         if i < 3 {
-            fmt.Printf("Created %s: %s\n", pdi.CommunityChID_name[int32(entry.assignTo)], entryID.Str())
+            CG.Infof(0, "Created %s: %s", pdi.CommunityChID_name[int32(entry.assignTo)], entryID.Str())
             CG.GenesisSeed.StorageEpoch.CommunityChID(entry.assignTo).AssignFromTID(entryID)
         }
 

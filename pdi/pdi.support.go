@@ -178,19 +178,6 @@ func Encode64(in []byte) string {
 // The purpose of a URID is that it can be easily compared with others and easily sorted chronologically.
 type URID []byte
 
-// URIDBlob is an array buf version of URID
-type URIDBlob [URIDSz]byte
-
-// URID is a convenience function that returns the URID contained within this URIDBlob.
-func (id *URIDBlob) URID() URID {
-    return id[:]
-}
-
-// ExtractTime extracts the time index bourne by this URID
-func (id *URIDBlob) ExtractTime() int64 {
-    return URID(id[:]).ExtractTime()
-}
-
 // ExtractTime extracts the time index bourne by this URID
 func (id URID) ExtractTime() int64 {
 
@@ -213,8 +200,8 @@ func (id URID) Blob() URIDBlob {
     return blob
 }
 
-// String converts a binary URID into its pdi.Base64 ASCII string representation.
-func (id URID) String() string {
+// Str converts a binary URID into its pdi.Base64 ASCII string representation.
+func (id URID) Str() string {
     var str [URIDStrLen]byte
 
     sz := len(id)
@@ -276,6 +263,18 @@ func URIDFromTimeAndHash(in []byte, inTimestamp int64, inID []byte) URID {
     return raw
 }
 
+// URIDBlob is an array buf version of URID
+type URIDBlob [URIDSz]byte
+
+// URID is a convenience function that returns the URID contained within this URIDBlob.
+func (id *URIDBlob) URID() URID {
+    return id[:]
+}
+
+// ExtractTime extracts the time index bourne by this URID
+func (id *URIDBlob) ExtractTime() int64 {
+    return URID(id[:]).ExtractTime()
+}
 
 // Deposit deposits the given transfer into this account
 func (acct *StorageAccount) Deposit(xfer *Transfer) error {
