@@ -856,7 +856,7 @@ func (CR *CommunityRepo) DecryptAndMergeEntry(entry *chEntry) error {
 
     // TODO: have txn holding tank for txns that can't decode b/c the epoch isn't live or not found yet
     if commEpoch == nil {
-        return plan.Error(nil, plan.CommunityEpochNotFound, "community epoch not found")
+        return plan.Errorf(nil, plan.CommunityEpochNotFound, "community epoch %v not found", plan.Base64p.EncodeToString(tmpCrypt.CommunityEpochID))
     }
 
     var payload ski.SignedPayload
@@ -1000,19 +1000,21 @@ func (CR *CommunityRepo) LatestStorageEpoch() pdi.StorageEpoch {
 // FetchCommunityEpoch returns the CommunityEpoch with the matching epoch ID
 func (CR *CommunityRepo) FetchCommunityEpoch(inEpochID []byte, inLiveOnly bool) *pdi.CommunityEpoch {
 
+    var commEpoch *pdi.CommunityEpoch
+
     if len(inEpochID) == plan.TIDSz {
         chCE := CR.chMgr.FetchCommunityEpochsChannel()
         if chCE != nil {
-            return chCE.FetchCommunityEpoch(inEpochID, inLiveOnly)
+            commEpoch = chCE.FetchCommunityEpoch(inEpochID, inLiveOnly)
         }
     }
 
     // If inEpochID is nil, then the genesis epoch is assumed
-    if len(inEpochID) == 0 || bytes.Equal(inEpochID, CR.GenesisSeed.CommunityEpoch.EpochTID) {
-        return CR.GenesisSeed.CommunityEpoch
+    if commEpoch == nil || bytes.Equal(inEpochID, CR.GenesisSeed.CommunityEpoch.EpochTID) {
+        commEpoch = CR.GenesisSeed.CommunityEpoch
     }
 
-    return nil
+    return commEpoch
 }
 
 
