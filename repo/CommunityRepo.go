@@ -464,8 +464,6 @@ func (CR *CommunityRepo) onInternalShutdown() {
     // First, end all member sessions (and channel sessions)
     CR.MemberSessMgr.Shutdown(CR.CtxStopReason(), nil)
 
-    CR.Infof(1, "all member sessions ended")
-
     // This will cause the fetch, then decode, then merge routines to stop
     if CR.txnsToFetch != nil {
         close(CR.txnsToFetch)
@@ -477,7 +475,7 @@ func (CR *CommunityRepo) onInternalShutdown() {
 
 func (CR *CommunityRepo) spSyncActivate() {
 
-    CR.Info(1, "sync with StorageProvider(s) ACTIVATING")
+    CR.Info(1, "StorageProvider sync ACTIVATING")
     
     // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
     CR.spSyncActive = true
@@ -488,13 +486,16 @@ func (CR *CommunityRepo) spSyncActivate() {
 
 func (CR *CommunityRepo) spSyncStop() {
 
-    CR.Info(1, "sync with StorageProvider(s) DEACTIVATING")
+    CR.Info(1, "StorageProvider sync DEACTIVATING")
 
     // Scanning will stop once it sees the CR is shutting down so wait until we know for sure that scanning is done so we know no new txns are requested
     CR.spSyncActive = false
     CR.spSyncWake()
 
     CR.spSyncWorkers.Wait()
+
+    CR.Info(1, "StorageProvider sync DEACTIVATED")
+
 }
 
 
@@ -540,7 +541,7 @@ func (CR *CommunityRepo) spSyncController(inParent *plan.Context) {
                 CR.spSyncActive = false
             }
             
-            // Only stop if we're in a grounded state.
+            // Wait until we're in the ground state before exiting
             if CR.spSyncStatus == spSyncStopped {
                 break
             }
@@ -578,11 +579,14 @@ func (CR *CommunityRepo) spSyncController(inParent *plan.Context) {
         }
     }
 
+    CR.Info(1, "StorageProvider sync mgr exiting")
 }
 
 
 
 func (CR *CommunityRepo) connectToStorage() {
+
+    CR.Info(1, "connecting to StorageProvider")
 
     CR.spSyncStatus = spSyncConnecting
 
@@ -836,6 +840,9 @@ func (CR *CommunityRepo) forwardTxnScanner() {
     }
 
     CR.spSyncWorkers.Done()
+
+    CR.Info(1, "starting forward txn exited")
+
 }
 
 // DecryptAndMergeEntry decrypts the given entry and then merges it with this repo.

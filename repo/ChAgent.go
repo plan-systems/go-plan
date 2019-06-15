@@ -436,7 +436,7 @@ func (chSt *ChStore) loadEntry(
             })
         }
         if err != nil {
-            chSt.Errorf("entry %v load EntryInfo error: %v", inEntryID.SuffixStr(), err)  
+            chSt.Errorf("entry %v load EntryInfo error: %v", inEntryID.Str(), err)  
         }
     }
 
@@ -455,7 +455,7 @@ func (chSt *ChStore) loadEntry(
             })
         }
         if err != nil {
-            chSt.Errorf("entry %v load EntryState error: %v", inEntryID.SuffixStr(), err)  
+            chSt.Errorf("entry %v load EntryState error: %v", inEntryID.Str(), err)  
         }
     }
 
@@ -468,7 +468,7 @@ func (chSt *ChStore) loadEntry(
                 err = item.Value(loadBody)
             }
             if err != nil {
-                chSt.Errorf("entry %v load body error: %v", inEntryID.SuffixStr(), err)  
+                chSt.Errorf("entry %v load body error: %v", inEntryID.Str(), err)  
             }
         }
     }
@@ -533,9 +533,6 @@ func (chSt *ChStore) loadEntryHL(
         &entry.State,
         nil,
     )
-    if err != nil {
-        panic(err)
-    }
 
     entry.StatePrev = entry.State
     entry.stateStatus = partLoaded
@@ -861,23 +858,6 @@ func (chSt *ChStore) OnLivenessChanged(
     return nil
 
 }
-
-
-/*
-// OnLivenessChanged -- see ChAgent.OnLivenessChanged
-func (chSt *ChStore) LoadBestEntryBody(
-    inLiveAsset *ChLiveAsset,
-    outBody pcore.Unmarshaller,
-) error {
-
-    chTxn := chSt.db.NewTransaction(false)
-
-    if chTxn.Get(
-    inLiveAsset
-    return nil
-
-}
-*/
 
 
 func (chSt *ChStore) FetchChEpoch(

@@ -21,8 +21,6 @@ import (
 	"google.golang.org/grpc/reflection"
     //"google.golang.org/grpc/metadata"
 
-    "github.com/ethereum/go-ethereum/common/hexutil"
-
     //"github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/repo"
@@ -40,7 +38,7 @@ const (
 type PnodeConfig struct {
 
     Name                        string                          `json:"node_name"`
-    NodeID                      hexutil.Bytes                   `json:"node_id"`
+    NodeID                      plan.Bytes                      `json:"node_id"`
 
     DefaultFileMode             os.FileMode                     `json:"default_file_mode"`
 

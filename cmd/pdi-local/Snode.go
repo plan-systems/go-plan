@@ -8,7 +8,7 @@ import (
     "path"
     "io/ioutil"
     //"fmt"
-    "sync"
+    //"sync"
     "time"
     "net"
     crand "crypto/rand"
@@ -20,8 +20,6 @@ import (
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
-    "github.com/ethereum/go-ethereum/common/hexutil"
-
     "golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -32,8 +30,7 @@ import (
 // GenesisParams is entered by humans
 type GenesisParams struct {
     CommunityName           string                  `json:"community_name"`
-    CommunityID             hexutil.Bytes           `json:"community_id"`
-    //GenesisAddr             hexutil.Bytes           `json:"genesis_addr"`
+    CommunityID             plan.Bytes              `json:"community_id"`
 }
 
 
@@ -60,9 +57,6 @@ const (
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
     plan.Context
-
-    storesMutex                 sync.RWMutex
-    stores                      map[plan.CommunityID]*ds.Store
     
     activeSessions              plan.SessionGroup
 
@@ -79,7 +73,7 @@ type Snode struct {
 type Config struct {
 
     Name                        string                          `json:"node_name"`
-    NodeID                      hexutil.Bytes                   `json:"node_id"`
+    NodeID                      plan.Bytes                      `json:"node_id"`
 
     StorageConfigs              []ds.StorageConfig              `json:"storage_configs"`
 
@@ -113,7 +107,6 @@ func NewSnode(
 
 
     sn := &Snode{
-        stores: make(map[plan.CommunityID]*ds.Store),
         activeSessions: plan.NewSessionGroup(),
     }
         
@@ -153,20 +146,20 @@ func (sn *Snode) Startup(inCtx context.Context) error {
 }
 
 func (sn *Snode) onInternalStartup() error {
-
     var err error
-
 
     for i := range sn.Config.StorageConfigs {
         info := &sn.Config.StorageConfigs[i]
         
         St := ds.NewStore(info, sn.BasePath)
 
-        sn.registerStore(St)
-    }
+        err = St.Startup(sn.Ctx, false)
+        if err != nil {
+            break
+        }
 
-    for _, St := range sn.stores {
-        St.Startup(sn.Ctx, false)
+        St.CtxID = plan.Base64p.EncodeToString(info.StorageEpoch.CommunityID)
+        sn.CtxAddChild(St)
     }
 
     if err == nil {
@@ -195,29 +188,15 @@ func (sn *Snode) onInternalStartup() error {
 }
 
 
-
 func (sn *Snode) onInternalShutdown() {
 
-    // Shutdown the Stores FIRST so that all we have to do is wait on the server to stop.
-    storesRunning := &sync.WaitGroup{}
-
-    storesRunning.Add(len(sn.stores))
-    for _, v := range sn.stores {
-        St := v
-        go func() {
-            St.CtxStop(sn.CtxStopReason())
-            storesRunning.Done()
-        }()
-    }
-
+    // At this point, the Stores are already stopped (since they are all children).
+    // Stopping the grpc server is the last thing the Snode (plan.Context) is waiting on.
     if sn.grpcServer != nil {
         sn.Info(1, "stopping grpc service")
         sn.grpcServer.GracefulStop()
     }
-
-    storesRunning.Wait()
 }
-
 
 
 // readConfig uses BasePath to read in the node's config file
@@ -325,26 +304,16 @@ func (sn *Snode) CreateNewStore(
     return nil
 }
 
-func (sn *Snode) registerStore(St *ds.Store) {
-   
-    communityID := plan.GetCommunityID(St.Config.StorageEpoch.CommunityID)
-
-    sn.storesMutex.Lock()
-    sn.stores[communityID] = St
-    sn.storesMutex.Unlock()
-}
-
 func (sn *Snode) fetchStore(inCommunityID []byte) *ds.Store {
 
-    communityID := plan.GetCommunityID(inCommunityID)
+    keyStr := plan.Base64p.EncodeToString(inCommunityID)
+    if child := sn.CtxGetChildByID(keyStr); child != nil {
+        return child.(*ds.Store)
+    }
 
-    sn.storesMutex.RLock()
-    St := sn.stores[communityID]
-    sn.storesMutex.RUnlock()
-
-    return St
-
+    return nil
 }
+
 // StartSession -- see service StorageProvider in pdi.proto
 func (sn *Snode) StartSession(ctx context.Context, in *pdi.SessionReq) (*pdi.StorageInfo, error) {
     if in.StorageEpoch == nil {

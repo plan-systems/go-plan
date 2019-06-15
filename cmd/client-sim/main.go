@@ -33,8 +33,6 @@ import (
     "github.com/plan-systems/go-plan/pdi"
     //"github.com/plan-systems/go-plan/pservice"
 
-    "github.com/ethereum/go-ethereum/common/hexutil"
-
     "context"
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
@@ -127,7 +125,7 @@ type Workstation struct {
 // InstallInfo is generated during client installation is considered immutable. 
 type InstallInfo struct {
 
-    InstallID                   hexutil.Bytes                   `json:"install_id"`
+    InstallID                   plan.Bytes                   `json:"install_id"`
 
 }
 
