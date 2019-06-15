@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+    "encoding/json"
 	"fmt"
 	"os"
 	"os/user"
 	"path"
+    "reflect"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +17,6 @@ import (
 	crand "crypto/rand"
 
 	"github.com/plan-systems/klog"
-	log "github.com/sirupsen/logrus"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -222,224 +223,67 @@ func SmartMarshal(inItem Marshaller, ioBuf []byte) []byte {
 	return ioBuf[:sz]
 }
 
-// Flow is a service helper.
-type Flow struct {
-	Ctx       context.Context
-	ctxCancel context.CancelFunc
+// Ctx is an abstraction for a context that can stopped/aborted.
+type Ctx interface {
 
-	Desc string
+    CtxStop(inReason string)
 
-	ShutdownComplete sync.WaitGroup
-	ShutdownReason   string
-	shutdownMutex    sync.Mutex
+    CtxIDStr() string
 
-	FaultLog   []error
-	FaultLimit int
-	Log        *log.Logger
-	logMutex   sync.Mutex
+    setParent(inNewParent Ctx)
+    getParent() Ctx
+    detachChild(inChild Ctx)
 }
 
-// Startup blocks until this Context is started up or stopped (if an err is returned).
-func (F *Flow) Startup(
-	inCtx context.Context,
-	inDesc string,
-	onInternalStartup func() error,
-	onInternalShutdown func(),
-) error {
 
-	F.ShutdownComplete.Wait()
-	F.ShutdownComplete.Add(1)
-
-	F.FaultLimit = 3
-	F.Log = log.StandardLogger()
-	F.Desc = inDesc
-	F.Ctx, F.ctxCancel = context.WithCancel(inCtx)
-
-	err := onInternalStartup()
-	if err != nil {
-		F.InitiateShutdown(inDesc + " internal startup failed")
-	}
-
-	go func() {
-
-		select {
-		case <-F.Ctx.Done():
-		}
-
-		onInternalShutdown()
-
-		F.shutdownMutex.Lock()
-		F.ctxCancel = nil
-		F.shutdownMutex.Unlock()
-
-		F.ShutdownComplete.Done()
-	}()
-
-	if err != nil {
-		F.ShutdownComplete.Wait()
-
-		F.Log.WithError(err).Warnf("%v startup failed", F.Desc)
-	}
-
-	return err
-}
-
-// CheckStatus returns an error if this Service is shut down or shutting down.
-//
-// THREADSAFE
-func (F *Flow) CheckStatus() error {
-
-	if F.Ctx == nil {
-		return Error(nil, ServiceShutdown, "context not running")
-	}
-
-	select {
-	case <-F.Ctx.Done():
-		return F.Ctx.Err()
-	default:
-		// still running baby!
-	}
-
-	return nil
-}
-
-// IsRunning returns true if this Context has not yet been shutdown.
-//
-// THREADSAFE
-func (F *Flow) IsRunning() bool {
-
-	if F.Ctx == nil {
-		return false
-	}
-
-	select {
-	case <-F.Ctx.Done():
-		return false
-	default:
-	}
-
-	return true
-}
-
-// InitiateShutdown initiates a polite shutdown of this Context, returning immediately after.
-//
-// If Shutdown() has already been called, behavior is consistent but inReason will be dropped.
-//
-// THREADSAFE
-func (F *Flow) InitiateShutdown(
-	inReason string,
-) bool {
-
-	initiated := false
-
-	F.shutdownMutex.Lock()
-	if F.IsRunning() && F.ctxCancel != nil {
-		F.ShutdownReason = inReason
-		F.Log.Infof("Initiating shutdown for %s: %s", F.Desc, F.ShutdownReason)
-		F.ctxCancel()
-		F.ctxCancel = nil
-		initiated = true
-	}
-	F.shutdownMutex.Unlock()
-
-	return initiated
-}
-
-// Shutdown calls InitiateShutdown() and blocks until complete.
-//
-// THREADSAFE
-func (F *Flow) Shutdown(
-	inReason string,
-) {
-
-	initiated := F.InitiateShutdown(inReason)
-
-	F.ShutdownComplete.Wait()
-
-	if initiated {
-		F.Log.Infof("Shutdown complete for %s", F.Desc)
-	}
-}
-
-// FilterFault is called when the given error has occurred an represents an unexpected fault that alone doesn't
-// justify an emergency condition. (e.g. a db error while accessing a record).  Call this on unexpected errors.
-//
-// if inErr is nil, this is equivalent to calling CheckStatus()
-//
-// Returns non-nil if the caller should abort whatever it's doing and anticipate a shutdown.
-//
-// THREADSAFE
-func (F *Flow) FilterFault(inErr error) error {
-
-	if inErr == nil {
-		return F.CheckStatus()
-	}
-
-	F.logMutex.Lock()
-	F.Log.WithError(inErr).Warn("fault occurred")
-	F.FaultLog = append(F.FaultLog, inErr)
-	faultCount := len(F.FaultLog)
-	F.logMutex.Unlock()
-
-	if faultCount < F.FaultLimit {
-		return nil
-	}
-
-	if F.IsRunning() {
-		go F.Shutdown("fault limit exceeded")
-	}
-
-	return inErr
-}
-
-// LogErr logs a warning for the given error with the given description.
-// If inErr == nil, this function has no effect
-func (F *Flow) LogErr(inErr error, inDesc string) {
-	if inErr != nil {
-		F.Log.WithError(inErr).Warn(inDesc)
-	}
-}
-
-// ContextWorker is used by Context as the model of subcontrol.
-type ContextWorker interface {
-	CtxInternalStart() error
-	CtxInternalStop()
+type childCtx struct {
+    CtxID string
+    Ctx   Ctx
 }
 
 // Context is a service helper.
 type Context struct {
 	Logger
 
-	worker ContextWorker
+    
+	Ctx          context.Context
+	ctxCancel    context.CancelFunc
 
-	Ctx       context.Context
-	ctxCancel context.CancelFunc
-
-	StopComplete sync.WaitGroup
+	stopComplete sync.WaitGroup
 	stopMutex    sync.Mutex
 	stopReason   string
+
+    parent          Ctx
+    children        []childCtx
+    childrenMutex   sync.RWMutex
+    childStopping   func(*Context)
+
+    // Identifies this context from others
+    CtxID           string
 
 	FaultLog   []error
 	FaultLimit int
 }
 
+
+
 // CtxStart blocks until this Context is started up or stopped (if an err is returned).
+//
+// See notes for CtxInitiateStop()
 func (C *Context) CtxStart(
-	inParentCtx context.Context,
-	inDesc string,
-	inWorker ContextWorker,
+	parentCtx context.Context,
+    onStartup func() error,
+	onStopping func(),
+    onChildStopping func(inChild *Context),
 ) error {
 
-	C.SetLogLabel(inDesc)
-	C.worker = inWorker
+	C.stopComplete.Wait()
+	C.stopComplete.Add(1)
 
-	C.StopComplete.Wait()
-	C.StopComplete.Add(1)
+	C.FaultLimit = 1
+	C.Ctx, C.ctxCancel = context.WithCancel(parentCtx)
 
-	C.FaultLimit = 3
-	C.Ctx, C.ctxCancel = context.WithCancel(inParentCtx)
-
-	err := C.worker.CtxInternalStart()
+	err := onStartup()
 	if err != nil {
 		C.Errorf("CtxStart failed: %v", err)
 		C.CtxInitiateStop("CtxStart failed")
@@ -448,30 +292,162 @@ func (C *Context) CtxStart(
 	go func() {
 
 		select {
-		case <-C.Ctx.Done():
+		    case <-C.Ctx.Done():
 		}
 
-		C.Info(2, "plan.Context done: ", C.Ctx.Err())
-
-		C.worker.CtxInternalStop()
-
 		C.stopMutex.Lock()
-		C.ctxCancel = nil
+        if C.ctxCancel != nil {
+            // If we're here, it's because the parent context is done (not because CtxStop()/ctxCancel was called)
+            C.ctxCancel = nil
+            C.stopReason = C.Ctx.Err().Error()
+        }
 		C.stopMutex.Unlock()
 
-		C.Info(2, "plan.Context stopped")
+		C.Info(2, "plan.Context done: ", C.Ctx.Err())
+        
+        if C.parent != nil {
+            C.parent.detachChild(C)
+        }
 
-		C.StopComplete.Done()
+        C.CtxStopChildren(C.stopReason)
+
+        onStopping()
+
+		C.stopComplete.Done()
 	}()
 
 	if err != nil {
-		C.StopComplete.Wait()
+		C.stopComplete.Wait()
 	}
 
 	return err
 }
 
-// CtxStatus returns an error if this Context is shut down or shutting down.
+// CtxInitiateStop initiates a polite shutdown of this Context, returning immediately after.
+// If Shutdown() has already been called, behavior is consistent but inReason will be dropped.
+//
+// THREADSAFE
+//
+// When a C.CtxInitiateStop() is called
+//  1. C is detached from its parent (if set)
+//  2. C's parent's OnChildStopping callback is made (if set)
+//  3. C's children are stopped (recursive)
+//  4. C's OnStopping callback is made
+//  5. C.StopComplete.Done() is called (which should release all Wait() calls against it)
+func (C *Context) CtxInitiateStop(
+	inReason string,
+) bool {
+
+	initiated := false
+
+	C.stopMutex.Lock()
+    ctxCancel := C.ctxCancel
+	if C.CtxRunning() && ctxCancel != nil {
+		C.ctxCancel = nil
+		C.stopReason = inReason
+		C.Infof(2, "initiating CtxStop (%s)", C.stopReason)
+		ctxCancel()
+		initiated = true
+	}
+	C.stopMutex.Unlock()
+
+	return initiated
+}
+
+// CtxStop calls InitiateShutdown() and blocks until complete. Returns true if this call initiated the shutdown (vs another cause)
+//
+// THREADSAFE
+//
+func (C *Context) CtxStop(
+	inReason string,
+) {
+	C.CtxInitiateStop(inReason)
+	C.stopComplete.Wait()
+    C.Infof(2, "completed CtxStop")
+}
+
+// CtxStopChildren initiates a stop on each child and blocks until complete.
+func (C *Context) CtxStopChildren(inReason string) {
+
+    // Shutdown the Stores FIRST so that all we have to do is wait on the server to stop.
+    childCount := sync.WaitGroup{}
+
+    C.childrenMutex.RLock()
+    N := len(C.children)
+    if N > 0 {
+        C.Infof(2, "stopping %d children", N)
+        childCount.Add(N)
+        for i := N-1; i >= 0; i-- {
+            child := C.children[i].Ctx
+            go func() {
+                child.CtxStop(inReason)
+                childCount.Done()
+            }()
+        }
+    }
+    C.childrenMutex.RUnlock()
+
+    childCount.Wait()
+    C.Infof(2, "%d children stopped", N)
+
+}
+
+// CtxGo is equivalent to go f() except that this Context will wait until ctxProcess completes before it signals that it is stopped.  
+// The presumption here is that ctxProcess will exit on its own or shortly after this Context is no longer running.
+func (C *Context) CtxGo(ctxProcess func(inParent *Context)) {
+    C.stopComplete.Add(1)
+    go func(){
+        ctxProcess(C)
+        C.stopComplete.Done()
+    }()
+}
+
+// CtxIDStr returns a string uniquely identifying this context.
+func (C *Context) CtxIDStr() string {
+    return C.CtxID
+}
+
+// CtxAddChild adds the given Context to this Context as a "child", meaning that 
+// the parent context will wait for all children's CtxStop() to complete before 
+func (C *Context) CtxAddChild(
+    inChild Ctx,
+) {
+    childID := inChild.CtxIDStr()
+
+    C.childrenMutex.Lock()
+    C.children = append(C.children, childCtx{
+        CtxID: childID,
+        Ctx: inChild,
+    })
+    inChild.setParent(C)
+    C.childrenMutex.Unlock()
+}
+
+// CtxGetChildByID returns the child Context with the match ID (or nil if not found).
+func (C *Context) CtxGetChildByID(
+	inChildID string,
+) Ctx {
+
+    var ctx Ctx
+
+    C.childrenMutex.RLock()
+    N := len(C.children)
+    for i := 0; i < N; i++ {
+        if C.children[i].CtxID == inChildID {
+            ctx = C.children[i].Ctx
+        }
+    }
+    C.childrenMutex.RUnlock()
+
+    return ctx
+}
+
+// CtxStopReason returns the reason provided by the stop initiator.
+func (C *Context) CtxStopReason() string {
+    return C.stopReason
+}
+
+// CtxStatus returns an error if this Context is stopping or is stopped.
 //
 // THREADSAFE
 func (C *Context) CtxStatus() error {
@@ -481,10 +457,10 @@ func (C *Context) CtxStatus() error {
 	}
 
 	select {
-	case <-C.Ctx.Done():
-		return C.Ctx.Err()
-	default:
-		// still running baby!
+        case <-C.Ctx.Done():
+            return C.Ctx.Err()
+	    default:
+		    // still running baby!
 	}
 
 	return nil
@@ -500,52 +476,78 @@ func (C *Context) CtxRunning() bool {
 	}
 
 	select {
-	case <-C.Ctx.Done():
-		return false
-	default:
+        case <-C.Ctx.Done():
+            return false
+        default:
 	}
 
 	return true
 }
 
-// CtxInitiateStop initiates a polite shutdown of this Context, returning immediately after.
+// CtxOnFault is called when the given error has occurred an represents an unexpected fault that alone doesn't
+// justify an emergency condition. (e.g. a db error while accessing a record).  Call this on unexpected errors.
 //
-// If Shutdown() has already been called, behavior is consistent but inReason will be dropped.
+// If inErr == nil, this call has no effect.
 //
 // THREADSAFE
-func (C *Context) CtxInitiateStop(
-	inReason string,
-) bool {
+func (C *Context) CtxOnFault(inErr error, inDesc string) {
 
-	initiated := false
+	if inErr == nil {
+		return
+	}
+
+	C.Error(inDesc, ": ", inErr)
 
 	C.stopMutex.Lock()
-	if C.CtxRunning() && C.ctxCancel != nil {
-		C.stopReason = inReason
-		C.Infof(2, "initiating CtxStop (%s)", C.stopReason)
-		C.ctxCancel()
-		C.ctxCancel = nil
-		initiated = true
-	}
+	C.FaultLog = append(C.FaultLog, inErr)
+	faultCount := len(C.FaultLog)
 	C.stopMutex.Unlock()
 
-	return initiated
+	if faultCount < C.FaultLimit {
+		return
+	}
+
+    C.CtxInitiateStop("fault limit reached")
 }
 
-// CtxStop calls InitiateShutdown() and blocks until complete.
-//
-// Retruns true if this call initiated the shutdown (vs another cause)
-//
-// THREADSAFE
-func (C *Context) CtxStop(
-	inReason string,
-) bool {
-	initiated := C.CtxInitiateStop(inReason)
-
-	C.StopComplete.Wait()
-
-	return initiated
+func (C *Context) getParent() Ctx {
+    return C.parent
 }
+
+func (C *Context) setParent(inNewParent Ctx) {
+   if inNewParent != nil && C.parent != nil {
+        panic("Context already has parent")
+    }
+    C.parent = inNewParent
+}
+
+func (C *Context) detachChild(
+    inChild Ctx,
+) {
+
+    if inChild.getParent() != C {
+        panic("Context child does not have matching parent")
+    }
+
+    inChild.setParent(nil)
+
+    C.childrenMutex.Lock()
+    N := len(C.children)
+    for i := 0; i < N; i++ {
+        if C.children[i].Ctx == inChild {
+            N--
+            copy(C.children[i:], C.children[i+1:N])
+            C.children[N].Ctx = nil
+            C.children = C.children[:N]
+        }
+    }
+    C.childrenMutex.Unlock()
+
+    if C.childStopping != nil {
+        C.childStopping(inChild.(*Context))
+    }
+}
+
 
 // ClientSession represents a client session over gRPC
 type ClientSession struct {
@@ -763,7 +765,6 @@ func (group *SessionGroup) EndSession(inSessionToken string, inReason string) {
 	if session != nil {
 		go session.OnEndSession(session, inReason)
 	}
-
 }
 
 // EndInactiveSessions removes alls sessions inactive longer than the given time index -- THREADSAFE
@@ -1127,3 +1128,122 @@ func MakeFSFriendly(inName string, inSuffix []byte) string {
 
 	return name
 }
+
+
+
+
+var (
+	bytesT  = reflect.TypeOf(Bytes(nil))
+)
+
+// Bytes marshal/unmarshal as a JSON string with 0x prefix.
+// The empty slice marshals as "0x".
+type Bytes []byte
+
+// MarshalText implements encoding.TextMarshaler
+func (b Bytes) MarshalText() ([]byte, error) {
+	out := make([]byte, len(b)*2+2)
+    out[0] = '0'
+    out[1] = 'x'
+	hex.Encode(out[2:], b)
+	return out, nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *Bytes) UnmarshalJSON(in []byte) error {
+	if ! isString(in) {
+		return errNonString(bytesT)
+	}
+	return wrapTypeError(b.UnmarshalText(in[1:len(in)-1]), bytesT)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (b *Bytes) UnmarshalText(input []byte) error {
+	raw, err := checkText(input)
+	if err != nil {
+		return err
+	}
+	dec := make([]byte, len(raw)/2)
+	if _, err = hex.Decode(dec, raw); err == nil {
+		*b = dec
+	}
+	return err
+}
+
+// String returns the hex encoding of b.
+func (b Bytes) String() string {
+	out := make([]byte, len(b)*2+2)
+    out[0] = '0'
+    out[1] = 'x'
+	hex.Encode(out[2:], b)
+	return string(out)
+}
+
+func isString(input []byte) bool {
+	return len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
+}
+
+func wrapTypeError(err error, typ reflect.Type) error {
+	if _, ok := err.(*decError); ok {
+		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
+	}
+	return err
+}
+
+func errNonString(typ reflect.Type) error {
+	return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
+}
+
+func checkText(in []byte) ([]byte, error) {
+    N := len(in)
+	if N == 0 {
+		return nil, nil // empty strings are allowed
+	}
+	if N >= 2 && in[0] == '0' && (in[1] == 'x' || in[1] == 'X') {
+		in = in[2:]
+        N -= 2
+	} else {
+		return nil, ErrMissingPrefix
+	}
+	if (N & 1) != 0 {
+		return nil, ErrOddLength
+	}
+	return in, nil
+}
+
+
+const badNibble = ^uint64(0)
+
+func decodeNibble(in byte) uint64 {
+	switch {
+	case in >= '0' && in <= '9':
+		return uint64(in - '0')
+	case in >= 'A' && in <= 'F':
+		return uint64(in - 'A' + 10)
+	case in >= 'a' && in <= 'f':
+		return uint64(in - 'a' + 10)
+	default:
+		return badNibble
+	}
+}
+
+
+const uintBits = 32 << (uint64(^uint(0)) >> 63)
+
+// Errors
+var (
+	ErrEmptyString   = &decError{"empty hex string"}
+	ErrSyntax        = &decError{"invalid hex string"}
+	ErrMissingPrefix = &decError{"hex string without 0x prefix"}
+	ErrOddLength     = &decError{"hex string of odd length"}
+	ErrEmptyNumber   = &decError{"hex string \"0x\""}
+	ErrLeadingZero   = &decError{"hex number with leading zero digits"}
+	ErrUint64Range   = &decError{"hex number > 64 bits"}
+	ErrUintRange     = &decError{fmt.Sprintf("hex number > %d bits", uintBits)}
+	ErrBig256Range   = &decError{"hex number > 256 bits"}
+)
+
+type decError struct{ msg string }
+
+func (err decError) Error() string { return err.msg }
+
