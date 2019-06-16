@@ -16,6 +16,7 @@ import (
     
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
@@ -121,7 +122,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
         return nil, plan.Error(nil, plan.ParamErr, "entry time authored not set")
     }
 
-    mc.tmpBuf = plan.SmartMarshal(ioInfo, mc.tmpBuf)
+    mc.tmpBuf = ptools.SmartMarshal(ioInfo, mc.tmpBuf)
 
     // Have the member sign the header
     var packingInfo ski.PackingInfo
@@ -150,7 +151,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
         PackedEntry: packedEntry,
     }
 
-    mc.tmpBuf = plan.SmartMarshal(&tmpCrypt, mc.tmpBuf)
+    mc.tmpBuf = ptools.SmartMarshal(&tmpCrypt, mc.tmpBuf)
 
     payloadTxnSet, err := mc.TxnEncoder.EncodeToTxns(
         mc.tmpBuf,

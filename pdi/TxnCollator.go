@@ -4,6 +4,7 @@ import (
     "bytes"
     "sync"
 
+	"github.com/plan-systems/go-ptools"
 	"github.com/plan-systems/go-plan/plan"
 )
 
@@ -102,7 +103,7 @@ func RecycleTxnSet(inTxnSet *PayloadTxnSet) {
 
 // UnmarshalPayload re-assumbles the payload as necessary and unmarshals to the givne item
 func (txnSet *PayloadTxnSet) UnmarshalPayload(
-    outItem plan.Unmarshaller,
+    outItem ptools.Unmarshaller,
 ) error {
 
     info := txnSet.Info()

@@ -14,6 +14,7 @@ import (
 
     "golang.org/x/crypto/blake2b"
 
+	"github.com/plan-systems/go-ptools"
 	"github.com/plan-systems/go-plan/plan"
 )
 
@@ -824,7 +825,7 @@ func GenerateNewKey(
 
 // SessionTool is a small set of util functions for creating a SKI session.
 type SessionTool struct {
-    plan.Logger
+    ptools.Logger
 
 	UserID        string
 	Session       Session

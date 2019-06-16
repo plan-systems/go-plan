@@ -11,6 +11,7 @@ import (
 	"sync"
 	crypto_rand "crypto/rand"
 
+	"github.com/plan-systems/go-ptools"
 	"github.com/plan-systems/go-plan/ski"
 	"github.com/plan-systems/go-plan/plan"
 
@@ -28,50 +29,8 @@ const (
 
 // GetSharedKeyDir returns the local dir of where keys are commonly stored
 func GetSharedKeyDir() (string, error) {
-	return plan.UseLocalDir("ski.hive")
+	return ptools.UseLocalDir("ski.hive")
 }
-
-/*
-// CryptoProvider is a local implemention of ski.Provider
-type CryptoProvider struct {
-	ski.CryptoProvider
-
-	sessions			[]*Session
-}
-
-// NewCryptoProvider creates a new hive Provider (a ski.Provider implemented via a file in the OS)
-func NewCryptoProvider() *CryptoProvider {
-
-	var provider = &CryptoProvider{
-		sessions: nil,
-	}
-
-	return provider
-}
-
-// NewSession starts a new hive SKI session locally, using a locally encrypted file.
-// If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
-func NewSession(
-	BaseDir   string,
-	StoreName string,
-	Passhash  []byte,
-) *Session {
-	session := &Session{
-		parentProvider: provider,
-		Params: inPB,
-		nextAutoSave: time.Now(),
-		//fsStatus: 0,
-		keyTomeMgr: ski.NewKeyTomeMgr(),
-	}
-	return session
-}
-
-	
-// InvocationStr -- see interface ski.Provider
-func (provider *CryptoProvider) InvocationStr() string {
-	return providerInvocation
-} 
-*/
 
 // StartSession starts a new hive SKI session locally, using a locally encrypted file.
 // If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
@@ -110,7 +69,7 @@ func StartSession(
 // Session represents a local implementation of the SKI
 type Session struct {
 	ski.Session
-	plan.Logger
+	ptools.Logger
 
 	autoSaveMutex	   sync.Mutex
 	nextAutoSave		time.Time
@@ -208,7 +167,7 @@ func (sess *Session) saveToFile() error {
 			}
 
 			if err == nil {
-				err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
+				err = ioutil.WriteFile(pathname, buf, ptools.DefaultFileMode)
 				if err != nil {
 					err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write hive")
 				}

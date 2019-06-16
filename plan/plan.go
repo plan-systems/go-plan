@@ -11,7 +11,6 @@ package plan
 
 import (
 	"encoding/base64"
-	"os"
 	"time"
 )
 
@@ -90,10 +89,6 @@ type ChID []byte
 type ChIDBlob [ChIDSz]byte
 
 var (
-
-	// DefaultFileMode is used to express the default mode of file creation.
-	DefaultFileMode = os.FileMode(0775)
-
 	// Base64p encodes/decodes binary strings.
 	Base64p = base64.NewEncoding(Base64pCharSet).WithPadding(base64.NoPadding)
 
@@ -142,14 +137,3 @@ var NilTID = TIDBlob{
 	0, 0, 0, 0, 0, 0, 0, 0, 0,
 }
 
-// Marshaller used to generalize serialization
-type Marshaller interface {
-	Marshal() ([]byte, error)
-	MarshalTo([]byte) (int, error)
-	Size() int
-}
-
-// Unmarshaller used to generalize deserialization
-type Unmarshaller interface {
-	Unmarshal([]byte) error
-}

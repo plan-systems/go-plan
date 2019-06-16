@@ -376,9 +376,5 @@ const (
 	// NetworkErrorFamily errors generally relate to network services and connections
 	NetworkErrorFamily = 5400 + iota
 
-	// SessionTokenMissing means a session token was not found in the request context
-	SessionTokenMissing
 
-	// SessionTokenNotValid means the session token that was supplied didn't match anything
-	SessionTokenNotValid
 )
