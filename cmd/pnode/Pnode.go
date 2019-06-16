@@ -5,7 +5,7 @@ import (
     "path"
     "io/ioutil"
     //"strings"
-    "sync"
+   //"sync"
     //"time"
     //"sort"
     //"encoding/hex"
@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/reflection"
     //"google.golang.org/grpc/metadata"
 
-    //"github.com/plan-systems/go-plan/pdi"
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/repo"
 
@@ -38,7 +38,7 @@ const (
 type PnodeConfig struct {
 
     Name                        string                          `json:"node_name"`
-    NodeID                      plan.Bytes                      `json:"node_id"`
+    NodeID                      ptools.Bytes                    `json:"node_id"`
 
     DefaultFileMode             os.FileMode                     `json:"default_file_mode"`
 
@@ -54,7 +54,7 @@ type PnodeConfig struct {
 // ApplyDefaults sets std fields and values
 func (config *PnodeConfig) ApplyDefaults() {
 
-    config.DefaultFileMode = plan.DefaultFileMode
+    config.DefaultFileMode = ptools.DefaultFileMode
     config.GrpcNetworkName = "tcp"
     config.GrpcNetworkAddr = ":50082"
     config.Version = 1
@@ -64,12 +64,9 @@ func (config *PnodeConfig) ApplyDefaults() {
 
 // Pnode wraps one or more communities replicated to a local dir.
 type Pnode struct {
-    plan.Context
-
-    reposMutex                  sync.RWMutex
-    repos                       map[plan.CommunityID]*repo.CommunityRepo
+    ptools.Context
     
-    activeSessions              plan.SessionGroup
+    activeSessions              ptools.SessionGroup
 
     BasePath                    string
     ReposPath                   string
@@ -87,8 +84,7 @@ func NewPnode(
 ) (*Pnode, error) {
 
     pn := &Pnode{
-        repos: make(map[plan.CommunityID]*repo.CommunityRepo),
-        activeSessions: plan.NewSessionGroup(),
+        activeSessions: ptools.NewSessionGroup(),
     }
 
     pn.SetLogLabel("pnode")
@@ -96,7 +92,7 @@ func NewPnode(
     var err error
 
     if inBasePath == nil || len(*inBasePath) == 0 {
-        pn.BasePath, err = plan.UseLocalDir("pnode")
+        pn.BasePath, err = ptools.UseLocalDir("pnode")
     } else {
         pn.BasePath = *inBasePath
     }
@@ -104,7 +100,7 @@ func NewPnode(
 
     pn.ReposPath = path.Join(pn.BasePath, "repos")
 
-    if err = os.MkdirAll(pn.ReposPath, plan.DefaultFileMode); err != nil {
+    if err = os.MkdirAll(pn.ReposPath, ptools.DefaultFileMode); err != nil {
         return nil, err
     }
 
@@ -114,8 +110,6 @@ func NewPnode(
 
     return pn, nil
 }
-
-
 
 
 
@@ -161,8 +155,22 @@ func (pn *Pnode) writeConfig() error {
 }
 
 
+// Startup -- see pcore.Flow.Startup
+func (pn *Pnode) Startup() error {
 
-func (pn *Pnode) internalStartup() error {
+    err := pn.CtxStart(
+        pn.ctxStartup,
+        pn.ctxAboutToStop,
+        nil,
+        pn.ctxStopping,
+    )
+
+    return err
+}
+
+
+
+func (pn *Pnode) ctxStartup() error {
 
 // TODO: test w/ sym links
     repoDirs, err := ioutil.ReadDir(pn.ReposPath)
@@ -173,22 +181,13 @@ func (pn *Pnode) internalStartup() error {
     for _, repoDir := range repoDirs {
         repoPath := repoDir.Name()
         if ! strings.HasPrefix(repoPath, ".") {
-            repoPath := path.Join(pn.ReposPath, repoPath)
-            CR, err := repo.NewCommunityRepo(repoPath, nil)
+            _, err = pn.createAndStartRepo(repoPath, nil)
             if err != nil {
-                return err
+                break
             }
-
-            pn.registerRepo(CR)
         }
     }
 
-    for _, CR := range pn.repos {
-        err = CR.Startup(pn.Ctx)
-        if err != nil {
-            break
-        }
-    }
 
     //
     //
@@ -207,12 +206,14 @@ func (pn *Pnode) internalStartup() error {
         
         // Register reflection service on gRPC server.
         reflection.Register(pn.grpcServer)
-        pn.CtxGo(func(*plan.Context) {
+        pn.CtxGo(func(inCtx ptools.Ctx) {
+            
             if err := pn.grpcServer.Serve(listener); err != nil {
                 pn.Error("grpc server error: ", err)
             }
-            pn.CtxInitiateStop("grpc server stopped")
             listener.Close()
+
+            pn.CtxStop("grpc server stopped", nil)
         })
     }
 
@@ -221,54 +222,65 @@ func (pn *Pnode) internalStartup() error {
 
 
 
-func (pn *Pnode) internalShutdown() {
-
-    // Shutdown the Stores FIRST so that all we have to do is wait on the server to stop.
-    reposRunning := &sync.WaitGroup{}
-
-    pn.reposMutex.RLock()
-    reposRunning.Add(len(pn.repos))
+func (pn *Pnode) ctxAboutToStop() {
     
-    for _, v := range pn.repos {
-        CR := v
-        go func() {
-            CR.CtxStop(pn.CtxStopReason())
-            reposRunning.Done()
-        }()
-    }
-    pn.reposMutex.RUnlock()
-
     if pn.grpcServer != nil {
         pn.Info(1, "stopping grpc service")
-        pn.grpcServer.GracefulStop()
+        go pn.grpcServer.GracefulStop()
+    }
+}
+
+
+func (pn *Pnode) ctxStopping() {
+
+
+}
+
+func (pn *Pnode) createAndStartRepo(
+    inRepoSubPath string,
+    inSeed *repo.RepoSeed,
+) (*repo.CommunityRepo, error) {
+
+    var repoPath string
+    var err error
+
+    if inSeed != nil {
+        // Only proceed if the dir doesn't exist
+        // TODO: change dir name in the event of a name collision.
+        repoPath, err = ptools.CreateNewDir(pn.ReposPath, inRepoSubPath)
+
+    } else {
+        repoPath = path.Join(pn.ReposPath, inRepoSubPath)
     }
 
-    reposRunning.Wait()
+    if err != nil {
+        return nil, err
+    }
 
+    CR, err := repo.NewCommunityRepo(repoPath, inSeed)
+    if err != nil {
+        return nil, err
+    }
+
+    err = CR.Startup()
+    if err != nil {
+        return nil, err
+    }
+
+    pn.Info(0, "mounted repo at ", repoPath)
+            
+    pn.CtxAddChild(CR, CR.GenesisSeed.StorageEpoch.CommunityID)
+
+    return CR, nil
 }
 
-
-// Startup -- see pcore.Flow.Startup
-func (pn *Pnode) Startup(
-    inCtx context.Context,
-) error {
-
-    err := pn.CtxStart(
-        inCtx, 
-        pn.internalStartup,
-        pn.internalShutdown,
-        nil,
-    )
-
-    return err
-}
 
 // seedRepo adds a new repo (if it doesn't already exist)
 func (pn *Pnode) seedRepo(
     inSeed *repo.RepoSeed,
 ) error {
 
-    var CR *repo.CommunityRepo
+    //var CR *repo.CommunityRepo
 
     {
         genesis, err := inSeed.ExtractAndVerifyGenesisSeed()
@@ -277,8 +289,7 @@ func (pn *Pnode) seedRepo(
         }
 
         // If the repo is already seed, nothing further required
-        CR = pn.fetchRepo(genesis.StorageEpoch.CommunityID)
-        if CR != nil {
+        if pn.fetchRepo(genesis.StorageEpoch.CommunityID) != nil {
             return nil
         }
     }
@@ -287,10 +298,7 @@ func (pn *Pnode) seedRepo(
         return plan.Error(nil, plan.AssertFailed, "pnode must be running to seed a new repo")
     }
 
-    // Only proceed if the dir doesn't exist
-    // TODO: change dir name in the event of a name collision.
-    repoPath, err := plan.CreateNewDir(pn.ReposPath, inSeed.SuggestedDirName)
-    if err != nil { return err }
+  
 
     // In the unlikely event that pn.Shutdown() is called while this is all happening, 
     //    prevent the rug from being snatched out from under us.
@@ -298,28 +306,19 @@ func (pn *Pnode) seedRepo(
     defer func() {
         hold <- struct{}{}
     }()
-    pn.CtxGo(func(*plan.Context) {
+    pn.CtxGo(func(ptools.Ctx) {
         <- hold
     })
 
     // When we pass the seed, it means create from scratch
-    if err == nil {
-        CR, err = repo.NewCommunityRepo(repoPath, inSeed)
-    }
-
-    if err == nil {
-        err = CR.Startup(pn.Ctx)
-    }
+    CR, err := pn.createAndStartRepo(inSeed.SuggestedDirName, inSeed)
 
     if err == nil {
         err = pn.writeConfig()
     }
 
-    if err == nil {
-        pn.Info(0, "seeding new repo at ", repoPath)
-        pn.registerRepo(CR)
-    } else {
-        CR.CtxStop("seed failed")
+    if err != nil {
+        CR.CtxStop("seed failed", nil)
 
         // TODO: clean up
     }
@@ -347,28 +346,14 @@ func (pn *Pnode) fetchMemberSession(ctx context.Context) (*repo.MemberSession, e
     return ms, nil
 }
 
+func (pn *Pnode) fetchRepo(inCommunityID []byte) *repo.CommunityRepo {
 
-
-func (pn *Pnode) registerRepo(CR *repo.CommunityRepo) {
-   
-    communityID := plan.GetCommunityID(CR.GenesisSeed.StorageEpoch.CommunityID)
-
-    pn.reposMutex.Lock()
-    pn.repos[communityID] = CR
-    pn.reposMutex.Unlock()
-}
-
-
-func (pn *Pnode) fetchRepo(inID []byte) *repo.CommunityRepo {
-
-    communityID := plan.GetCommunityID(inID)
-
-    pn.reposMutex.RLock()
-    CR := pn.repos[communityID]
-    pn.reposMutex.RUnlock()
-
-    return CR
-
+    child := pn.CtxGetChildByID(inCommunityID)
+    if child != nil {
+        return child.(*repo.CommunityRepo)
+    }
+    
+    return nil
 }
 
 /*****************************************************
@@ -425,10 +410,7 @@ func (pn *Pnode) OpenMemberSession(
     sess := pn.activeSessions.NewSession(inMsgOutlet.Context(), ms.SessionToken)
     sess.Cookie = ms
 
-    // Should this be waiting on ms.flow.StopComplete instead?
-    select {
-        case <- inMsgOutlet.Context().Done():
-    }
+    <-ms.CtxStopping()
 
 	return nil
 }

@@ -15,6 +15,7 @@ import (
     //"encoding/hex"
     "encoding/json"
 
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pdi"
 
@@ -30,7 +31,7 @@ import (
 // GenesisParams is entered by humans
 type GenesisParams struct {
     CommunityName           string                  `json:"community_name"`
-    CommunityID             plan.Bytes              `json:"community_id"`
+    CommunityID             ptools.Bytes            `json:"community_id"`
 }
 
 
@@ -56,9 +57,9 @@ const (
 //     can be instantiated and offer service in parallel, this is not typical operation. Rather,
 //     one instance runs and hosts service for one or more communities.
 type Snode struct {
-    plan.Context
+    ptools.Context    
     
-    activeSessions              plan.SessionGroup
+    activeSessions              ptools.SessionGroup
 
     BasePath                    string
     Config                      Config
@@ -73,7 +74,7 @@ type Snode struct {
 type Config struct {
 
     Name                        string                          `json:"node_name"`
-    NodeID                      plan.Bytes                      `json:"node_id"`
+    NodeID                      ptools.Bytes                    `json:"node_id"`
 
     StorageConfigs              []ds.StorageConfig              `json:"storage_configs"`
 
@@ -91,7 +92,7 @@ type Config struct {
 // ApplyDefaults sets std fields and values
 func (config *Config) ApplyDefaults() {
 
-    config.DefaultFileMode = plan.DefaultFileMode
+    config.DefaultFileMode = ptools.DefaultFileMode
     config.GrpcNetworkName = "tcp"
     config.GrpcNetworkAddr = ":50053"
     config.Version = 1
@@ -107,19 +108,19 @@ func NewSnode(
 
 
     sn := &Snode{
-        activeSessions: plan.NewSessionGroup(),
+        activeSessions: ptools.NewSessionGroup(),
     }
         
     var err error
 
     if inBasePath == nil || len(*inBasePath) == 0 {
-        sn.BasePath, err = plan.UseLocalDir("pdi-local")
+        sn.BasePath, err = ptools.UseLocalDir("pdi-local")
     } else {
         sn.BasePath = *inBasePath
     }
     if err != nil { return nil, err }
 
-    if err = os.MkdirAll(sn.BasePath, plan.DefaultFileMode); err != nil {
+    if err = os.MkdirAll(sn.BasePath, ptools.DefaultFileMode); err != nil {
         return nil, err
     }
 
@@ -133,19 +134,19 @@ func NewSnode(
 }
 
 // Startup -- see plan.Flow.Startup()
-func (sn *Snode) Startup(inCtx context.Context) error {
+func (sn *Snode) Startup() error {
 
     err := sn.CtxStart(
-        inCtx,
-        sn.onInternalStartup,
-        sn.onInternalShutdown,
+        sn.ctxStartup,
+        sn.ctxAboutToStop,
         nil,
+        sn.ctxStopping,
     )
 
     return err
 }
 
-func (sn *Snode) onInternalStartup() error {
+func (sn *Snode) ctxStartup() error {
     var err error
 
     for i := range sn.Config.StorageConfigs {
@@ -153,13 +154,12 @@ func (sn *Snode) onInternalStartup() error {
         
         St := ds.NewStore(info, sn.BasePath)
 
-        err = St.Startup(sn.Ctx, false)
+        err = St.Startup(false)
         if err != nil {
             break
         }
 
-        St.CtxID = plan.Base64p.EncodeToString(info.StorageEpoch.CommunityID)
-        sn.CtxAddChild(St)
+        sn.CtxAddChild(St, info.StorageEpoch.CommunityID)
     }
 
     if err == nil {
@@ -175,27 +175,32 @@ func (sn *Snode) onInternalStartup() error {
         
         // Register reflection service on gRPC server.
         reflection.Register(sn.grpcServer)
-        sn.CtxGo(func(*plan.Context) {
+        sn.CtxGo(func(inCtx ptools.Ctx) {
+            
             if err := sn.grpcServer.Serve(listener); err != nil {
                 sn.Error("grpc server error: ", err)
             }
-            sn.CtxInitiateStop("grpc server stopped")
             listener.Close()
+
+            sn.CtxStop("grpc server stopped", nil)
         })
     }
 
     return err
 }
 
+func (sn *Snode) ctxAboutToStop() {
 
-func (sn *Snode) onInternalShutdown() {
-
-    // At this point, the Stores are already stopped (since they are all children).
-    // Stopping the grpc server is the last thing the Snode (plan.Context) is waiting on.
     if sn.grpcServer != nil {
         sn.Info(1, "stopping grpc service")
-        sn.grpcServer.GracefulStop()
+        go sn.grpcServer.GracefulStop()
     }
+}
+
+
+func (sn *Snode) ctxStopping() {
+
+
 }
 
 
@@ -261,14 +266,14 @@ func (sn *Snode) CreateNewStore(
         StorageEpoch: inEpoch,
     }
 
-    _, err := plan.CreateNewDir(sn.BasePath, stConfig.HomePath)
+    _, err := ptools.CreateNewDir(sn.BasePath, stConfig.HomePath)
     if err != nil { return err }
 
     St := ds.NewStore(
         stConfig, 
         sn.BasePath,
     )
-    if err = St.Startup(context.Background(), true); err != nil {
+    if err = St.Startup(true); err != nil {
         return err
     }
 
@@ -299,15 +304,15 @@ func (sn *Snode) CreateNewStore(
     // Sleep a little so the log messages show up in a nice order for such an important occasion!
     time.Sleep(100 * time.Millisecond)
 
-    St.CtxStop("creation complete")
+    St.CtxStop("creation complete", nil)
+    St.CtxWait()
 
     return nil
 }
 
 func (sn *Snode) fetchStore(inCommunityID []byte) *ds.Store {
 
-    keyStr := plan.Base64p.EncodeToString(inCommunityID)
-    if child := sn.CtxGetChildByID(keyStr); child != nil {
+    if child := sn.CtxGetChildByID(inCommunityID); child != nil {
         return child.(*ds.Store)
     }
 
@@ -342,11 +347,7 @@ func (sn *Snode) FetchSessionStore(ctx context.Context) (*ds.Store, error) {
         return nil, err
     }
 
-    St, _ := session.Cookie.(*ds.Store)
-    if St == nil {
-        return nil, plan.Errorf(nil, plan.AssertFailed, "internal type assertion err")
-    }
-
+    St := session.Cookie.(*ds.Store)
     err = St.CtxStatus()
     if err != nil {
         return nil, err

@@ -3,6 +3,7 @@ package main
 
 import (
     //"fmt"
+    //"context"
     "flag"
     "io/ioutil"
     "os"
@@ -25,15 +26,13 @@ import (
     crand "crypto/rand" 
 
 
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/repo"
-
     "github.com/plan-systems/go-plan/client"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
     "github.com/plan-systems/go-plan/pdi"
-    //"github.com/plan-systems/go-plan/pservice"
 
-    "context"
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
 
@@ -74,26 +73,19 @@ func main() {
 
 
     {
-        intr, intrCtx := plan.SetupInterruptHandler(context.Background())
-        defer intr.Close()
-        
-        err := ws.Startup(intrCtx)
+        err := ws.Startup()
         if err != nil {
             ws.Fatalf("failed to startup: %v", err)
         }
 
-        ws.Infof(0, "to stop service: kill -s SIGINT %d", os.Getpid())
+        ws.AttachInterruptHandler()
 
         err = ws.Login(0, seedMember)
         if err != nil {
             ws.Fatalf("client-sim fatal err: %v", err)
         }
 
-        select {
-            case <- ws.Ctx.Done():
-        }
-
-        ws.CtxStop("client done")
+        ws.CtxWait()
     }   
 
 }
@@ -110,7 +102,7 @@ func main() {
 // (c) A User has any number of communities (repos) seeded, meaning it has established an
 //     account on a given pnode for a given community. 
 type Workstation struct {
-    plan.Context
+    ptools.Context
 
     BasePath                    string
     UsersPath                   string
@@ -125,7 +117,7 @@ type Workstation struct {
 // InstallInfo is generated during client installation is considered immutable. 
 type InstallInfo struct {
 
-    InstallID                   plan.Bytes                   `json:"install_id"`
+    InstallID                   ptools.Bytes                   `json:"install_id"`
 
 }
 
@@ -150,7 +142,7 @@ id, err := machineid.ProtectedID("myAppName")
 
     // FUTURE: base 
     if inBasePath == nil || len(*inBasePath) == 0 {
-        ws.BasePath, err = plan.UseLocalDir("workstation")
+        ws.BasePath, err = ptools.UseLocalDir("workstation")
     } else {
         ws.BasePath = *inBasePath
     }
@@ -158,7 +150,7 @@ id, err := machineid.ProtectedID("myAppName")
 
     ws.UsersPath = path.Join(ws.BasePath, "users")
 
-    if err = os.MkdirAll(ws.UsersPath, plan.DefaultFileMode); err != nil {
+    if err = os.MkdirAll(ws.UsersPath, ptools.DefaultFileMode); err != nil {
         return nil, err
     }
 
@@ -186,7 +178,7 @@ func (ws *Workstation) readConfig(inFirstTime bool) error {
 
             buf, err = json.MarshalIndent(&ws.Info, "", "\t")
             if err == nil {
-                err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
+                err = ioutil.WriteFile(pathname, buf, ptools.DefaultFileMode)
             }
         } else {
             err = plan.Errorf(err, plan.ConfigFailure, "Failed to load client/workstation install info")
@@ -200,21 +192,19 @@ func (ws *Workstation) readConfig(inFirstTime bool) error {
 
 
 // Startup --
-func (ws *Workstation) Startup(
-    inCtx context.Context,
-) error {
+func (ws *Workstation) Startup() error {
 
     err := ws.CtxStart(
-        inCtx, 
-        ws.internalStartup,
-        ws.internalShutdown,
+        ws.ctxStartup,
         nil,
+        nil,
+        ws.ctxStopping,
     )
 
     return err
 }
 
-func (ws *Workstation) internalStartup() error {
+func (ws *Workstation) ctxStartup() error {
 
     dirs, err := ioutil.ReadDir(ws.UsersPath)
     if err != nil {
@@ -232,7 +222,7 @@ func (ws *Workstation) internalStartup() error {
 }
 
 
-func (ws *Workstation) internalShutdown() {
+func (ws *Workstation) ctxStopping() {
 
 }
 
@@ -267,12 +257,12 @@ func (ws *Workstation) ImportSeed(
     }
 
     userDir := fmt.Sprintf("%s-%s", seed.RepoSeed.SuggestedDirName, seed.MemberEpoch.FormMemberStrID())
-    userDir, err = plan.CreateNewDir(ws.UsersPath, userDir)
+    userDir, err = ptools.CreateNewDir(ws.UsersPath, userDir)
     if err != nil {
         return nil, err
     }
 
-    err = ioutil.WriteFile(path.Join(userDir, seedFilename), buf, plan.DefaultFileMode)
+    err = ioutil.WriteFile(path.Join(userDir, seedFilename), buf, ptools.DefaultFileMode)
     if err != nil {
         return nil, err
     }
@@ -377,7 +367,7 @@ type chSess struct {
 
 // ClientSess is user using this workstation -- only one client session per workstation is allowed/possible.
 type ClientSess struct {
-    plan.Context
+    ptools.Context
 
     ws                  *Workstation
 
@@ -404,24 +394,22 @@ type ClientSess struct {
 
 
 // Startup initiates connection to the repo
-func (sess *ClientSess) Startup(
-    inCtx context.Context,
-) error {
+func (sess *ClientSess) Startup() error {
 
     sess.SetLogLabel("ClientSession")
 
     err := sess.CtxStart(
-        inCtx, 
-        sess.internalStartup,
-        sess.internalShutdown,
+        sess.ctxStartup,
         nil,
+        nil,
+        sess.ctxStopping,
     )
 
     return err
 }
 
 
-func (sess *ClientSess) internalStartup() error {
+func (sess *ClientSess) ctxStartup() error {
 
     sess.MemberCrypto.CommunityEpoch = *sess.Info.CommunityEpoch
     sess.MemberCrypto.StorageEpoch   = *sess.Info.StorageEpoch
@@ -443,7 +431,7 @@ func (sess *ClientSess) internalStartup() error {
     //
     //
     //
-    sess.CtxGo(func(*plan.Context) {
+    sess.CtxGo(func(ptools.Ctx) {
 
         for item := range sess.entriesToCommit {
             txnSet, err := sess.MemberCrypto.EncryptAndEncodeEntry(item.msg.EntryInfo, item.entryBody)
@@ -473,7 +461,7 @@ func (sess *ClientSess) internalStartup() error {
     //
     //
     //
-    sess.CtxGo(func(*plan.Context) {
+    sess.CtxGo(func(ptools.Ctx) {
 
         for msg := range sess.msgOutbox {
 
@@ -494,7 +482,7 @@ func (sess *ClientSess) internalStartup() error {
     return nil
 }
 
-func (sess *ClientSess) internalShutdown() {
+func (sess *ClientSess) ctxStopping() {
 
     // First end all chSessions
     sess.chSessionsMutex.RLock()
@@ -567,7 +555,7 @@ func (sess *ClientSess) openMemberSession() error {
     sess.sessToken = msg.BUF0
  
     // Since OpenMemberSession() uses a stream responder, the trailer is never set, so we use this guy as the sesh token.
-    sess.Ctx = plan.ApplyTokenOutgoingContext(sess.Ctx, sess.sessToken)
+    sess.Ctx = ptools.ApplyTokenOutgoingContext(sess.Ctx, sess.sessToken)
 
     sess.msgOutlet, err = sess.repoClient.OpenMsgPipe(sess.Ctx)
     if err != nil {
@@ -816,7 +804,7 @@ func (ws *Workstation) Login(inNum int, inSeedMember bool) error {
     }
 
 
-    sess.Startup(ws.Ctx)
+    sess.Startup()
     if err != nil {
         return err
     }

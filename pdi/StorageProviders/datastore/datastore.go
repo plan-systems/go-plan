@@ -12,7 +12,6 @@ import (
     "bytes"
     //"encoding/json"
     "time"
-    "context"
     //"hash"
     //"crypto/rand"
 
@@ -23,12 +22,11 @@ import (
 
     "github.com/dgraph-io/badger"
 
-    //"github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/pdi"
 
 )
-
 
 // StorageConfig contains core info about a db/store
 type StorageConfig struct {
@@ -40,7 +38,7 @@ type StorageConfig struct {
 
 // Store wraps a PLAN community UUID and a datastore
 type Store struct {
-    plan.Context
+    ptools.Context
 
     AgentDesc                   string    
     Config                      *StorageConfig
@@ -91,7 +89,7 @@ func NewStore(
 
     St := &Store{
         Config: inConfig,
-        DefaultFileMode: plan.DefaultFileMode,
+        DefaultFileMode: ptools.DefaultFileMode,
         txnDecoder: NewTxnDecoder(true),
     }
 
@@ -109,39 +107,23 @@ func NewStore(
 
 // Startup should be called once Datastore is preprared and ready to invoke the underlying implementation.
 func (St *Store) Startup(
-    inCtx context.Context,
     inFirstTime bool,
 ) error {
 
     St.Info(0, "starting up store ", St.AbsPath)
 
     err := St.CtxStart(
-        inCtx,
-        St.internalStartup,
-        St.internalShutdown,
+        St.ctxStartup,
         nil,
+        nil,
+        St.ctxStopping,
     )
 
     return err
 }
 
 
-func (St *Store) internalStartup() error {
-
-    /*
-    // Load community info
-    {
-        pathname := path.Join(St.AbsPath, pdi.StorageEpochFilename)
-        buf, err := ioutil.ReadFile(pathname)
-        if err != nil {
-            return plan.Errorf(err, plan.ConfigFailure, "missing %s", pathname)
-        }
-
-        err = json.Unmarshal(buf, &St.StorageEpoch)
-        if err != nil {
-            return plan.Errorf(err, plan.ConfigFailure, "error unmarshalling %s", pathname)
-        }
-    }*/
+func (St *Store) ctxStartup() error {
 
     var err error
 
@@ -171,15 +153,13 @@ func (St *Store) internalStartup() error {
     if err != nil {
         return err
     }
-
-
     //
     //
     //
     //
     // Small buffer needed for the txn notifications to ensure that the txn writer doesn't get blocked
     St.txnUpdates = make(chan txnUpdate, 8)
-    St.CtxGo(func(*plan.Context) {
+    St.CtxGo(func(inCtx ptools.Ctx) {
 
         for update := range St.txnUpdates {
             St.subsMutex.Lock()
@@ -188,7 +168,7 @@ func (St *Store) internalStartup() error {
             }
             St.subsMutex.Unlock()
         }
-        St.Info(1, "T-1) commit notification exited")
+        St.Info(2, "commit notification exited")
 
         // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
         for {
@@ -209,7 +189,7 @@ func (St *Store) internalStartup() error {
     //
     //
     St.DecodedCommits = make(chan CommitJob, 1)
-    go func() {
+    St.CtxGo(func(inCtx ptools.Ctx) {
 
         for job := range St.DecodedCommits {
             
@@ -218,19 +198,17 @@ func (St *Store) internalStartup() error {
 
             atomic.AddInt32(&St.numCommitJobs, -1)
         }
-        St.Info(1, "T-2) commit pipeline closed")
+        St.Info(2, "commit pipeline closed")
 
         // Cause all subs to fire, causing them to exit when they see St.OpState == Stopping
         St.txnUpdates <- txnUpdate{}
         close(St.txnUpdates)
-    }()
-
+    })
 
     return nil
 }
 
-
-func (St *Store) internalShutdown() {
+func (St *Store) ctxStopping() {
 
     // Wait until we're sure a commit didn't sneak in
     for {
@@ -240,11 +218,12 @@ func (St *Store) internalShutdown() {
         }
     }
 
-    St.Info(1, "T-3) pending commits complete")
+    St.Info(2, "pending commits complete")
 
     // This will initiate a close-cascade causing St.resources to be released
-    close(St.DecodedCommits)
-
+    if St.DecodedCommits != nil {
+        close(St.DecodedCommits)
+    }
 }
 
 // ScanJob represents a pending Query() call to a StorageProvider
@@ -525,20 +504,12 @@ func (St *Store) removeTxnSubscriber(inSub chan txnUpdate) {
 
 // DoScanJob queues the given ScanJob
 func (St *Store) DoScanJob(job ScanJob) {
-
     atomic.AddInt32(&St.numScanJobs, 1)
-
-    err := St.CtxStatus()
-    if err != nil {
-        job.OnComplete <- err
-        atomic.AddInt32(&St.numScanJobs, -1)
-        return
-    }
 
     // TODO: use semaphore.NewWeighted() to bound the number of query jobs
     go func() {
         err := St.doScanJob(job)
-
+        
         if err != nil && St.CtxRunning() {
             St.Errorf("scan job error: %v", err)
         }
@@ -552,13 +523,6 @@ func (St *Store) DoScanJob(job ScanJob) {
 // DoSendJob queues the given SendJob
 func (St *Store) DoSendJob(job SendJob) {
     atomic.AddInt32(&St.numSendJobs, 1)
-
-    err := St.CtxStatus()
-    if err != nil {
-        job.OnComplete <- err
-        atomic.AddInt32(&St.numSendJobs, -1)
-        return
-    }
 
     go func() {
         err := St.doSendJob(job)

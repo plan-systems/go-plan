@@ -2,9 +2,8 @@ package main
 
 import (
 	"github.com/plan-systems/go-plan/pdi"
-    "context"
+    //"context"
     "flag"
-    "os"
     //"path"
     "fmt"
     "io/ioutil"
@@ -13,6 +12,7 @@ import (
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
+   "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/client"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/repo"
@@ -32,7 +32,7 @@ func main() {
 
     sn, err := NewSnode(basePath, *init)
     if err != nil {
-        plan.Fatalf("NewSnode failed: %v", err)
+        ptools.Fatalf("NewSnode failed: %v", err)
     }
 
     if *init {
@@ -52,27 +52,16 @@ func main() {
         }
 
         if err == nil {
-        
-            intr, intrCtx := plan.SetupInterruptHandler(context.Background())
-            defer intr.Close()
-
-            err := sn.Startup(intrCtx)
+            err := sn.Startup()
             if err != nil {
                 sn.Fatalf("failed to startup: %v", err)
             } else {
-                sn.Infof(0, "to stop: kill -s SIGINT %d", os.Getpid())
-
-                select {
-                    case <- sn.Ctx.Done():
-                }
-
-                sn.CtxStop("snode complete")
+                sn.AttachInterruptHandler()
+                sn.CtxWait()
             }     
         }
     }
-
 }
-
 
 
 
@@ -123,7 +112,7 @@ func loadGenesisInfo(inPathname string) (*CommunityGenesis, error) {
 
 // CommunityGenesis is a helper for creating a new community
 type CommunityGenesis struct {
-    plan.Logger
+    ptools.Logger
 
     GenesisSeed         repo.GenesisSeed
     MemberSeed          repo.MemberSeed
@@ -260,11 +249,10 @@ func (CG *CommunityGenesis) CreateNewCommunity(
                 buf, err = CG.MemberSeed.Marshal()
 
                 // TODO: encrypt this and put keys in it    
-                err = ioutil.WriteFile(CG.GenesisSeed.CommunityEpoch.CommunityName + ".seed.plan", buf, plan.DefaultFileMode)
+                err = ioutil.WriteFile(CG.GenesisSeed.CommunityEpoch.CommunityName + ".seed.plan", buf, ptools.DefaultFileMode)
             }
         }
     }
-
 
     return err
 }
@@ -277,7 +265,7 @@ type chEntry struct {
 
     whitelist       bool    
     chEpoch         *pdi.ChannelEpoch
-    body            plan.Marshaller
+    body            ptools.Marshaller
     assignTo        pdi.CommunityChID
     parentEntry     *chEntry
 }

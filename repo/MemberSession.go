@@ -18,6 +18,7 @@ import (
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
@@ -42,16 +43,8 @@ Newly authoered entries sit around until there's a storage provider
 
 */
 
+/*
 
-// MemberSessMgr contains functionality that manages live active member connections.  
-type MemberSessMgr struct {
-    sync.RWMutex
-
-    CR                      *CommunityRepo
-
-    List                    []*MemberSession
-
-}
 
 // Shutdown calls Shutdown() on each MemberSession and blocks until all sessions have completed shutting down.
 func (mgr *MemberSessMgr) Shutdown(
@@ -64,6 +57,7 @@ func (mgr *MemberSessMgr) Shutdown(
     for {
         mgr.Lock()
         N := len(mgr.List)
+        mgr.CR.Infof(1, "ending %d member sessions", N)
         activeSessions.Add(N)
         for i := 0; i < N; i++ {
             ms := mgr.List[i]
@@ -106,16 +100,16 @@ func (mgr *MemberSessMgr) detachSession(inSess *MemberSession) {
     mgr.Unlock()
 
 }
+*/
 
 
-
-// StartSession sets up a MemberSession for use
+// NewMemberSession sets up a MemberSession for use.
 //
 // TODO: close inSKI if an error is returned
-func (mgr *MemberSessMgr) StartSession(
+func NewMemberSession(
+    CR *CommunityRepo,
     inSessReq *MemberSessionReq,
     inMsgOutlet Repo_OpenMemberSessionServer,
-    inBasePath string,
 ) (*MemberSession, error) {
 
     // TODO: close inSKI if an error is returned
@@ -125,6 +119,8 @@ func (mgr *MemberSessMgr) StartSession(
         return nil, plan.Error(nil, plan.AssertFailed, "invalid workstation ID")
     }
 
+/*
+TODO: check than a session w/ the same member ID + warksation isn't already open?
     // Is the session already open?
     {
         var match *MemberSession
@@ -143,9 +139,10 @@ func (mgr *MemberSessMgr) StartSession(
             return nil, plan.Error(nil, plan.AssertFailed, "session already open")
         }
     }
+*/
 
     ms := &MemberSession{
-        sessMgr: mgr,
+        CR: CR,
         WorkstationID: inSessReq.WorkstationID,
         MemberEpoch: *inSessReq.MemberEpoch,
         SessionToken: make([]byte, 18),
@@ -158,32 +155,26 @@ func (mgr *MemberSessMgr) StartSession(
 
     crypto_rand.Read(ms.SessionToken)
 
-    ms.SetLogLabel(fmt.Sprintf("%s member %d", path.Base(inBasePath), inSessReq.MemberEpoch.MemberID))
     ms.MemberIDStr = ms.MemberEpoch.FormMemberStrID()
-    ms.SharedPath = path.Join(inBasePath, ms.MemberIDStr)
+    ms.SetLogLabel(fmt.Sprintf("%s/member %d", CR.GetLogLabel(), inSessReq.MemberEpoch.MemberID))
+    ms.SharedPath = path.Join(CR.HomePath, ms.MemberIDStr)
 
     if len(inSessReq.WorkstationID) == 0 {
         ms.WorkstationPath = ms.SharedPath
     } else {
         ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64p.EncodeToString(ms.WorkstationID[:15]))
     }
-
-    ms.SetLogLabel(fmt.Sprintf("MemSess_%v", ms.MemberIDStr))
     
     err = ms.CtxStart(
-        inMsgOutlet.Context(),
-        ms.onInternalStartup,
-        ms.onInternalShutdown,
+        ms.ctxStartup,
         nil,
+        ms.ctxChildAboutToStop,
+        ms.ctxStopping,
     )
 
     if err != nil {
         return nil, err
     }
-
-    mgr.Lock()
-    mgr.List = append(mgr.List, ms)
-    mgr.Unlock()
 
     ms.msgOutbox <- &Msg{
         Op: MsgOp_MEMBER_SESSION_READY,
@@ -259,9 +250,9 @@ func (cc *CommunityCrypto) EndSession(
 
 // MemberSession represents a user/member "logged in", meaning a SKI session is active.
 type MemberSession struct {
-    plan.Context
+    ptools.Context
 
-    sessMgr         *MemberSessMgr
+    CR              *CommunityRepo
 
     // Pathname to member repo files (shared by all client instances)
     SharedPath      string
@@ -306,12 +297,12 @@ type MemberSession struct {
 
 
 
-func (ms *MemberSession) onInternalStartup() error {
+func (ms *MemberSession) ctxStartup() error {
 
     ms.ChSessions = make(map[ChSessID]*ChSession)
 
     var err error
-    if err = os.MkdirAll(ms.WorkstationPath, plan.DefaultFileMode); err != nil {
+    if err = os.MkdirAll(ms.WorkstationPath, ms.CR.DefaultFileMode); err != nil {
         return err
     }
 
@@ -320,75 +311,62 @@ func (ms *MemberSession) onInternalStartup() error {
         return err
     }
 
-    ms.sessMgr.CR.registerCommCrypto(ms.commCrypto)
+    ms.CR.registerCommCrypto(ms.commCrypto)
 
     //
     // 
     // outbound client msg sender
     //
     ms.msgOutbox = make(chan *Msg, 8)
-    ms.CtxGo(func(*plan.Context) {
+    ms.CtxGo(func(inCtx ptools.Ctx) {
 
-        for msg := range ms.msgOutbox {
+        isRunning := true
 
-            //ms.Infof(1, "msgOutlet -> (sess %d, ID %d, %s)", msg.ChSessID, msg.ID, MsgOp_name[int32(msg.Op)])
+        outletDone := ms.msgOutlet.Context().Done()
 
-            err := ms.msgOutlet.Send(msg)
-            if err != nil {
-                ms.Info(1, "msgOutlet error: ", err)
-                // TODO
+        for isRunning {
+            var (
+                msg *Msg
+                err error
+            )
 
-                err = ms.msgOutlet.Context().Err()
-                if err != nil {
-                    ms.CtxInitiateStop(err.Error())
-                }
+            select {
+                case msg = <-ms.msgOutbox:
+                    if msg != nil {
+                        err = ms.msgOutlet.Send(msg)
+                        if err != nil {
+                            ms.Warn("ms.msgOutlet.Send: ", err)
+                        }
+                    } else {
+                        isRunning = false
+                    }
+                case <-outletDone:
+                    err = ms.msgOutlet.Context().Err()
+                    ms.CtxStop("MemberSession: " + err.Error(), nil)
+                    outletDone = nil
             }
         }
 
-        ms.sessMgr.detachSession(ms)
-        ms.sessMgr.CR.unregisterCommCrypto(ms.commCrypto)
+        ms.CR.unregisterCommCrypto(ms.commCrypto)
     })
 
     return nil
 }
 
 
-
-func (ms *MemberSession) onInternalShutdown() {
-
-    // Shutdown all channel sessions
-    {
-        waiter := sync.WaitGroup{}
-
-        // First, cause end all client ch sessions
-        ms.ChSessionsMutex.RLock()
-        waiter.Add(len(ms.ChSessions))
-        for _, cs := range ms.ChSessions {
-            go func(cs *ChSession) {
-                cs.CtxStop(ms.CtxStopReason())
-                waiter.Done()
-            }(cs)
-        }
-        ms.ChSessionsMutex.RUnlock()
-
-        waiter.Wait()
-    }    
-
-    // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
-    if ms.msgOutbox != nil {
-        close(ms.msgOutbox)
-    }
-}
-
-func (ms *MemberSession) detachChSession(cs *ChSession) {
+func (ms *MemberSession) ctxChildAboutToStop(inChild ptools.Ctx) {
+    cs := inChild.(*ChSession)
     ms.ChSessionsMutex.Lock()
     delete(ms.ChSessions, cs.ChSessID)
     ms.ChSessionsMutex.Unlock()
 }
 
-// EndSession shutsdown this MemberSession, blocking until the session has been completely removed from use.
-func (ms *MemberSession) EndSession(inReason string) {
-    ms.CtxStop(inReason)
+func (ms *MemberSession) ctxStopping() {
+
+    // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
+    if ms.msgOutbox != nil {
+        close(ms.msgOutbox)
+    }
 }
 
 // StartChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
@@ -402,11 +380,13 @@ func (ms *MemberSession) StartChannelSession(
         return nil, err
     }
 
-    cs, err := ms.sessMgr.CR.chMgr.StartChannelSession(ms, inInvocation)
+    cs, err := ms.CR.chMgr.StartChannelSession(ms, inInvocation)
     if err != nil {
         ms.Infof(1, "channel session failed to start: %v", err)
         return nil, err
     }
+
+    ms.CtxAddChild(cs, nil)
 
     cs.MemberSession.Infof(1, "channel session opened on ch %v (ChSessID %d)", cs.Agent.Store().ChID().SuffixStr(), cs.ChSessID)
 
@@ -418,36 +398,48 @@ func (ms *MemberSession) StartChannelSession(
 }
 
 
-
-
 // OpenMsgPipe blocks until the client closes their pipe or this Member session is closing.
 //
 // WARNING: a client can create multiple pipes, so ensure that all activity is threadsafe.
 func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
 
-    for ms.CtxRunning() {
-        msg, err := inPipe.Recv()
+    ms.CtxGo(func(ptools.Ctx) {
+        for {
+            msg, err := inPipe.Recv()
 
-        if msg != nil {
+            if msg != nil {
+                chSessID := ChSessID(msg.ChSessID)
 
-            chSessID := ChSessID(msg.ChSessID)
+                if ! ms.handleTopLevelMsgs(msg) {
+                    ms.ChSessionsMutex.RLock()
+                    cs := ms.ChSessions[chSessID]
+                    ms.ChSessionsMutex.RUnlock()
 
-            if ! ms.handleTopLevelMsgs(msg) {
-                ms.ChSessionsMutex.RLock()
-                cs := ms.ChSessions[chSessID]
-                ms.ChSessionsMutex.RUnlock()
+                    if cs.CtxRunning() {
+                        cs.msgInbox <- msg
+                    }
+                }
+            }
 
-                if cs.CtxRunning() {
-                    cs.msgInbox <- msg
+            if err != nil {
+                if inPipe.Context().Err() != nil {
+                    break
+                } else {
+                    ms.Warn("OpenMsgPipe pipe recv err: ", err)
                 }
             }
         }
+    })
 
-        if err != nil {
-            return err
-        }
+    // If the session is stopping, then existing this function will cause inPipe to cancel.
+    // If inPipe is closed (from the client side), we want the member session to keep going.
+    select {
+        case <-ms.CtxStopping():
+        case <-inPipe.Context().Done():
     }
+    inPipe.SendAndClose(&plan.Status{})
 
+    // Once we return, inPipe is cancelled. 
     return nil
 }
 
@@ -496,7 +488,7 @@ func (ms *MemberSession) handleTopLevelMsgs(msg *Msg) bool {
                 entry.PayloadTxnSet = txnSet
                 entry.onMergeComplete = onMergeComplete
 
-                ms.sessMgr.CR.entriesToMerge <- entry
+                ms.CR.entriesToMerge <- entry
             } else {
                 onMergeComplete(nil, nil, err)
             }
@@ -513,7 +505,7 @@ func (ms *MemberSession) handleTopLevelMsgs(msg *Msg) bool {
             if err != nil {
                 ms.Warn("ADD_COMMUNITY_KEYS import error: ", err) 
             } else {
-                ms.sessMgr.CR.spSyncActivate()
+                ms.CR.spSyncActivate()
             }
 
         default:

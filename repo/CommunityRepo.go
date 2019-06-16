@@ -16,13 +16,13 @@ import (
     "encoding/json"
     //"e
     
-    //"github.com/plan-systems/go-plan/ski/Providers/hive"
 
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
@@ -55,7 +55,7 @@ type CommunityRepoState struct {
 
 // CommunityRepo wraps a community's data repository and responds to queries for the given community.
 type CommunityRepo struct {
-    plan.Context
+    ptools.Context
 
     GenesisSeed             GenesisSeed    
     Config                 *Config
@@ -113,6 +113,7 @@ type CommunityRepo struct {
     commSessionsMutex       sync.RWMutex
     commSessions            []*CommunityCrypto
 
+    memberSessMgr           ptools.Context
 
     //communitySKI            ski.Session
     //communitySKICond        *sync.Cond
@@ -121,8 +122,6 @@ type CommunityRepo struct {
     //txnScanning             sync.WaitGroup
 
     //pipelines               sync.WaitGroup
-
-    MemberSessMgr          MemberSessMgr
 
 
     // Used for unpacking txns intenrally
@@ -163,7 +162,7 @@ func NewCommunityRepo(
     var err error
 
     CR := &CommunityRepo{
-        DefaultFileMode: plan.DefaultFileMode,
+        DefaultFileMode: ptools.DefaultFileMode,
         unpacker: ski.NewUnpacker(true),
         HomePath: inHomePath,
         spSyncWakeup: make(chan struct{}, 5),
@@ -199,7 +198,6 @@ func NewCommunityRepo(
 
     if err == nil {
         CR.chMgr = NewChMgr(inHomePath, CR)
-        CR.MemberSessMgr.CR = CR
         CR.commKeyRef.KeyringName = CR.GenesisSeed.StorageEpoch.CommunityKeyringName()
     }
 
@@ -216,26 +214,24 @@ func (CR *CommunityRepo) flushState() error {
     if err == nil {
         pathname := path.Join(CR.HomePath, "RepoState.json")
 
-        err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
+        err = ioutil.WriteFile(pathname, buf, CR.DefaultFileMode)
     }
 
     return err
 }
 
 // Startup starts this repo
-func (CR *CommunityRepo) Startup(
-    inCtx context.Context,
-) error {
+func (CR *CommunityRepo) Startup() error {
 
     if CR.CtxRunning() {
         panic("repo is already running")
     }
 
     err := CR.CtxStart(
-        inCtx,
-        CR.onInternalStartup,
-        CR.onInternalShutdown,
+        CR.ctxStartup,
         nil,
+        nil,
+        CR.ctxStopping,
     )
 
     return err
@@ -246,7 +242,7 @@ func (CR *CommunityRepo) GenesisSeedPathname() string {
     return path.Join(CR.HomePath, "GenesisSeed.signed")
 } 
 
-func (CR *CommunityRepo) onInternalStartup() error {
+func (CR *CommunityRepo) ctxStartup() error {
     
     pathname := path.Join(CR.HomePath, "RepoState.json")
     buf, err := ioutil.ReadFile(pathname)
@@ -265,6 +261,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
         return plan.Error(err, plan.StorageNotReady, "CommunityRepo.txnDB.Open() failed")
     }
 
+
     //
     //
     //
@@ -273,7 +270,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Receives txns ready to be committed to the community's storage
     CR.txnsToCommit = make(chan *pdi.PayloadTxnSet, 16)
-    CR.CtxGo(func(*plan.Context) {
+    CR.CtxGo(func(ctx ptools.Ctx) {
 
         for payload := range CR.txnsToCommit {
 
@@ -302,28 +299,17 @@ func (CR *CommunityRepo) onInternalStartup() error {
 
         }
 
+        // TODO: fix this so fetching stop asap but commit is last to disconnect.
+        // Or, we can stop asap once we have txn logging such that uncommited txns get to the server
+        CR.spSyncStop()
+
         CR.flushState()
 
         CR.txnDB.Close()
         CR.txnDB = nil
 
-        // End all community keyring sessions 
-        {
-            CR.commSessionsMutex.Lock()
-            N := len(CR.commSessions)
-            for i := 0; i < N; i++ {
-                CR.commSessions[i].EndSession(CR.CtxStopReason())
-                CR.commSessions[i] = nil
-            }
-            CR.commSessions = nil
-            CR.commSessionsMutex.Unlock()
-        }
-
         CR.Info(0, "shutdown complete")
-        
-    // TODO: fix this so fetching stop asap but commit is last to disconnect.
-    // Or, we can stop asap once we have txn logging such that uncommited txns get to the server
-        CR.spSyncStop()        
+    
     })
     //
     //
@@ -333,8 +319,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Writes incoming raw txns to the txn DB
     CR.txnsToWrite = make(chan *pdi.PayloadTxnSet, 8)
-    CR.CtxGo(func(*plan.Context) {
-        var err error
+    CR.CtxGo(func(ctx ptools.Ctx) {
 
         for payload := range CR.txnsToWrite {
             wb := CR.txnDB.NewWriteBatch()
@@ -367,7 +352,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Processes a new pdi.EntryCrypt and dispatches it to the appropriate channel pipeline
     CR.entriesToMerge = make(chan *chEntry, 1)
-    CR.CtxGo(func(*plan.Context) {
+    CR.CtxGo(func(ctx ptools.Ctx) {
 
         for entry := range CR.entriesToMerge {
             err := CR.DecryptAndMergeEntry(entry)
@@ -377,10 +362,22 @@ func (CR *CommunityRepo) onInternalStartup() error {
         }
 
         // Now that all entries have been inserted into the chMgr, we can shut that down
-        CR.chMgr.CtxStop(CR.CtxStopReason())
+        CR.chMgr.CtxStop(CR.CtxStopReason(), nil)
+        CR.chMgr.CtxWait()
+
+        // End all community keyring sessions now that we're done decrypting.
+        {
+            CR.commSessionsMutex.Lock()
+            N := len(CR.commSessions)
+            for i := 0; i < N; i++ {
+                CR.commSessions[i].EndSession(CR.CtxStopReason())
+                CR.commSessions[i] = nil
+            }
+            CR.commSessions = nil
+            CR.commSessionsMutex.Unlock()
+        }
 
         close(CR.txnsToWrite)
-
     })
     //
     //
@@ -390,7 +387,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Decodes incoming raw txns and inserts them into the collator, which performs callbacks to merge payloads (entries)
     CR.txnsToDecode = make(chan pdi.RawTxn, 1)
-    CR.CtxGo(func(*plan.Context) {
+    CR.CtxGo(func(ctx ptools.Ctx) {
 
         // TODO: choose different encoder based on spInfo
         txnDecoder := ds.NewTxnDecoder(false)
@@ -424,7 +421,7 @@ func (CR *CommunityRepo) onInternalStartup() error {
     //
     // Dispatches txn ID requests to the community's (remote) StorageProvider(s), managing connections etc.
     CR.txnsToFetch = make(chan *pdi.TxnList, 16)
-    CR.CtxGo(func(*plan.Context) {
+    CR.CtxGo(func(ctx ptools.Ctx) {
 
         for txnList := range CR.txnsToFetch {
             
@@ -449,9 +446,17 @@ func (CR *CommunityRepo) onInternalStartup() error {
         close(CR.txnsToDecode)
     })
 
-    if err = CR.chMgr.Startup(CR.Ctx); err != nil {
+    if err = CR.chMgr.Startup(); err != nil {
         return err
     }
+    
+    CR.memberSessMgr.SetLogLabel(CR.GetLogLabel() + "-msMgr")
+    CR.memberSessMgr.CtxStart(
+        nil,
+        nil,
+        nil,
+        nil,
+    )
     
     CR.CtxGo(CR.spSyncController)
 
@@ -459,18 +464,17 @@ func (CR *CommunityRepo) onInternalStartup() error {
 }
 
 
-func (CR *CommunityRepo) onInternalShutdown() {
+func (CR *CommunityRepo) ctxStopping() {
 
-    // First, end all member sessions (and channel sessions)
-    CR.MemberSessMgr.Shutdown(CR.CtxStopReason(), nil)
+    // First, end all member sessions (and channel sessions inside each member session)
+    CR.memberSessMgr.CtxStop(CR.CtxStopReason(), nil)
+    CR.memberSessMgr.CtxWait()
 
     // This will cause the fetch, then decode, then merge routines to stop
     if CR.txnsToFetch != nil {
         close(CR.txnsToFetch)
     }
-
 }
-
 
 
 func (CR *CommunityRepo) spSyncActivate() {
@@ -525,7 +529,7 @@ func (CR *CommunityRepo) disconnectFromStorage() {
 }
 
 
-func (CR *CommunityRepo) spSyncController(inParent *plan.Context) {
+func (CR *CommunityRepo) spSyncController(inHostCtx ptools.Ctx) {
 
     sleep := true
 
@@ -617,7 +621,7 @@ func (CR *CommunityRepo) connectToStorage() {
         }
 
         if err == nil {
-            CR.spContext, err = plan.TransferSessionToken(CR.spContext, trailer)
+            CR.spContext, err = ptools.TransferSessionToken(CR.spContext, trailer)
             if err != nil {
                 err = plan.Error(err, plan.FailedToConnectStorageProvider, "TransferSessionToken() failed")
             }
@@ -976,14 +980,16 @@ func (CR *CommunityRepo) OpenMemberSession(
         return nil, plan.Error(nil, plan.AssertFailed, "community ID does not match repo's ID")
     }
 
-    ms, err := CR.MemberSessMgr.StartSession(
+    ms, err := NewMemberSession(
+        CR,
         inSessReq,
         inMsgOutlet,
-        CR.HomePath,
     )
     if err != nil {
         return nil, err
     }
+
+    CR.memberSessMgr.CtxAddChild(ms, nil)
 
     return ms, nil
 }
@@ -1055,7 +1061,6 @@ func (CR *CommunityRepo) unregisterCommCrypto(inCommSession *CommunityCrypto) {
             CR.commSessions = CR.commSessions[:N]
         }
     }
-    CR.commSessions = append(CR.commSessions, inCommSession)
     CR.commSessionsMutex.Unlock()
 
     if N == 0 {

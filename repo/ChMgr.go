@@ -8,7 +8,7 @@ import (
     //"io/ioutil"
     //"strings"
     "sync"
-    "context"
+    //"context"
     "fmt"
     //"sort"
     //"encoding/hex"
@@ -17,10 +17,9 @@ import (
     //"encoding/binary"
     "sync/atomic"
 
-    //"github.com/plan-systems/go-plan/pcore"
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
-    //"github.com/plan-systems/go-plan/pservice"
     "github.com/plan-systems/go-plan/ski"
 
 
@@ -33,7 +32,7 @@ type ChSessID uint32
 
 // ChMgr is the top level interface for a community's channels.
 type ChMgr struct {
-    plan.Context
+    ptools.Context
 
     HomePath                string
 
@@ -50,7 +49,6 @@ type ChMgr struct {
    // revalQueue              chan revalidateMsg
     chMutex                 sync.RWMutex
     chLoaded                map[plan.ChIDBlob]ChAgent
-
 }
 
 
@@ -75,15 +73,13 @@ func NewChMgr(
 }
 
 // Startup -- see plan.Flow.Startup()
-func (chMgr *ChMgr) Startup(
-    inCtx context.Context,
-) error {
+func (chMgr *ChMgr) Startup() error {
 
     err := chMgr.CtxStart(
-        inCtx,
-        chMgr.onInternalStartup,
-        chMgr.onInternalShutdown,
+        chMgr.ctxStartup,
         nil,
+        nil,
+        chMgr.ctxStopping,
     )
 
     return err
@@ -91,7 +87,7 @@ func (chMgr *ChMgr) Startup(
 
 
 
-func (chMgr *ChMgr) onInternalStartup() error {
+func (chMgr *ChMgr) ctxStartup() error {
 
     /*
     opts := badger.DefaultOptions
@@ -126,14 +122,14 @@ func (chMgr *ChMgr) onInternalStartup() error {
 }
   
 
-func (chMgr *ChMgr) onInternalShutdown() {
+func (chMgr *ChMgr) ctxStopping() {
 
     // The assumption at this point is that no new entries are being sent to channels to be merged.
     // This means that we can close each channel's entriesToMerge to proceed with shutdown
     var waitingOn []*ChStore
     for {
 
-        shutdown := &sync.WaitGroup{} 
+        channels := &sync.WaitGroup{} 
 
         // First, cause all the ChStores to exit their main entry processing loop.
         chMgr.chMutex.RLock()
@@ -145,13 +141,13 @@ func (chMgr *ChMgr) onInternalShutdown() {
             } else {
                 waitingOn = waitingOn[:0]
             }
-            shutdown.Add(N)
+            channels.Add(N)
             for _, ch := range chMgr.chLoaded {
                 chSt := ch.Store()
                 waitingOn = append(waitingOn, chSt)
                 go func() {
                     chSt.ShutdownEntryProcessing(true)
-                    shutdown.Done()
+                    channels.Done()
                 }()
             }
         }
@@ -161,22 +157,27 @@ func (chMgr *ChMgr) onInternalShutdown() {
             break
         }
 
-        chMgr.CR.Infof(1, "waiting on %d channels to shutdown", len(waitingOn))
+        chMgr.CR.Infof(1, "stopping %d open channels", len(waitingOn))
 
         // Wait until every loaded channel has exited it main validation loop
-        shutdown.Wait()
+        channels.Wait()
 
         // At this point, nothing is running (so no futher calls to FetchChannel() should/will be made), so now we can fully shutdown each channel.
-        shutdown.Add(len(waitingOn))
+        channels.Add(len(waitingOn))
         for _, chSt := range waitingOn {
             chMgr.detachChannel(chSt.ChID())
-            go chSt.Shutdown(shutdown)
+            go chSt.Shutdown(channels)
         }
 
         // Wait until all channels have fully shutdown (dbs closed, etc)
-        shutdown.Wait()
+        channels.Wait()
+
+        chMgr.CR.Infof(1, "all channels shutdown")
+
     }
 }
+
+
 
 
 type chEntryOrigin int32
@@ -707,7 +708,7 @@ func (chMgr *ChMgr) loadChannel(
         }
     }
 
-    if err := os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
+    if err := os.MkdirAll(opts.Dir, ptools.DefaultFileMode); err != nil {
         return nil, plan.Error(err, plan.FailedToLoadChannel, "failed to create channel dir")
     }
 
@@ -881,10 +882,10 @@ func (chMgr *ChMgr) StartChannelSession(
     cs.SetLogLabel(fmt.Sprint("ChSess_", cs.ChSessID))
 
     err = cs.CtxStart(
-        inMemberSession.Ctx,
-        cs.ctxInternalStart,
-        cs.ctxInternalStop,
+        cs.ctxStartup,
         nil,
+        nil,
+        cs.ctxStopping,
     )
 
     //inMemberSession.CtxAddChild(cs)
@@ -897,7 +898,7 @@ func (chMgr *ChMgr) StartChannelSession(
 //
 // A ChSession is the bridge between a ChAgent and a MemberSession
 type ChSession struct {
-    plan.Context
+    ptools.Context
     //plan.ContextWorker
 
     ChSessID            ChSessID
@@ -918,43 +919,39 @@ type ChSession struct {
     entryUpdates        chan plan.TIDBlob  
 }
 
-func (cs *ChSession) ctxInternalStart() error {
+func (cs *ChSession) ctxStartup() error {
 
     cs.Agent.Store().attachChSession(cs)
 
-    cs.CtxGo(func(*plan.Context) {
+    cs.CtxGo(func(inCtx ptools.Ctx) {
 
-        for cs.CtxRunning() {
-
-            msg := <- cs.msgInbox
-            if msg == nil {
-                break
-            }
-
+        for msg := range cs.msgInbox {
             switch msg.Op {                            
                 case MsgOp_CH_NEW_ENTRY_REQ:
                     cs.AuthorNewEntry(msg)
                 case MsgOp_CLOSE_CH_SESSION:
-                    cs.CtxInitiateStop("closed by client")
+                    cs.CtxStop("closed by client", nil)
                 case MsgOp_RESET_ENTRY_READER:
                     cs.readerCmdQueue <- msg.FLAGS
             }
         }
 
-        cs.MemberSession.detachChSession(cs)
-        cs.Agent.Store().detachChSession(cs)
-
+        // Causes chSessionEntryReader() to exit
         close(cs.entryUpdates)
     })
 
-    cs.CtxGo(func(*plan.Context) {
+    cs.CtxGo(func(inCtx ptools.Ctx) {
         chSessionEntryReader(cs)
     })
 
     return nil
 }
 
-func (cs *ChSession) ctxInternalStop() {
+func (cs *ChSession) ctxAboutToStop() {
+    cs.Agent.Store().detachChSession(cs)
+}
+
+func (cs *ChSession) ctxStopping() {
 
     if cs.MemberSession.CtxRunning() {
         cs.MemberSession.msgOutbox <- &Msg{
