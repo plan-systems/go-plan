@@ -1,21 +1,24 @@
 {
     "folders": [
-        {
-            "path": "."
-        },
-        {
-            "path": "../design-docs"
-        },
-        {
-            "path": "../plan-protobufs"
-        },
-        {
-            "path": "/Users/aomeara/go/src/github.com/dgraph-io/badger"
-        },
-        {
-            "path": "/Users/aomeara/go/src/github.com/plan-systems/klog"
-        }
-    ],
+		{
+			"path": "."
+		},
+		{
+			"path": "../design-docs"
+		},
+		{
+			"path": "../plan-protobufs"
+		},
+		{
+			"path": "/Users/aomeara/go/src/github.com/dgraph-io/badger"
+		},
+		{
+			"path": "/Users/aomeara/go/src/github.com/plan-systems/klog"
+		},
+		{
+			"path": "/Users/aomeara/go/src/github.com/plan-systems/go-ptools"
+		}
+	],
     "settings": {
     
         "cSpell.words": [
@@ -73,6 +76,7 @@
             "typescript",
             "typescriptreact",
             "yml"
-        ]
+        ],
+		"editor.insertSpaces": false
     }
 }
