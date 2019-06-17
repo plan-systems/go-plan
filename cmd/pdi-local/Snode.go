@@ -10,7 +10,7 @@ import (
     //"fmt"
     //"sync"
     "time"
-    "net"
+    //"net"
     crand "crypto/rand"
     //"encoding/hex"
     "encoding/json"
@@ -23,7 +23,6 @@ import (
 
     "golang.org/x/net/context"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 
 )
 
@@ -65,7 +64,6 @@ type Snode struct {
     Config                      Config
 
     grpcServer                  *grpc.Server
-    listener                    net.Listener
 }
 
 
@@ -96,39 +94,28 @@ func (config *Config) ApplyDefaults() {
     config.GrpcNetworkName = "tcp"
     config.GrpcNetworkAddr = ":50053"
     config.Version = 1
-
 }
 
 
 // NewSnode creates and initializes a new Snode instance
 func NewSnode(
-    inBasePath *string,
+    inBasePath string,
     inDoInit bool,
 ) (*Snode, error) {
-
 
     sn := &Snode{
         activeSessions: ptools.NewSessionGroup(),
     }
-        
+    sn.SetLogLabel("pdi-local")
+
     var err error
-
-    if inBasePath == nil || len(*inBasePath) == 0 {
-        sn.BasePath, err = ptools.UseLocalDir("pdi-local")
-    } else {
-        sn.BasePath = *inBasePath
-    }
-    if err != nil { return nil, err }
-
-    if err = os.MkdirAll(sn.BasePath, ptools.DefaultFileMode); err != nil {
+    if sn.BasePath, err = ptools.SetupBaseDir(inBasePath, inDoInit); err != nil {
         return nil, err
     }
 
     if err = sn.readConfig(inDoInit); err != nil {
         return nil, err
     }
-
-    sn.SetLogLabel("pdi-local")
 
     return sn, nil
 }
@@ -138,7 +125,7 @@ func (sn *Snode) Startup() error {
 
     err := sn.CtxStart(
         sn.ctxStartup,
-        sn.ctxAboutToStop,
+        nil,
         nil,
         sn.ctxStopping,
     )
@@ -163,46 +150,23 @@ func (sn *Snode) ctxStartup() error {
     }
 
     if err == nil {
-        sn.Infof(0, "starting service on %v %v", sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
-        listener, err := net.Listen(sn.Config.GrpcNetworkName, sn.Config.GrpcNetworkAddr)
-        if err != nil {
-            return err
-        }
-
-        // TODO: turn off compression since we're dealing w/ encrypted data
+        // TODO: turn off compression since we're dealing w/ fully encrypted data
         sn.grpcServer = grpc.NewServer()
         pdi.RegisterStorageProviderServer(sn.grpcServer, sn)
-        
-        // Register reflection service on gRPC server.
-        reflection.Register(sn.grpcServer)
-        sn.CtxGo(func(inCtx ptools.Ctx) {
-            
-            if err := sn.grpcServer.Serve(listener); err != nil {
-                sn.Error("grpc server error: ", err)
-            }
-            listener.Close()
 
-            sn.CtxStop("grpc server stopped", nil)
-        })
+        err = sn.AttachGrpcServer(
+            sn.Config.GrpcNetworkName,
+            sn.Config.GrpcNetworkAddr,
+            sn.grpcServer,
+        )
     }
 
     return err
 }
 
-func (sn *Snode) ctxAboutToStop() {
-
-    if sn.grpcServer != nil {
-        sn.Info(1, "stopping grpc service")
-        go sn.grpcServer.GracefulStop()
-    }
-}
-
-
 func (sn *Snode) ctxStopping() {
-
-
+    sn.Infof(0, "stopping")
 }
-
 
 // readConfig uses BasePath to read in the node's config file
 func (sn *Snode) readConfig(inFirstTime bool) error {
