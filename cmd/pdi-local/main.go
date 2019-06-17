@@ -22,17 +22,17 @@ import (
 
 func main() {
 
-    basePath    := flag.String( "path",         "",                 "Directory for all files associated with this datastore" )
-    init        := flag.Bool  ( "init",         false,              "Initializes <datadir> as a fresh datastore" )
-    genesisFile := flag.String( "genesis",      "",                 "Creates a new store using the given community genesis file" )
+    init        := flag.Bool  ( "init",         false,                  "Initializes <datadir> as a fresh datastore" )
+    dataDir     := flag.String( "datadir",      "~/_PLAN_pdi-local",    "Path for all files associated with this datastore" )
+    genesisFile := flag.String( "genesis",      "",                     "Creates a new store using the given community genesis json file" )
 
     flag.Parse()
     flag.Set("logtostderr", "true")
     flag.Set("v", "2")
 
-    sn, err := NewSnode(basePath, *init)
+    sn, err := NewSnode(*dataDir, *init)
     if err != nil {
-        ptools.Fatalf("NewSnode failed: %v", err)
+        ptools.Fatalf("startup failed: %v", err)
     }
 
     if *init {
