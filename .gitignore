@@ -36,5 +36,5 @@ client/client.pb.go
 cmd/pdi-local/pdi-local
 cmd/pdi-local/Shrug Island.seed.plan
 cmd/pnode/pnode
-cmd/client-sim/client-sim
+cmd/pclient/pclient
 
