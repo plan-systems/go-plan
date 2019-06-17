@@ -48,9 +48,9 @@ import (
 
 func main() {
 
-    init        := flag.Bool  ( "init",         false,      "Simulates a new installation" )
-    seed        := flag.String( "seed",         "",         "Reads the given member seed pathname and reflates repo and account")
-    basePath    := flag.String( "path",         "",         "Directory for all files associated with this repo" )
+    init        := flag.Bool  ( "init",         false,              "Used to set up a new plan-seats dir" )
+    basePath    := flag.String( "path",         "~/_plan-pclient",  "The working storage and state dir" )
+    seed        := flag.String( "seed",         "",                 "Reads a PLAN seed file at the given pathname and attempts to seed it with the preferred pnode")
 
 
     flag.Parse()
