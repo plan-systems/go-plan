@@ -12,7 +12,7 @@ import (
 
     ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
-   "github.com/plan-systems/go-ptools"
+    "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/client"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/repo"
@@ -22,8 +22,8 @@ import (
 
 func main() {
 
-    init        := flag.Bool  ( "init",         false,                  "Initializes <datadir> as a fresh datastore" )
-    dataDir     := flag.String( "datadir",      "~/_PLAN_pdi-local",    "Path for all files associated with this datastore" )
+    init        := flag.Bool  ( "init",         false,                  "Creates <datadir> as a fresh/new datastore")
+    dataDir     := flag.String( "datadir",      "~/_PLAN_pdi-local",    "Specifies the path for all file access and storage")
     genesisFile := flag.String( "genesis",      "",                     "Creates a new store using the given community genesis json file" )
 
     flag.Parse()
