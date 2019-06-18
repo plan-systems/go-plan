@@ -412,8 +412,7 @@ func (entry *chEntry) IsWellFormed() bool {
 
 // QueueEntryForMerge is called when an entry arrives to a repo and must be merged into the repo.
 func (chMgr *ChMgr) QueueEntryForMerge(
-    entryCommunityEpoch *pdi.CommunityEpoch,
-    chID plan.ChID, 
+    entryCommEpoch *pdi.CommunityEpoch,
     entry *chEntry,
 ) {
 
@@ -431,31 +430,34 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                 err = plan.Error(err, plan.ChEntryIsMalformed, "error unmarshalling NEW_CHANNEL_EPOCH")
                 entry.ThrowMalformed(err)
             } else {
-                chEpoch.EpochTID = entry.Info.EntryID()
-                chEpoch.CommunityEpochID = entryCommunityEpoch.EpochTID
+                entryID := entry.Info.EntryID()
 
-                // Having set critical fields, remarshal the body
-                // TODO: use scrap
-                entry.Body, _ = chEpoch.Marshal()
+                // Warning: when we use slices from chEntry, watch out for escapes since chEntry is recycled (and will be overwritten)
+                chEpoch.EpochTID = entryID.Clone()
+                chEpoch.CommunityEpochID = entryCommEpoch.EpochTID
+
+                // Having set the above fields, remarshal the body
+                entry.Body = ptools.SmartMarshal(chEpoch, entry.Body)
     
                 // Is the the channel genesis epoch?  If so, the channel ID derives from the channel ID.
                 if chEpoch.IsChannelGenesis() {
-                    chID = entry.Info.FormGenesisChID()
+                    entry.Info.ChannelID = append(entry.Info.ChannelID[:0], entryID.ExtractChID()...)
                     chGenesisEpoch = chEpoch
                     entry.AddFlags(EntryFlag_IS_CHANNEL_GENESIS) 
                 }
             }
         }
+    }
 
-        default:
-            if len(chID) != plan.ChIDSz {
-                err = plan.Error(err, plan.ChEntryIsMalformed, "bad channel ID len")
-                entry.ThrowMalformed(err)
-            }
+    chID := entry.Info.ChID()
+
+    if len(chID) != plan.ChIDSz {
+        err = plan.Error(err, plan.ChEntryIsMalformed, "malformed channel ID")
+        entry.ThrowMalformed(err)
     }
 
     if entry.IsWellFormed() {
-        ch, err = chMgr.fetchChannel(chID, true, chGenesisEpoch)
+        ch, err = chMgr.fetchChannel(entry.Info.ChannelID, true, chGenesisEpoch)
 
         // Is this the channel genesis entry but the channel has ChUnknown?   This occurs when
         //    entries are merged into a channel before the channel's genesis entry arrives.
@@ -467,7 +469,7 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                 chNew := chMgr.NewChAgent(
                     &ChStoreState{
                         ChProtocol: chGenesisEpoch.ChProtocol,
-                        ChannelID: chID,
+                        ChannelID: chID.Clone(),
                     }, 
                     false,
                 )
@@ -507,6 +509,11 @@ func (chMgr *ChMgr) QueueEntryForMerge(
         //chEntry.Status = EntryStatus_DEFERRED
         panic("TODO")
     } else {
+
+        // From here on out, an entry is always accompanied by the ChStore, so we drop the entry chID since it's now redundant.
+        // We zero it here to ensure entry.Info.ChannelID isn't used accidentally. 
+        entry.Info.ChannelID = entry.Info.ChannelID[:0]
+
         ch.Store().entriesToMerge <- entry
     }
 
@@ -923,7 +930,7 @@ func (cs *ChSession) ctxStartup() error {
 
     cs.Agent.Store().attachChSession(cs)
 
-    cs.CtxGo(func(inCtx ptools.Ctx) {
+    cs.CtxGo(func() {
 
         for msg := range cs.msgInbox {
             switch msg.Op {                            
@@ -940,7 +947,7 @@ func (cs *ChSession) ctxStartup() error {
         close(cs.entryUpdates)
     })
 
-    cs.CtxGo(func(inCtx ptools.Ctx) {
+    cs.CtxGo(func() {
         chSessionEntryReader(cs)
     })
 
