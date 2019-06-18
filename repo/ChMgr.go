@@ -890,7 +890,7 @@ func (chMgr *ChMgr) StartChannelSession(
 
     err = cs.CtxStart(
         cs.ctxStartup,
-        nil,
+        cs.ctxAboutToStop,
         nil,
         cs.ctxStopping,
     )
