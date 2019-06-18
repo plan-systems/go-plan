@@ -262,7 +262,7 @@ func (sn *Snode) StartSession(ctx context.Context, in *pdi.SessionReq) (*pdi.Sto
 
 	St := sn.fetchStore(in.StorageEpoch.CommunityID)
 	if St == nil {
-		return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found: %v", in.StorageEpoch.CommunityID)
+		return nil, plan.Errorf(nil, plan.CommunityNotFound, "community not found: %v", plan.Base64p.EncodeToString(in.StorageEpoch.CommunityID))
 	}
 
 	// TODO security checks to prevent DoS
