@@ -42,26 +42,6 @@ var gChAgentRegistry = map[string]ChAgentFactory{}
 
 
 
-
-
-/*
-Channel TODO:
-
-/plan/ch/ch-registry ??
-
-
-/plan/ch/talk
-/plan/ch/space
-/plan/ch/notepad
-/plan/ch/sheet
-
-/plan/ch/file/audio
-/plan/ch/file/video
-
-
-*/
-
-
 const (
 
     // BuiltinProtocolPrefix is the prefix used for all builtin channel protocols.
@@ -92,9 +72,6 @@ const (
 // ChAgent is a protocol-specific implementation built to interact with a ChStore
 type ChAgent interface {
 
-
-    //Revalidator()
-
     //AttachToChStore(chSt *ChStore)
     Store() *ChStore
 
@@ -116,44 +93,6 @@ type ChAgent interface {
         entry *chEntry,
     ) error
 
-    // Initiates a reversal and revalidation cascade for each recursive-reversed entry.
-    /*
-    ReverseEntry(
-        inURID []byte,
-    ) error*/
-
-
-/*
-    ProcessNewEntry(
-        inEntryBody []byte,
-        inEntryURID []byte,
-        ioEntryStatus *EntryStatus,
-        outRetainBody *bool,
-        outBody []byte,
-    ) 
-
-    EntryStatusChanged(
-        inEntryURID []byte,
-        ioEntryStatus *EntryStatus,
-    )
-*/
-
-/*
-    BeginSession(
-        inCommunityRepo    *CommunityRepo,
-        inMemberSession    *MemberSession,
-        inChID             plan.ChannelID,
-        inMsgOutbox      chan *plan.Block,
-    ) (ChSession, error)
-
-    ProcessSession(sess *ChSession)
-*/
-
-
-    //OnEntryPosted()
-
-
-    //OnEntryStatusChanged()
 }
 
 
@@ -217,17 +156,6 @@ ChStore.db
 
 
 */
-
-
-
-
-
-
-
-
-
-//func (guide *revalGuide) queueReval()
-
 
 
 // ChStore is the low-level channel entry manager for a channel.  
@@ -382,18 +310,6 @@ func (chSt *ChStore) NewWrite(
 
     return chTxn
 }
-
-/*
-func loadEntry(
-    inEntryID plan.TID,
-    inTxn    *badger.Txn,
-    loadBody func(v []byte) error,
-    loadBodyRaw bool,
-    entry *chEntry,
- ) *chEntry {
-
-}
-*/
 
 
 // LoadEntry reads the given entry ID from this ChStore.
@@ -572,6 +488,7 @@ func (chSt *ChStore) seekToNextEntry(
     }
 
     copy(outEntryTID, itr.Item().Key())
+    //chSt.Info(2, "next key: ", itr.Item().Key(), outEntryTID.SuffixStr())
 
     return true
 
@@ -765,6 +682,7 @@ func (chSt *ChStore) flushEntry(entry *chEntry) error {
     // If we're merging, write out info and body entries (they only need to be written once)
     if entry.bodyStatus == partTouched {
         n, err = writeEntryItem(wb, entry, entryID, chEntryInfoKey, n, nil, &entry.Info)
+        //chSt.Info(2, "wrote EntryInfo: ", entryID.SuffixStr())
         chSt.Log(err, "storing EntryInfo")
         
         if err == nil {
@@ -1195,15 +1113,14 @@ func (chSt *ChStore) ValidateEntry(
         {
             registry, err := chSt.chMgr.FetchMemberRegistry()
             if err == nil {
-
+                
                 // Write the dependency so this entry will be revalidated if the dep changes liveness.
                 if ! entry.HasFlags(EntryFlag_AUTHOR_DEPENDENCY_WRITTEN) {
-                    err = registry.AddDependency(chSt.ChID(), &entry.Info)
+                    err = registry.AddDependency(entry.Info.AuthorEntryID(), chSt.ChID(), &entry.Info)
                     if err == nil {
                         entry.AddFlags(EntryFlag_AUTHOR_DEPENDENCY_WRITTEN)
                     }
                 }
-
                 if err == nil {
                     err = registry.ValidateAuthor(entry)
                 }
@@ -1256,13 +1173,13 @@ func (chSt *ChStore) ValidateEntry(
 
                         // Write the ACC dependency so that we know to revalidate this entry if the cited entry changes
                         if ! entry.HasFlags(EntryFlag_ACC_DEPENDENCY_WRITTEN) {
-                            err = acc.Store().AddDependency(chSt.ChID(), &entry.Info)
+                            err = acc.Store().AddDependency(accEntryID, chSt.ChID(), &entry.Info)
                             if err == nil {
                                 entry.AddFlags(EntryFlag_AUTHOR_DEPENDENCY_WRITTEN)
                             }
-                        }
-                        if err == nil {
-                            err = acc.Store().IsEntryAuthorized(accEntryID, entry)
+                            if err == nil {
+                                err = acc.Store().IsEntryAuthorized(accEntryID, entry)
+                            }
                         }
                     } else {
                         err = plan.Error(err, plan.ACCNotFound, "cited ACC in ch epoch not accessible")
@@ -1292,7 +1209,7 @@ func (chSt *ChStore) ValidateEntry(
 
     entry.SetStatus(status)
 
-    if status == EntryStatus_DEFERRED || chSt.LogV(1) {
+    if (entry.LivenessChanged() || entry.stateStatus == partTouched) && chSt.LogV(1) {
         var errStr string 
         if valErr != nil {
             errStr = fmt.Sprintf(" (%v)", valErr)
@@ -1300,7 +1217,6 @@ func (chSt *ChStore) ValidateEntry(
 
         chSt.Info(1, "entry ", entry.Info.EntryID().SuffixStr(), " => ", gEntryStatusDesc[entry.State.Status], errStr)
     }
-
 }
 
 var gEntryStatusDesc = map[EntryStatus]string{
@@ -1312,20 +1228,12 @@ var gEntryStatusDesc = map[EntryStatus]string{
 }
 
 
-/*
-func formDepKeyForAuthor(
-    authorMemberID uint32,
-    authorEpochNum uint32,
-) uint64 {
-    return uint64(authorMemberID) << 32 | uint64(authorEpochNum)
-}
-*/
-
 // AddDependency adds the given dependency, storing a state such that subsequent entries posted to reverted to this channel
 //    can cause dependent channels to commence relvalidation. 
 func (chSt *ChStore) AddDependency(
-    inChID plan.ChID,
-    inChEntry *pdi.EntryInfo,
+    inRefdTID  plan.TID,
+    inDepChID  plan.ChID,
+    inDepEntry *pdi.EntryInfo,
 ) error {
 
     var (
@@ -1333,17 +1241,17 @@ func (chSt *ChStore) AddDependency(
         chDep ChDependency
     )
 
-    plan.Assert(len(inChID) == plan.ChIDSz, "bad channel ID")
+    plan.Assert(len(inDepChID) == plan.ChIDSz, "bad channel ID")
 
-    copy(depKey[:], inChEntry.EntryID())
+    copy(depKey[:], inRefdTID)
     depKey[plan.TIDSz] = chEntryDepsKey
-    copy(depKey[chEntryKeySz:], inChID)
+    copy(depKey[chEntryKeySz:], inDepChID)
 
     // Typically, we won't need to write but we have to do it anyway in the event that we do.
     chTxn := chSt.NewWrite()
     needsUpdate := false
 
-    depTime := int64(inChEntry.TimeAuthoredFS())
+    depTime := int64(inDepEntry.TimeAuthoredFS())
 
     // If there's already a dependency for the referenced dep key in the given channel, 
     //    choose the more restrictive dependency.
@@ -2036,8 +1944,6 @@ func (ch *ChMemberRegistry) ValidateAuthor(
     entry *chEntry,
 ) error {
      
-    //registry.AddDependency(inEntry.Info.ChannelID, inEntry.TimeAuthored, BY_AUTHOR)
-
     memberEpoch, err := ch.FetchMemberEpoch(entry.Info.AuthorEntryID())
     if err != nil {
         return err
