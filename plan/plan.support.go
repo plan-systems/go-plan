@@ -185,7 +185,7 @@ func (tid TID) CopyNext(inTID TID) {
 	}
 }
 
-// ExtractChID returns the ChID for what is presumed to be a channel genesis entry
+// ExtractChID returns the ChID for what is presumed to be a channel genesis entry (whose ChID is dervied from the EntryID)
 func (tid TID) ExtractChID() ChID {
     return ChID(tid[TIDSz - ChIDSz:])
 }
