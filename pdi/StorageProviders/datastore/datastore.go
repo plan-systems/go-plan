@@ -3,7 +3,7 @@ package datastore
 import (
 
     "fmt"
-    "sync/atomic"
+    //"sync/atomic"
     "os"
     "path"
     //"io/ioutil"
@@ -60,10 +60,6 @@ type Store struct {
     DecodedCommits              chan CommitJob
 
     commitScrap                 []byte
-
-    numScanJobs                 int32
-    numSendJobs                 int32
-    numCommitJobs               int32
  
     txnDecoder                  pdi.TxnDecoder
 
@@ -159,7 +155,7 @@ func (St *Store) ctxStartup() error {
     //
     // Small buffer needed for the txn notifications to ensure that the txn writer doesn't get blocked
     St.txnUpdates = make(chan txnUpdate, 8)
-    St.CtxGo(func(inCtx ptools.Ctx) {
+    St.CtxGo(func() {
 
         for update := range St.txnUpdates {
             St.subsMutex.Lock()
@@ -169,14 +165,6 @@ func (St *Store) ctxStartup() error {
             St.subsMutex.Unlock()
         }
         St.Info(2, "commit notification exited")
-
-        // Wait until all queries are exited (which is assured with St.OpState set and all possible blocks signaled)
-        for {
-            time.Sleep(100 * time.Millisecond)
-            if atomic.LoadInt32(&St.numScanJobs) == 0 && atomic.LoadInt32(&St.numSendJobs) == 0 {
-                break
-            }
-        }
 
         St.txnDB.Close()
         St.txnDB = nil
@@ -189,14 +177,11 @@ func (St *Store) ctxStartup() error {
     //
     //
     St.DecodedCommits = make(chan CommitJob, 1)
-    St.CtxGo(func(inCtx ptools.Ctx) {
+    St.CtxGo(func() {
 
-        for job := range St.DecodedCommits {
-            
-            // Process once commit job at a time
+        // Process one commit job at a time
+        for job := range St.DecodedCommits {            
             St.doCommitJob(job)
-
-            atomic.AddInt32(&St.numCommitJobs, -1)
         }
         St.Info(2, "commit pipeline closed")
 
@@ -209,16 +194,7 @@ func (St *Store) ctxStartup() error {
 }
 
 func (St *Store) ctxStopping() {
-
-    // Wait until we're sure a commit didn't sneak in
-    for {
-        time.Sleep(100 * time.Millisecond)
-        if atomic.LoadInt32(&St.numCommitJobs) == 0 {
-            break
-        }
-    }
-
-    St.Info(2, "pending commits complete")
+    St.Info(2, "stopping")
 
     // This will initiate a close-cascade causing St.resources to be released
     if St.DecodedCommits != nil {
@@ -500,14 +476,12 @@ func (St *Store) removeTxnSubscriber(inSub chan txnUpdate) {
 
 }
 
-
-
 // DoScanJob queues the given ScanJob
 func (St *Store) DoScanJob(job ScanJob) {
-    atomic.AddInt32(&St.numScanJobs, 1)
 
     // TODO: use semaphore.NewWeighted() to bound the number of query jobs
-    go func() {
+    St.CtxGo(func() {
+
         err := St.doScanJob(job)
         
         if err != nil && St.CtxRunning() {
@@ -515,32 +489,23 @@ func (St *Store) DoScanJob(job ScanJob) {
         }
 
         job.OnComplete <- err
-        atomic.AddInt32(&St.numScanJobs, -1)
-    }()
+    })
 }
 
 
 // DoSendJob queues the given SendJob
 func (St *Store) DoSendJob(job SendJob) {
-    atomic.AddInt32(&St.numSendJobs, 1)
 
-    go func() {
+    St.CtxGo(func() {
         err := St.doSendJob(job)
-
-        if err != nil && St.CtxRunning() {
-            St.Errorf("send job error: %v", err)
-        }
-
         job.OnComplete <- err
-        atomic.AddInt32(&St.numSendJobs, -1)
-    }()
+    })
 
 }
 
 
 // DoCommitJob queues the given CommitJob
 func (St *Store) DoCommitJob(job CommitJob) error {
-    atomic.AddInt32(&St.numCommitJobs, 1)
 
     err := St.CtxStatus()
     if err == nil {
@@ -548,7 +513,6 @@ func (St *Store) DoCommitJob(job CommitJob) error {
     }
 
     if err != nil {
-        atomic.AddInt32(&St.numSendJobs, -1)
         return err
     }
 
@@ -558,27 +522,30 @@ func (St *Store) DoCommitJob(job CommitJob) error {
 }
 
 
-
+// doSendJob sends the requested txns.
+//
+// Any error returned is related 
 func (St *Store) doSendJob(job SendJob) error {
-
-    var err error 
 
     dbTxn := St.txnDB.NewTransaction(false)
     {
-        txn := pdi.RawTxn{
+        txn := &pdi.RawTxn{
             TxnMetaInfo: &pdi.TxnMetaInfo{
                 TxnStatus: pdi.TxnStatus_FINALIZED,
             },
         }
 
         for _, URID := range job.URIDs {
-            txnOut := &txn
 
-            item, dbErr := dbTxn.Get(URID)
-            if dbErr == nil {
-                txnOut = &txn
+            if ! St.CtxRunning() {
+                break
+            }
 
-                err = item.Value(func(inVal []byte) error {
+            txnOut := txn
+
+            item, readErr := dbTxn.Get(URID)
+            if readErr == nil {
+                readErr = item.Value(func(inVal []byte) error {
                     t := int64(inVal[0]) << 40
                     t |= int64(inVal[1]) << 32
                     t |= int64(inVal[2]) << 24
@@ -589,23 +556,26 @@ func (St *Store) doSendJob(job SendJob) error {
                     txnOut.Bytes = inVal[pdi.URIDTimestampSz:]
                     return nil
                 })
-            } else if dbErr == badger.ErrKeyNotFound {
-                // TODO: send alert that URID not found?
+            } else if readErr == badger.ErrKeyNotFound {
+                txnOut = &pdi.RawTxn{
+                    URID: URID,
+                    TxnMetaInfo: &pdi.TxnMetaInfo{
+                        TxnStatus: pdi.TxnStatus_MISSING,
+                    },
+                }
+            }
+
+            if readErr != nil {
+                St.CtxOnFault(readErr, fmt.Sprintf("reading txn %v", pdi.URID(URID).Str()))
             } else {
-                err = dbErr
+                if sendErr := job.Outlet.Send(txnOut); sendErr != nil {
+                    if ! St.CtxRunning() {
+                        St.Warn("failed to send txn: ", sendErr)
+                    }
+                }
             }
 
-            if err != nil {
-                St.Warnf("error reading txn %v:", URID, err)
-                continue
-            }
-
-            err = St.CtxStatus()
-            if err == nil && txnOut != nil {
-                err = job.Outlet.Send(txnOut)
-            }
-
-            if err != nil {
+            if St.CtxStatus() != nil {
                 break
             }
         }
@@ -613,42 +583,41 @@ func (St *Store) doSendJob(job SendJob) error {
     dbTxn.Discard()
     dbTxn = nil
 
-    return err
-
+    return nil
 }
 
 
-
-func (St *Store) doScanJob(job ScanJob) error {
-
-    var err error
+// doScanJob performs scan work.
+//
+// If an error is returned, it's bc there was a problem w/ the params (not b/c of an internal problem).  
+// Internal problems will eventually cause this Context to stop if appropriate.
+func (St *Store) doScanJob(job ScanJob) (jobErr error) {
 
     const (
         batchMax = 50
         batchBufSz = batchMax * pdi.URIDSz
     )
     var (
-        URIDbuf [batchMax * pdi.URIDSz]byte
-        URIDs [batchMax][]byte
+        URIDbuf [batchMax*pdi.URIDSz]byte
+        URIDs   [batchMax][]byte
+        batchDelay *time.Ticker
     )
+
+    // Before we start the db txn (and effectively get locked to a db rev in time), subscribe this job to receive new commits
+    if job.TxnScan.SendTxnUpdates {
+        batchDelay = time.NewTicker(time.Millisecond * 300)
+        
+        job.txnUpdates = St.addTxnSubscriber()
+    }
+
     statuses := make([]byte, batchMax)
     for i := 0; i < batchMax; i++ {
-        statuses[i] = byte(pdi.TxnStatus_FINALIZED)
-
         pos := i * pdi.URIDSz
         URIDs[i] = URIDbuf[pos:pos + pdi.URIDSz]
     }
 
     heartbeat := time.NewTicker(time.Second * 28)
-    var batchDelay *time.Ticker
-
-    // Before we start the db txn (and effectively get locked to a db rev in time), subscribe this job to receive new commits
-    if job.TxnScan.SendTxnUpdates {
-        batchDelay = time.NewTicker(time.Millisecond * 300)
-
-        job.txnUpdates = St.addTxnSubscriber()
-    }
-
+    
     {
         opts := badger.DefaultIteratorOptions
         opts.PrefetchValues = false
@@ -658,6 +627,7 @@ func (St *Store) doScanJob(job ScanJob) error {
             scanDir int
             stopKey pdi.URIDBlob
             seekKey pdi.URIDBlob
+            jobErr error
         )
 
         seekKey.URID().SetFromTimeAndHash(job.TxnScan.TimestampStart, nil)
@@ -672,7 +642,7 @@ func (St *Store) doScanJob(job ScanJob) error {
         totalCount := int32(0)
 
         // Loop and send batches of txn IDs and interleave and txn updates.
-        for  err == nil && (scanDir != 0 || job.TxnScan.SendTxnUpdates) {
+        for jobErr == nil && St.CtxRunning() {
 
             // Track where the seek head started
             curScanPos := seekKey.ExtractTime()
@@ -690,11 +660,7 @@ func (St *Store) doScanJob(job ScanJob) error {
 
                 batchCount := int32(0)
                 
-                for  ; itr.Valid(); itr.Next() {
-
-                    if err = St.CtxStatus(); err != nil {
-                        break
-                    }
+                for  ; itr.Valid() && St.CtxRunning(); itr.Next() {
 
                     item := itr.Item()
                     itemKey := item.Key()
@@ -704,11 +670,12 @@ func (St *Store) doScanJob(job ScanJob) error {
                     }
 
                     if len(itemKey) != pdi.URIDSz {
-                        St.Warnf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDSz)
+                        St.Errorf("encountered txn key len %d, expected %d", len(itemKey), pdi.URIDSz)
                         continue
                     }
 
                     copy(URIDs[batchCount], itemKey)
+                    statuses[batchCount] = byte(pdi.TxnStatus_FINALIZED)
 
                     batchCount++
                     totalCount++
@@ -724,24 +691,25 @@ func (St *Store) doScanJob(job ScanJob) error {
                 dbTxn.Discard()
                 dbTxn = nil
 
-                if err == nil {
-                    err = St.CtxStatus()
-                }
-
                 if batchCount == 0 {
                     scanDir = 0
-                } else if err == nil {
-                    err = job.Outlet.Send(&pdi.TxnList{
+                } else {
+                    copy(seekKey[:], URIDs[batchCount-1])
+
+                    txnList := &pdi.TxnList{
                         URIDs:    URIDs[:batchCount],
                         Statuses: statuses[:batchCount],
-                    })
-
-                    copy(seekKey[:], URIDs[batchCount-1])
+                    }
+                    jobErr = job.Outlet.Send(txnList)
                 }
             }
 
+            if jobErr != nil {
+                break
+            }
+
             // At this point, we've sent a healthy batch of scanned txn IDs and we need to also send any pending txn status updates.
-            {
+            if job.TxnScan.SendTxnUpdates {
                 batchCount := int32(0)
                 fullWait := false
 
@@ -758,11 +726,12 @@ func (St *Store) doScanJob(job ScanJob) error {
                 }
 
                 doneWaiting := false
-
-                for err == nil && ! doneWaiting {
+                sendBatch := false
+                
+                for ! doneWaiting {
 
                     select {
-                        case txnUpdate := <- job.txnUpdates:
+                        case txnUpdate := <-job.txnUpdates:
                             if len(txnUpdate.URID) == pdi.URIDSz {
                                 txnTime := txnUpdate.URID.ExtractTime()
 
@@ -791,24 +760,26 @@ func (St *Store) doScanJob(job ScanJob) error {
                                 }
                             }
 
-                        case <- wakeTimer:
+                        case <-wakeTimer:
                             doneWaiting = true
+                            sendBatch = true
 
-                        case <- St.Ctx.Done():
-                            err = St.CtxStatus()
+                        case <-St.Ctx.Done():
+                            doneWaiting = true
                     }
 
-                    if doneWaiting || batchCount == batchMax {
-                        err = job.Outlet.Send(&pdi.TxnList{
-                            URIDs: URIDs[:batchCount],
+                    if sendBatch || batchCount == batchMax {
+                        txnList := &pdi.TxnList{
+                            URIDs:    URIDs[:batchCount],
                             Statuses: statuses[:batchCount],
-                        })
+                        }
+                        jobErr = job.Outlet.Send(txnList)
                         batchCount = 0
                     }
                 }
-
+            } else if scanDir == 0 {
+                break
             }
-
         }
     }
 
@@ -816,7 +787,7 @@ func (St *Store) doScanJob(job ScanJob) error {
         St.removeTxnSubscriber(job.txnUpdates)
     }
 
-    return err
+    return jobErr
 }
 
 
