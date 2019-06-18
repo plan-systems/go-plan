@@ -518,11 +518,6 @@ func (entry *EntryInfo) Clone() *EntryInfo {
     return clone
 }
 
-// FormGenesisChID returns the ChID for what is presumed to be a channel genesis entry
-func (entry *EntryInfo) FormGenesisChID() plan.ChID {
-    return plan.ChID(entry.EntryID()[plan.TIDSz - plan.ChIDSz:])
-}
-
 // IsChannelGenesis returns true if this channel epoch implies the creation/genesis of a new channel
 func (epoch *ChannelEpoch) IsChannelGenesis() bool {
     return len(epoch.PrevEpochTID) == 0;

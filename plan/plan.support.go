@@ -20,14 +20,16 @@ func (chID ChID) Str() string {
 	return Base64p.EncodeToString(chID)
 }
 
+// Clone returns a duplicate of this ChID
+func (chID ChID) Clone() ChID {
+	dupe := make([]byte, ChIDSz)
+	copy(dupe, chID)
+	return dupe
+}
+
 // SuffixStr returns the last few digits of this ChID in string form (for easy reading, logs, etc)
 func (chID ChID) SuffixStr() string {
 	return Base64p.EncodeToString(chID[ChIDSz-6:])
-}
-
-// AssignFromTID copies from the right-part of the given TID
-func (chID ChID) AssignFromTID(tid TID) {
-	copy(chID, tid[TIDSz-ChIDSz:])
 }
 
 // TID is a convenience function that returns the TID contained within this TIDBlob.
@@ -46,6 +48,13 @@ func (tid TID) IsNil() bool {
 	}
 
 	return false
+}
+
+// Clone returns a duplicate of this TID
+func (tid TID) Clone() TID {
+	dupe := make([]byte, TIDSz)
+	copy(dupe, tid)
+	return dupe
 }
 
 // Blob is a convenience function that forms a TID byte array from a TID byte slice.
@@ -176,6 +185,10 @@ func (tid TID) CopyNext(inTID TID) {
 	}
 }
 
+// ExtractChID returns the ChID for what is presumed to be a channel genesis entry
+func (tid TID) ExtractChID() ChID {
+    return ChID(tid[TIDSz - ChIDSz:])
+}
 
 /*****************************************************
 ** Utility & Conversion Helpers
