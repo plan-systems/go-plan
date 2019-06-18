@@ -1,47 +1,35 @@
-
 package main
 
 import (
-    //"fmt"
-    "flag"
-    //"os"
-    //"time"
-    "log"
-    //"io"
-    //"bytes"
-    //"fmt"
-	//"os/user"
-    //"path"
-    //"crypto/md5"
-    //"encoding/hex"
+	//"fmt"
+	"flag"
+	"log"
 
-    //"github.com/plan-systems/go-plan/plan"
-    //"github.com/plan-systems/go-plan/ski"
-    //"github.com/plan-systems/go-plan/pdi"
-    //"github.com/plan-systems/go-plan/pservice"
+	"github.com/plan-systems/go-plan/plan"
 )
 
 func main() {
 
-    basePath    := flag.String( "path",         "",         "Directory for all files associated with this repo" )
-    init        := flag.Bool  ( "init",         false,      "Initializes <datadir> as a fresh repo" )
+	init 	:= flag.Bool(	"init", 	false, 							"Creates <datadir> as a fresh/new pnode datastore")
+	dataDir := flag.String(	"datadir",	"~/_PLAN_pnode", 				"Specifies the path for all file access and storage")
+	port    := flag.String(	"port",	    plan.DefaultRepoServicePort, 	"Sets the port used to bind the Repo service")
 
-    flag.Parse()
-    flag.Set("logtostderr", "true")
-    flag.Set("v", "2")
+	flag.Parse()
+	flag.Set("logtostderr", "true")
+	flag.Set("v", "2")
 
-    pn, err := NewPnode(basePath, *init)
-    if err != nil {
-        log.Fatal(err)
-    }
+	pn, err := NewPnode(*dataDir, *init, *port)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    {
-        err := pn.Startup()
-        if err != nil {
-            pn.Fatalf("failed to startup pnode")
-        } else {
-            pn.AttachInterruptHandler()
-            pn.CtxWait()
-        }
-    }
+	{
+		err := pn.Startup()
+		if err != nil {
+			pn.Fatalf("failed to startup pnode")
+		} else {
+			pn.AttachInterruptHandler()
+			pn.CtxWait()
+		}
+	}
 }

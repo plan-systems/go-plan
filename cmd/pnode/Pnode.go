@@ -48,13 +48,12 @@ type PnodeConfig struct {
 }
 
 
-
 // ApplyDefaults sets std fields and values
 func (config *PnodeConfig) ApplyDefaults() {
 
     config.DefaultFileMode = ptools.DefaultFileMode
     config.GrpcNetworkName = "tcp"
-    config.GrpcNetworkAddr = ":" + plan.DefaultRepoServicePort
+    config.GrpcNetworkAddr = ""
     config.Version = 1
 
 }
@@ -70,6 +69,7 @@ type Pnode struct {
     ReposPath                   string
     Config                      PnodeConfig
 
+    servicePort                 string
     grpcServer                  *grpc.Server
 }
 
@@ -78,10 +78,12 @@ type Pnode struct {
 func NewPnode(
     inBasePath string,
     inDoInit bool,
+    inServicePort string,
 ) (*Pnode, error) {
 
     pn := &Pnode{
         activeSessions: ptools.NewSessionGroup(),
+        servicePort: inServicePort,
     }
     pn.SetLogLabel("pnode")
 
@@ -189,9 +191,10 @@ func (pn *Pnode) ctxStartup() error {
         pn.grpcServer = grpc.NewServer()
         repo.RegisterRepoServer(pn.grpcServer, pn)
         
+        addr := pn.Config.GrpcNetworkAddr + ":" + pn.servicePort
         err = pn.AttachGrpcServer(
             pn.Config.GrpcNetworkName,
-            pn.Config.GrpcNetworkAddr,
+            addr,
             pn.grpcServer,
         )
     }
