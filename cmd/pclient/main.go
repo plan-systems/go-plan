@@ -15,6 +15,7 @@ import (
 	"fmt"
 
 	"path"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -39,10 +40,12 @@ const localPnode = ":" + plan.DefaultRepoServicePort
 
 func main() {
 
-	init := flag.Bool("init", false, "init creates <datadir> as a fresh/new pclient datastore")
-	dataDir := flag.String("datadir", "~/_PLAN_pclient", "datadir specifies the path for all file access and storage")
-	seed := flag.String("seed", "", "seed reads a PLAN seed file ands seeds a community instance on the host pnode")
-	hostAddr := flag.String("host", localPnode, "host specifies the net addr of a host pnode for all connection")
+	init 		:= flag.Bool("init", 		false, 				"init creates <datadir> as a fresh/new pclient datastore")
+	dataDir 	:= flag.String("datadir", 	"~/_PLAN_pclient", 	"datadir specifies the path for all file access and storage")
+	seed 		:= flag.String("seed", 		"", 				"seed reads a PLAN seed file ands seeds a community instance on the host pnode")
+	hostAddr 	:= flag.String("host",		localPnode, 		"host specifies the net addr of a host pnode for all connection")
+	testRepeat  := flag.String("Trepeat",    "10",				"how often a test msg will be posted to the test channel")
+	testCreate  := flag.String("Topen",    	"", 				"opens the given channel (vs creating a new channel)")
 
 	flag.Parse()
 	flag.Set("logtostderr", "true")
@@ -65,20 +68,114 @@ func main() {
 	{
 		err := ws.Startup()
 		if err != nil {
-			ws.Fatalf("failed to startup: %v", err)
+			log.Fatalf("failed to startup: %v", err)
 		}
 
 		ws.AttachInterruptHandler()
 
 		err = ws.Login(*hostAddr, 0, seedMember)
 		if err != nil {
-			ws.Fatalf("client-sim fatal err: %v", err)
+			log.Fatalf("client-sim fatal err: %v", err)
+		}
+	}
+
+	{
+		testDelay := float64(10)
+		if testDelay, err = strconv.ParseFloat(*testRepeat, 32); err != nil {
+			log.Fatal(err)
+		}
+
+		var openChID []byte
+		if testCreate != nil && len(*testCreate) > 0 {
+			if openChID, err = plan.Base64p.DecodeString(*testCreate); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if len(openChID) != 0 && len(openChID) != plan.ChIDSz {
+			log.Fatal("bad channel ID")
+		}
+
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Println("ENTER TO START")
+		reader.ReadString('\n')
+
+		N := 1
+		//waiter := sync.WaitGroup
+		//time.Sleep(5 * time.Second)
+
+		for i := 0; i < N; i++ {
+			go doTest(ws.ms, openChID, int64(testDelay*1000))
 		}
 
 		ws.CtxWait()
 	}
-
 }
+
+
+
+func doTest(
+	ms *MemberSess,
+	chID plan.ChID,
+	repeatMS int64,
+) {
+
+	var (
+		//cs *chSess
+		//err error
+	)
+	isRdy := make(chan *chSess, 1)
+	if len(chID) == plan.ChIDSz {
+		ms.Infof(0, "opening channel %s", chID.Str())
+		cs, err := ms.openChannel(chID)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		isRdy <- cs
+	} else {
+		ms.createNewChannel(repo.ChProtocolTalk, func(
+			inCS *chSess,
+			inErr error,
+		) {
+			if inErr != nil {
+				ms.Error("createNewChannel error: ", inErr)
+			} else {
+				ms.Infof(0, "created new channel %s", inCS.ChID.Str())
+			}
+
+			isRdy <- inCS
+		})
+	}
+
+	cs :=  <- isRdy
+	if cs == nil {
+		return
+	}
+
+	cs.resetReader()
+
+	for i := 1; ms.CtxRunning(); i++ {
+		hello := fmt.Sprintf("Hello, Universe!  This is msg #%d in ch %s", i, cs.ChID.SuffixStr())
+
+		cs.PostContent(
+			[]byte(hello),
+			func(
+				inEntryInfo *pdi.EntryInfo,
+				inEntryState *repo.EntryState,
+				inErr error,
+			) {
+				if inErr != nil {
+					fmt.Println("PostContent() -- got commit hello err:", inErr)
+				} else {
+					//fmt.Println("PostContent() entry ID", inEntryInfo.EntryID().SuffixStr())
+				}
+			},
+		)
+		time.Sleep(time.Duration(repeatMS) * time.Millisecond)
+	}
+}
+
+
 
 // Workstation represents a client "install" on workstation or mobile device.
 // It's distinguished by its ability to connect to a pnode and become "a dumb terminal"
@@ -97,6 +194,7 @@ type Workstation struct {
 	UsersPath string
 	Info      InstallInfo
 	Seeds     []string
+	ms        *MemberSess
 }
 
 // InstallInfo is generated during client installation is considered immutable.
@@ -316,6 +414,49 @@ type chSess struct {
 	isOpen   bool
 }
 
+
+func (cs *chSess) PostContent(
+	inBody []byte,
+	onCommitComplete OnCommitComplete,
+) {
+
+	msg := cs.newMsg(repo.MsgOp_CH_NEW_ENTRY_REQ)
+	msg.EntryInfo = &pdi.EntryInfo{
+		EntryOp: pdi.EntryOp_POST_CONTENT,
+	}
+
+	cs.putResponder(&msgItem{
+		msg:              msg,
+		entryBody:        inBody,
+		onCommitComplete: onCommitComplete,
+	})
+
+	cs.MemberSess.msgOutbox <- msg
+}
+
+func (cs *chSess) resetReader() {
+
+	msg := cs.newMsg(repo.MsgOp_RESET_ENTRY_READER)
+	msg.FLAGS |= uint32(1) << byte(repo.ChSessionFlags_INCLUDE_BODY)
+	msg.FLAGS |= uint32(1) << byte(repo.ChSessionFlags_CONTENT_ENTRIES)
+	/*cs.putResponder(&msgItem{
+		msg: msg,
+	})*/
+
+	cs.MemberSess.msgOutbox <- msg
+}
+
+func (cs *chSess) CloseSession() {
+	if cs.isOpen {
+		cs.isOpen = false
+		close(cs.msgInbox)
+		cs.MemberSess.msgOutbox <- &repo.Msg{
+			Op:       repo.MsgOp_CLOSE_CH_SESSION,
+			ChSessID: uint32(cs.chSessID),
+		}
+	}
+}
+
 // MemberSess is a member using this workstation.
 type MemberSess struct {
 	ptools.Context
@@ -333,6 +474,52 @@ type MemberSess struct {
 	sessToken       []byte
 	chSessions      map[repo.ChSessID]*chSess
 	chSessionsMutex sync.RWMutex
+}
+
+
+func NewMemberSess(
+	ws *Workstation,
+	seedPathname string,
+) (*MemberSess, error) {
+
+	buf, err := ioutil.ReadFile(seedPathname)
+	if err != nil {
+		return nil, err
+	}
+
+	ms := &MemberSess{
+		ws:              ws,
+		msgOutbox:       make(chan *repo.Msg, 4),
+		chSessions:      make(map[repo.ChSessID]*chSess),
+		entriesToCommit: make(chan *msgItem, 1),
+	}
+	ms.initResponder(ms)
+
+	if err = ms.MemberSeed.Unmarshal(buf); err != nil {
+		return nil, err
+	}
+
+	// TOD: This could be send over the wire as a Msg from the WsClient.
+	{
+		unpacker := ski.NewUnpacker(false)
+
+		var packingInfo ski.SignedPayload
+		err = unpacker.UnpackAndVerify(ms.MemberSeed.RepoSeed.SignedGenesisSeed, &packingInfo)
+		if err == nil {
+			err = ms.Info.Unmarshal(packingInfo.Header)
+			if err == nil {
+				if ! bytes.Equal(packingInfo.Signer.PubKey, ms.Info.StorageEpoch.OriginKey.PubKey) {
+					err = plan.Errorf(nil, plan.VerifySignatureFailed, "failed to verify %v", seedPathname)
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return ms, nil
 }
 
 // Startup initiates connection to the repo
@@ -377,7 +564,7 @@ func (ms *MemberSess) ctxStartup() error {
 	//
 	//
 	//
-	ms.CtxGo(func(ptools.Ctx) {
+	ms.CtxGo(func() {
 
 		for item := range ms.entriesToCommit {
 			txnSet, err := ms.MemberCrypto.EncryptAndEncodeEntry(item.msg.EntryInfo, item.entryBody)
@@ -406,7 +593,7 @@ func (ms *MemberSess) ctxStartup() error {
 	//
 	//
 	//
-	ms.CtxGo(func(ptools.Ctx) {
+	ms.CtxGo(func() {
 
 		for msg := range ms.msgOutbox {
 
@@ -602,16 +789,6 @@ func (ms *MemberSess) openChannel(
 	return cs, nil
 }
 
-func (cs *chSess) CloseSession() {
-	if cs.isOpen {
-		cs.isOpen = false
-		close(cs.msgInbox)
-		cs.MemberSess.msgOutbox <- &repo.Msg{
-			Op:       repo.MsgOp_CLOSE_CH_SESSION,
-			ChSessID: uint32(cs.chSessID),
-		}
-	}
-}
 
 // OnCommitComplete is a callback when an entry's txn(s) have been merged or rejected by the repo.
 type OnCommitComplete func(
@@ -625,37 +802,6 @@ type OnOpenComplete func(
 	chms *chSess,
 	inErr error,
 )
-
-func (cs *chSess) PostContent(
-	inBody []byte,
-	onCommitComplete OnCommitComplete,
-) {
-
-	msg := cs.newMsg(repo.MsgOp_CH_NEW_ENTRY_REQ)
-	msg.EntryInfo = &pdi.EntryInfo{
-		EntryOp: pdi.EntryOp_POST_CONTENT,
-	}
-
-	cs.putResponder(&msgItem{
-		msg:              msg,
-		entryBody:        inBody,
-		onCommitComplete: onCommitComplete,
-	})
-
-	cs.MemberSess.msgOutbox <- msg
-}
-
-func (cs *chSess) readerTest() {
-
-	msg := cs.newMsg(repo.MsgOp_RESET_ENTRY_READER)
-	msg.FLAGS |= uint32(1) << byte(repo.ChSessionFlags_INCLUDE_BODY)
-	msg.FLAGS |= uint32(1) << byte(repo.ChSessionFlags_CONTENT_ENTRIES)
-	/*cs.putResponder(&msgItem{
-		msg: msg,
-	})*/
-
-	cs.MemberSess.msgOutbox <- msg
-}
 
 func (ms *MemberSess) createNewChannel(
 	inProtocol string,
@@ -683,7 +829,7 @@ func (ms *MemberSess) createNewChannel(
 			if inErr != nil {
 				onOpenComplete(nil, inErr)
 			} else {
-				chSess, err := ms.openChannel(inEntryInfo.FormGenesisChID())
+				chSess, err := ms.openChannel(inEntryInfo.EntryID().ExtractChID())
 				onOpenComplete(chSess, err)
 			}
 		},
@@ -702,52 +848,22 @@ func (ws *Workstation) Login(inHostAddr string, inNum int, inSeedMember bool) er
 
 	seedPathname := path.Join(ws.UsersPath, ws.Seeds[inNum], seedFilename)
 
-	buf, err := ioutil.ReadFile(seedPathname)
+	var err error
+	ws.ms, err = NewMemberSess(ws, seedPathname)
+
+	ws.ms.Startup()
 	if err != nil {
 		return err
 	}
 
-	ms := &MemberSess{
-		ws:              ws,
-		msgOutbox:       make(chan *repo.Msg, 4),
-		chSessions:      make(map[repo.ChSessID]*chSess),
-		entriesToCommit: make(chan *msgItem, 1),
-	}
-	ms.initResponder(ms)
-
-	if err = ms.MemberSeed.Unmarshal(buf); err != nil {
-		return err
-	}
-
-	// TOD: This could be send over the wire as a Msg from the WsClient.
-	{
-		unpacker := ski.NewUnpacker(false)
-
-		var packingInfo ski.SignedPayload
-		err = unpacker.UnpackAndVerify(ms.MemberSeed.RepoSeed.SignedGenesisSeed, &packingInfo)
-		if err == nil {
-			err = ms.Info.Unmarshal(packingInfo.Header)
-			if err == nil {
-				if !bytes.Equal(packingInfo.Signer.PubKey, ms.Info.StorageEpoch.OriginKey.PubKey) {
-					err = plan.Errorf(nil, plan.VerifySignatureFailed, "failed to verify %v", seedPathname)
-				}
-			}
-		}
-	}
-
-	ms.Startup()
-	if err != nil {
-		return err
-	}
-
-	err = ms.connectToRepo(inHostAddr)
+	err = ws.ms.connectToRepo(inHostAddr)
 	if err != nil {
 		return err
 	}
 
 	// TODO: move this to ImportSeed()
 	if inSeedMember {
-		_, err := ms.repoClient.SeedRepo(ms.Ctx, ms.MemberSeed.RepoSeed)
+		_, err := ws.ms.repoClient.SeedRepo(ws.ms.Ctx, ws.ms.MemberSeed.RepoSeed)
 		if err != nil {
 			return err
 
@@ -755,10 +871,17 @@ func (ws *Workstation) Login(inHostAddr string, inNum int, inSeedMember bool) er
 		}
 	}
 
-	err = ms.openMemberSession()
+	err = ws.ms.openMemberSession()
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+
+/*
+// REMOVE ME
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("ENTER TO START")
@@ -815,3 +938,4 @@ func (ws *Workstation) Login(inHostAddr string, inNum int, inSeedMember bool) er
 
 	return nil
 }
+*/
