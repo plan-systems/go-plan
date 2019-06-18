@@ -11,14 +11,12 @@ import (
     //"encoding/hex"
     "encoding/json"
     "context"
-    "net"
     "strings"
     crand "crypto/rand" 
     //"fmt"
     
 
  	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
     //"google.golang.org/grpc/metadata"
 
     "github.com/plan-systems/go-ptools"
@@ -42,8 +40,8 @@ type PnodeConfig struct {
 
     DefaultFileMode             os.FileMode                     `json:"default_file_mode"`
 
-    GrpcNetworkName             string                          `json:"grpc_network"`
-    GrpcNetworkAddr             string                          `json:"grpc_addr"`
+    GrpcNetworkName             string                          `json:"grpc_network_name"`
+    GrpcNetworkAddr             string                          `json:"grpc_network_addr"`
 
     Version                     int32                           `json:"version"`
 
@@ -56,7 +54,7 @@ func (config *PnodeConfig) ApplyDefaults() {
 
     config.DefaultFileMode = ptools.DefaultFileMode
     config.GrpcNetworkName = "tcp"
-    config.GrpcNetworkAddr = ":50082"
+    config.GrpcNetworkAddr = ":" + plan.DefaultRepoServicePort
     config.Version = 1
 
 }
@@ -73,33 +71,26 @@ type Pnode struct {
     Config                      PnodeConfig
 
     grpcServer                  *grpc.Server
-    listener                    net.Listener
 }
 
 
 // NewPnode creates a new Pnode
 func NewPnode(
-    inBasePath *string,
+    inBasePath string,
     inDoInit bool,
 ) (*Pnode, error) {
 
     pn := &Pnode{
         activeSessions: ptools.NewSessionGroup(),
     }
-
     pn.SetLogLabel("pnode")
 
     var err error
-
-    if inBasePath == nil || len(*inBasePath) == 0 {
-        pn.BasePath, err = ptools.UseLocalDir("pnode")
-    } else {
-        pn.BasePath = *inBasePath
+    if pn.BasePath, err = ptools.SetupBaseDir(inBasePath, inDoInit); err != nil {
+        return nil, err
     }
-    if err != nil { return nil, err }
 
-    pn.ReposPath = path.Join(pn.BasePath, "repos")
-
+    pn.ReposPath = path.Join(pn.BasePath, "seeded")
     if err = os.MkdirAll(pn.ReposPath, ptools.DefaultFileMode); err != nil {
         return nil, err
     }
@@ -160,7 +151,7 @@ func (pn *Pnode) Startup() error {
 
     err := pn.CtxStart(
         pn.ctxStartup,
-        pn.ctxAboutToStop,
+        nil,
         nil,
         pn.ctxStopping,
     )
@@ -195,39 +186,17 @@ func (pn *Pnode) ctxStartup() error {
     // grpc service
     //
     if err == nil {
-        pn.Infof(0, "starting service on %v %v", pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
-        listener, err := net.Listen(pn.Config.GrpcNetworkName, pn.Config.GrpcNetworkAddr)
-        if err != nil {
-            return err
-        }
-
         pn.grpcServer = grpc.NewServer()
         repo.RegisterRepoServer(pn.grpcServer, pn)
         
-        // Register reflection service on gRPC server.
-        reflection.Register(pn.grpcServer)
-        pn.CtxGo(func(inCtx ptools.Ctx) {
-            
-            if err := pn.grpcServer.Serve(listener); err != nil {
-                pn.Error("grpc server error: ", err)
-            }
-            listener.Close()
-
-            pn.CtxStop("grpc server stopped", nil)
-        })
+        err = pn.AttachGrpcServer(
+            pn.Config.GrpcNetworkName,
+            pn.Config.GrpcNetworkAddr,
+            pn.grpcServer,
+        )
     }
 
     return err
-}
-
-
-
-func (pn *Pnode) ctxAboutToStop() {
-    
-    if pn.grpcServer != nil {
-        pn.Info(1, "stopping grpc service")
-        go pn.grpcServer.GracefulStop()
-    }
 }
 
 
@@ -306,7 +275,7 @@ func (pn *Pnode) seedRepo(
     defer func() {
         hold <- struct{}{}
     }()
-    pn.CtxGo(func(ptools.Ctx) {
+    pn.CtxGo(func() {
         <- hold
     })
 
