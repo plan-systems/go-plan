@@ -318,7 +318,7 @@ func (ms *MemberSession) ctxStartup() error {
     // outbound client msg sender
     //
     ms.msgOutbox = make(chan *Msg, 8)
-    ms.CtxGo(func(inCtx ptools.Ctx) {
+    ms.CtxGo(func() {
 
         isRunning := true
 
@@ -362,6 +362,7 @@ func (ms *MemberSession) ctxChildAboutToStop(inChild ptools.Ctx) {
 }
 
 func (ms *MemberSession) ctxStopping() {
+    ms.Info(2, "MemberSession ending")
 
     // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
     if ms.msgOutbox != nil {
@@ -403,7 +404,7 @@ func (ms *MemberSession) StartChannelSession(
 // WARNING: a client can create multiple pipes, so ensure that all activity is threadsafe.
 func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
 
-    ms.CtxGo(func(ptools.Ctx) {
+    ms.CtxGo(func() {
         for {
             msg, err := inPipe.Recv()
 
