@@ -242,13 +242,13 @@ message StorageAccount {
 enum TxnStatus {
 
     // The txn is yet to be committed to storage
-    AWAITING_COMMIT             = 0;
+    NEW                         = 0;
 
     // The txn is in the process of being committed
     COMMITTING                  = 2;
 
-    // This txn was lost or is otherwise not available 
-    LOST                        = 5;
+    // This txn does not exist, is lost, or is otherwise not available 
+    MISSING                     = 5;
 
     // This txn has failed to commit because of a server-side error, failure, or shutdown
     COMMIT_FAILED               = 7;    
@@ -256,7 +256,7 @@ enum TxnStatus {
     // The txn has been committed and has been confirmed as stored (but could still potentially be reverted)
     COMMITTED                   = 8;
 
-    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and is in an equivalent state to AWAITING_COMMIT)
+    // The txn was confirmed COMMITTED earlier in time, but has since been revoked (and can be treated as MISSING)
     REVOKED                     = 9;
 
     // The txn has been committed, confirmed as stored, and faces no possibility of being reverted/revoked.
