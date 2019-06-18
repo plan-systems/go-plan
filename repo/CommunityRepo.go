@@ -270,7 +270,7 @@ func (CR *CommunityRepo) ctxStartup() error {
     //
     // Receives txns ready to be committed to the community's storage
     CR.txnsToCommit = make(chan *pdi.PayloadTxnSet, 16)
-    CR.CtxGo(func(ctx ptools.Ctx) {
+    CR.CtxGo(func() {
 
         for payload := range CR.txnsToCommit {
 
@@ -319,7 +319,7 @@ func (CR *CommunityRepo) ctxStartup() error {
     //
     // Writes incoming raw txns to the txn DB
     CR.txnsToWrite = make(chan *pdi.PayloadTxnSet, 8)
-    CR.CtxGo(func(ctx ptools.Ctx) {
+    CR.CtxGo(func() {
 
         for payload := range CR.txnsToWrite {
             wb := CR.txnDB.NewWriteBatch()
@@ -352,7 +352,7 @@ func (CR *CommunityRepo) ctxStartup() error {
     //
     // Processes a new pdi.EntryCrypt and dispatches it to the appropriate channel pipeline
     CR.entriesToMerge = make(chan *chEntry, 1)
-    CR.CtxGo(func(ctx ptools.Ctx) {
+    CR.CtxGo(func() {
 
         for entry := range CR.entriesToMerge {
             err := CR.DecryptAndMergeEntry(entry)
@@ -387,7 +387,7 @@ func (CR *CommunityRepo) ctxStartup() error {
     //
     // Decodes incoming raw txns and inserts them into the collator, which performs callbacks to merge payloads (entries)
     CR.txnsToDecode = make(chan pdi.RawTxn, 1)
-    CR.CtxGo(func(ctx ptools.Ctx) {
+    CR.CtxGo(func() {
 
         // TODO: choose different encoder based on spInfo
         txnDecoder := ds.NewTxnDecoder(false)
@@ -421,7 +421,7 @@ func (CR *CommunityRepo) ctxStartup() error {
     //
     // Dispatches txn ID requests to the community's (remote) StorageProvider(s), managing connections etc.
     CR.txnsToFetch = make(chan *pdi.TxnList, 16)
-    CR.CtxGo(func(ctx ptools.Ctx) {
+    CR.CtxGo(func() {
 
         for txnList := range CR.txnsToFetch {
             
@@ -529,7 +529,7 @@ func (CR *CommunityRepo) disconnectFromStorage() {
 }
 
 
-func (CR *CommunityRepo) spSyncController(inHostCtx ptools.Ctx) {
+func (CR *CommunityRepo) spSyncController() {
 
     sleep := true
 
@@ -553,7 +553,7 @@ func (CR *CommunityRepo) spSyncController(inHostCtx ptools.Ctx) {
 
             // Wait until someone wakes us up!
             select {
-                case <- CR.spSyncWakeup:
+                case <-CR.spSyncWakeup:
             }
         } else {
             //time.Sleep(1 * time.Second)
@@ -616,9 +616,6 @@ func (CR *CommunityRepo) connectToStorage() {
             grpc.Header(&header), 
             grpc.Trailer(&trailer),
         )
-        if err != nil {
-            err = plan.Error(err, plan.FailedToConnectStorageProvider, "StartSession() failed")
-        }
 
         if err == nil {
             CR.spContext, err = ptools.TransferSessionToken(CR.spContext, trailer)
@@ -629,12 +626,21 @@ func (CR *CommunityRepo) connectToStorage() {
     }
 
     if err != nil {
+        CR.Error("failed to connect to StorageProvider: ", err)
         CR.disconnectFromStorage()
-    }
+        
+        retry := time.NewTimer(10 * time.Second)
+        select {
+            case <-retry.C:
+            case <-CR.CtxStopping():
+        }
+        CR.spSyncWake()
 
-    CR.spSyncWorkers.Add(1)
-    CR.spSyncStatus = spSyncForwardScan
-    go CR.forwardTxnScanner()
+    } else {
+        CR.spSyncWorkers.Add(1)
+        CR.spSyncStatus = spSyncForwardScan
+        go CR.forwardTxnScanner()
+    }
 }
 
 
@@ -796,10 +802,8 @@ func (CR *CommunityRepo) backwardTxnScanner() {
 // When it receives URID updates, reconciles that with the repo's txn db, and sends off requests for missing txns.
 func (CR *CommunityRepo) forwardTxnScanner() {
 
-    doingScan := true
-
-    for doingScan {
-
+    doScan := true
+    for doScan {
         CR.Info(1, "starting forward txn scan")
 
         scanner, err := CR.spClient.Scan(
@@ -814,16 +818,13 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             CR.Warn("StorageProvider.Scan() error: ", err)
         }
 
+        // Receive batches of URIDs and see which ones we don't have
         for err == nil {
             var txnList *pdi.TxnList
             txnList, err = scanner.Recv()
-        
-            if ! CR.CtxRunning() {
-                doingScan = false
-                break
-            } else if err != nil {
+
+            if err != nil && CR.spContext.Err() == nil {
                 CR.Warn("StorageProvider.Scan() recv error: ", err)
-                break
             } else if txnList != nil {
 
                 // Filter for txn we need
@@ -837,25 +838,21 @@ func (CR *CommunityRepo) forwardTxnScanner() {
         }
 
         select {
-            case <- CR.spContext.Done():
-                doingScan = false
-            case <- time.After(5 * time.Second):
+            case <-CR.spContext.Done():
+                doScan = false
+            case <-time.After(5 * time.Second):
         }
     }
 
+    CR.Info(2, "forwardTxnScanner done")
+
     CR.spSyncWorkers.Done()
-
-    CR.Info(1, "starting forward txn exited")
-
 }
 
 // DecryptAndMergeEntry decrypts the given entry and then merges it with this repo.
 //
 // If an error is returned, it means the entry is malformed (and never can be merged).
 func (CR *CommunityRepo) DecryptAndMergeEntry(entry *chEntry) error {
-
-    var (
-    )
 
     tmpCrypt := &CR.tmpCrypt
     err := entry.PayloadTxnSet.UnmarshalPayload(tmpCrypt)
@@ -960,7 +957,6 @@ func (CR *CommunityRepo) DecryptAndMergeEntry(entry *chEntry) error {
 
     CR.chMgr.QueueEntryForMerge(
         commEpoch,
-        entry.Info.ChID(),
         entry,
     )
  
