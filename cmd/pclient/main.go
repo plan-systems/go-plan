@@ -155,7 +155,7 @@ func doTest(
 	cs.resetReader()
 
 	for i := 1; ms.CtxRunning(); i++ {
-		hello := fmt.Sprintf("Hello, Universe!  This is msg #%d in ch %s", i, cs.ChID.SuffixStr())
+		hello := fmt.Sprintf("Hello, Universe #%d, from %s", i, path.Base(ms.ws.BasePath))
 
 		cs.PostContent(
 			[]byte(hello),
@@ -333,7 +333,8 @@ type msgItem struct {
 	onCommitComplete OnCommitComplete
 }
 
-type msgResponder struct {
+// MsgResponder is characterized by having a list of msg IDs that are currently in progress and have associated responder callbacks.
+type MsgResponder struct {
 	MemberSess      *MemberSess
 	chSessID        repo.ChSessID
 	responders      map[uint32]*msgItem
@@ -341,13 +342,13 @@ type msgResponder struct {
 	nextMsgID       uint32
 }
 
-func (resp *msgResponder) initResponder(ms *MemberSess) {
+func (resp *MsgResponder) initResponder(ms *MemberSess) {
 	resp.responders = map[uint32]*msgItem{}
 	resp.MemberSess = ms
 	resp.nextMsgID = 1
 }
 
-func (resp *msgResponder) newMsg(op repo.MsgOp) *repo.Msg {
+func (resp *MsgResponder) newMsg(op repo.MsgOp) *repo.Msg {
 
 	msg := &repo.Msg{
 		ID:       atomic.AddUint32(&resp.nextMsgID, 1),
@@ -358,13 +359,13 @@ func (resp *msgResponder) newMsg(op repo.MsgOp) *repo.Msg {
 	return msg
 }
 
-func (resp *msgResponder) putResponder(inItem *msgItem) {
+func (resp *MsgResponder) putResponder(inItem *msgItem) {
 	resp.respondersMutex.Lock()
 	resp.responders[inItem.msg.ID] = inItem
 	resp.respondersMutex.Unlock()
 }
 
-func (resp *msgResponder) fetchResponder(inMsgID uint32, inPop bool) *msgItem {
+func (resp *MsgResponder) fetchResponder(inMsgID uint32, inPop bool) *msgItem {
 	resp.respondersMutex.Lock()
 	item := resp.responders[inMsgID]
 	if item != nil && inPop {
@@ -375,7 +376,7 @@ func (resp *msgResponder) fetchResponder(inMsgID uint32, inPop bool) *msgItem {
 	return item
 }
 
-func (resp *msgResponder) handleCommon(msg *repo.Msg) {
+func (resp *MsgResponder) handleCommon(msg *repo.Msg) {
 
 	switch msg.Op {
 
@@ -407,7 +408,7 @@ func (resp *msgResponder) handleCommon(msg *repo.Msg) {
 }
 
 type chSess struct {
-	msgResponder
+	MsgResponder
 
 	ChID     plan.ChID
 	msgInbox chan *repo.Msg
@@ -460,7 +461,7 @@ func (cs *chSess) CloseSession() {
 // MemberSess is a member using this workstation.
 type MemberSess struct {
 	ptools.Context
-	msgResponder
+	MsgResponder
 
 	MemberCrypto    client.MemberCrypto
 	MemberSeed      repo.MemberSeed
@@ -476,7 +477,7 @@ type MemberSess struct {
 	chSessionsMutex sync.RWMutex
 }
 
-
+// NewMemberSess creates a new MemberSess and sets up member crypto.
 func NewMemberSess(
 	ws *Workstation,
 	seedPathname string,
