@@ -17,12 +17,11 @@ import (
     //"encoding/json"
     //"encoding/base64"
     //"encoding/binary"
-    
+
 
     "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
-    //"github.com/plan-systems/go-plan/pservice"
     //"github.com/plan-systems/go-plan/ski"
 
 
@@ -148,12 +147,11 @@ ChStore.db
     |                             ...
     |
     |
-    |+ EntryTID 2 + ...
-    |             |
-    |             ...
+    + EntryTID 2 + ...
+    |            |
+    |            ...
     |
     ...
-
 
 */
 
@@ -175,32 +173,15 @@ type ChStore struct {
     chEpochNodes            []*ChEpochNode 
     chEpochMutex            sync.RWMutex
 
-    //epochCache              map[plan.TIDBlob]*pdi.ChannelEpoch 
-    //revalGuide              revalGuide  
-
     chMgr                   *ChMgr
 
     revalRequestMutex       sync.Mutex 
     revalAfter              plan.TimeFS
 
-
-    //revalQueue              chan revalMsg
-    //readyToMerge            bool
     entriesToMerge          chan *chEntry
     processingEntries       bool
 
-    //chCmdQueue              chan chCmd
-
     chShutdown              sync.WaitGroup
-    //agent                   ChAgent
-    //HomePath                 string
-
-
-    //entryInbox              chan *entryIP
-
-
-    //ChannelID               plan.ChannelID
-
 }
 
 
