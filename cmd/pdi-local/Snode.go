@@ -1,15 +1,12 @@
 package main
 
 import (
+    "context"
 	"io/ioutil"
 	"os"
 	"path"
-	//"fmt"
-	//"sync"
 	"time"
-	//"net"
 	crand "crypto/rand"
-	//"encoding/hex"
 	"encoding/json"
 
 	"github.com/plan-systems/go-plan/pdi"
@@ -18,7 +15,6 @@ import (
 
 	ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
