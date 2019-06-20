@@ -635,7 +635,7 @@ func writeEntryItem(
         entry.scrap[n] = inKey
         n++
 
-        err = wb.Set(entry.scrap[keyPos:n], valBuf, 0)
+        err = wb.Set(entry.scrap[keyPos:n], valBuf)
     }
 
     return n, err
@@ -676,7 +676,7 @@ func (chSt *ChStore) flushEntry(entry *chEntry) error {
             keyPos := n
             n += copy(entry.scrap[n:], chEpochsPrefix)
             n += copy(entry.scrap[n:], entryID)
-            err = wb.Set(entry.scrap[keyPos:n], nil, 0)
+            err = wb.Set(entry.scrap[keyPos:n], nil)
             chSt.Log(err, "storing entry channel epoch")
         }
 

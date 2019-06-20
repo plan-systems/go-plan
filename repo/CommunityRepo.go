@@ -325,7 +325,7 @@ func (CR *CommunityRepo) ctxStartup() error {
             wb := CR.txnDB.NewWriteBatch()
             N := len(payload.Segs)
             for _, seg := range payload.Segs {
-                err = wb.Set(seg.Info.URID, seg.RawTxn, 0)
+                err = wb.Set(seg.Info.URID, seg.RawTxn)
                 if err != nil {
                     // TODO log err
                 }
@@ -585,7 +585,6 @@ func (CR *CommunityRepo) spSyncController() {
 
     CR.Info(1, "StorageProvider sync mgr exiting")
 }
-
 
 
 func (CR *CommunityRepo) connectToStorage() {
