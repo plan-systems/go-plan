@@ -4,7 +4,8 @@ import (
 	"github.com/plan-systems/go-plan/pdi"
 	//"context"
 	"flag"
-	//"path"
+	"os"
+    "path"
 	"fmt"
 	"io/ioutil"
 	"encoding/json"
@@ -247,8 +248,12 @@ func (CG *CommunityGenesis) CreateNewCommunity(
 			if err == nil { 
 				buf, err = CG.MemberSeed.Marshal()
 
-				// TODO: encrypt this and put keys in it	
-				err = ioutil.WriteFile(CG.GenesisSeed.CommunityEpoch.CommunityName + ".seed.plan", buf, ptools.DefaultFileMode)
+				// TODO: encrypt this and put keys in it 
+
+                outDir, _ := os.Getwd()
+                seedFilename := path.Join(outDir, CG.GenesisSeed.CommunityEpoch.CommunityName + ".seed.plan")
+                CG.Info(0, "writing genesis seed at ", seedFilename)
+				err = ioutil.WriteFile(seedFilename, buf, ptools.DefaultFileMode)
 			}
 		}
 	}
