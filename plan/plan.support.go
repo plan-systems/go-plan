@@ -4,7 +4,10 @@ import (
 	"bytes"
 )
 
-
+// BinEncode encodes the given binary buffer into PLAN's std encoding (BinEncoding)
+func BinEncode(in []byte) string {
+	return BinEncoding.EncodeToString(in)
+}
 
 // Blob is a convenience function that forms a ChID byte array from a ChID byte slice.
 func (chID ChID) Blob() ChIDBlob {
@@ -15,9 +18,9 @@ func (chID ChID) Blob() ChIDBlob {
 	return blob
 }
 
-// Str returns this channel ID in plan.Base64p form.
+// Str returns this channel ID in plan.BinEncoding form.
 func (chID ChID) Str() string {
-	return Base64p.EncodeToString(chID)
+	return BinEncoding.EncodeToString(chID)
 }
 
 // Clone returns a duplicate of this ChID
@@ -29,7 +32,7 @@ func (chID ChID) Clone() ChID {
 
 // SuffixStr returns the last few digits of this ChID in string form (for easy reading, logs, etc)
 func (chID ChID) SuffixStr() string {
-	return Base64p.EncodeToString(chID[ChIDSz-6:])
+	return BinEncoding.EncodeToString(chID[ChIDSz-6:])
 }
 
 // TID is a convenience function that returns the TID contained within this TIDBlob.
@@ -68,12 +71,12 @@ func (tid TID) Blob() TIDBlob {
 
 // Str returns this TID in plan.Base64 form.
 func (tid TID) Str() string {
-	return Base64p.EncodeToString(tid)
+	return BinEncoding.EncodeToString(tid)
 }
 
 // SuffixStr returns the last few digits of this TID in string form (for easy reading, logs, etc)
 func (tid TID) SuffixStr() string {
-	return Base64p.EncodeToString(tid[TIDSz-6:])
+	return BinEncoding.EncodeToString(tid[TIDSz-6:])
 }
 
 // SetTimeAndHash writes the given timestamp and the right-most part of inSig into this TID.

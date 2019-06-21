@@ -162,7 +162,7 @@ TODO: check than a session w/ the same member ID + warksation isn't already open
     if len(inSessReq.WorkstationID) == 0 {
         ms.WorkstationPath = ms.SharedPath
     } else {
-        ms.WorkstationPath = path.Join(ms.SharedPath, plan.Base64p.EncodeToString(ms.WorkstationID[:15]))
+        ms.WorkstationPath = path.Join(ms.SharedPath, plan.BinEncode(ms.WorkstationID[:15]))
     }
     
     err = ms.CtxStart(

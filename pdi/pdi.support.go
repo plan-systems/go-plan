@@ -9,8 +9,6 @@ import (
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
 	//"github.com/plan-systems/go-plan/pdi"
-
-    "encoding/base64"
 )
 
 
@@ -132,14 +130,6 @@ func SegmentIntoTxns(
 }
 
 
-
-
-
-// Base64p is a base64 char set that such that values are sortable when encoded (each glyph has an increasing ASCII value).Base64.
-// See comments for TxnInfo.URID in pdi.proto
-var Base64p = base64.NewEncoding(plan.Base64pCharSet).WithPadding(base64.NoPadding)
-
-
 const (
 
     // URIDTimestampSz is the bytesize of the timestamp stored in a URID
@@ -167,11 +157,6 @@ const (
     URIDStrLen = 8 * URIDSz / 6
 
 )
-
-// Encode64 encodes the given binary buffer into base64.
-func Encode64(in []byte) string {
-	return Base64p.EncodeToString(in)
-}
 
 // URID aka "Universal Resource Identifier"
 // 
@@ -213,7 +198,7 @@ func (id URID) Str() string {
         return ""
     }
         
-    Base64p.Encode(str[:], id)
+    plan.BinEncoding.Encode(str[:], id)
 	return string(str[:sz])  
 }
 

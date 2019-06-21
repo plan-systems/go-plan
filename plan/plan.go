@@ -47,9 +47,6 @@ const (
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
 	MemberAliasMaxLen = 127
 
-	// Base64pCharSet is the base 64 char set used in PLAN, chosen such that 0 maps to '0' and is monotonic increasing (which can be sorted).
-	Base64pCharSet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~"
-
 	// DefaultStorageProviderServicePort is the default port to host the grpc service StorageProvider, used for serving Repo clients.
 	DefaultStorageProviderServicePort = "5190"
 	
@@ -98,8 +95,8 @@ type ChID []byte
 type ChIDBlob [ChIDSz]byte
 
 var (
-	// Base64p encodes/decodes binary strings.
-	Base64p = base64.NewEncoding(Base64pCharSet).WithPadding(base64.NoPadding)
+    // BinEncoding is used to encode/decode binary bufs in PLAN.
+	BinEncoding = base64.RawURLEncoding
 
 	// GenesisMemberID is the genesis member ID
 	GenesisMemberID = uint32(1)

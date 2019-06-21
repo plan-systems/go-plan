@@ -863,7 +863,7 @@ func (CR *CommunityRepo) DecryptAndMergeEntry(entry *chEntry) error {
 
     // TODO: have txn holding tank for txns that can't decode b/c the epoch isn't live or not found yet
     if commEpoch == nil {
-        return plan.Errorf(nil, plan.CommunityEpochNotFound, "community epoch %v not found", plan.Base64p.EncodeToString(tmpCrypt.CommunityEpochID))
+        return plan.Errorf(nil, plan.CommunityEpochNotFound, "community epoch %v not found", plan.BinEncode(tmpCrypt.CommunityEpochID))
     }
 
     var payload ski.SignedPayload

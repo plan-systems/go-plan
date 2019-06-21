@@ -87,7 +87,7 @@ func main() {
 
 		var openChID []byte
 		if testCreate != nil && len(*testCreate) > 0 {
-			if openChID, err = plan.Base64p.DecodeString(*testCreate); err != nil {
+			if openChID, err = plan.BinEncoding.DecodeString(*testCreate); err != nil {
 				log.Fatal(err)
 			}
 		}

@@ -269,7 +269,7 @@ func (St *Store) updateAccount(
 
         if err == nil {
             if creatingNew {
-                St.Infof(0, "creating account %v to receive deposit", pdi.Encode64(inAcctAddr))
+                St.Infof(0, "creating account %v to receive deposit", plan.BinEncode(inAcctAddr))
             }
             err = dbTxn.Set(inAcctAddr, scrap[:acctSz]) 
             if err != nil {
