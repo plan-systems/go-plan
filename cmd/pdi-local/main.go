@@ -116,7 +116,7 @@ type CommunityGenesis struct {
 	ptools.Logger
 
 	GenesisSeed		 	repo.GenesisSeed
-	MemberSeed			repo.MemberSeed
+	MemberSeed			client.MemberSeed
 	txnsToCommit		[]pdi.RawTxn
 }
 
@@ -130,7 +130,7 @@ func (CG *CommunityGenesis) CreateNewCommunity(
 
 	CG.SetLogLabel("genesis")
 
-	CG.MemberSeed = repo.MemberSeed{
+	CG.MemberSeed = client.MemberSeed{
 		RepoSeed: &repo.RepoSeed{
 			Services: []*plan.ServiceInfo{
 				&plan.ServiceInfo{
@@ -190,12 +190,14 @@ func (CG *CommunityGenesis) CreateNewCommunity(
 
 	// Emit all the genesis entries
 	if err == nil {
-		crypto := &client.MemberCrypto{
+		crypto := &pdi.MemberCrypto{
 			CommunityEpoch: *CG.GenesisSeed.CommunityEpoch,
 			StorageEpoch:   *CG.GenesisSeed.StorageEpoch,
+			TxnEncoder: ds.NewTxnEncoder(false, CG.GenesisSeed.StorageEpoch),
+			MemberEpoch: *CG.MemberSeed.MemberEpoch,
 		}
 
-		err = crypto.StartSession(genesisSKI, *CG.MemberSeed.MemberEpoch)
+		err = crypto.StartSession(genesisSKI)
 		if err == nil {
 			err = CG.emitGenesisEntries(crypto)
 		}

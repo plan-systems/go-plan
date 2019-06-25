@@ -1,4 +1,4 @@
-package client
+package pdi
 
 import (
 	//crypto_rand "crypto/rand"
@@ -14,10 +14,8 @@ import (
     //"context"
     //"fmt"
     
-    ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
 
     "github.com/plan-systems/go-ptools"
-    "github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
 
@@ -33,11 +31,11 @@ type MemberCrypto struct {
 
     skiSession      ski.Session
 
-    TxnEncoder      pdi.TxnEncoder
+    TxnEncoder      TxnEncoder
 
-    StorageEpoch    pdi.StorageEpoch
-    CommunityEpoch  pdi.CommunityEpoch
-    MemberEpoch     pdi.MemberEpoch
+    StorageEpoch    StorageEpoch
+    CommunityEpoch  CommunityEpoch
+    MemberEpoch     MemberEpoch
     MemberIDStr     string
 
     Packer          ski.PayloadPacker
@@ -45,8 +43,8 @@ type MemberCrypto struct {
     communityKey    ski.KeyRef
 
     // packing scrap
-    tmpCrypt        pdi.EntryCrypt
-    tmpInfo         pdi.EntryInfo
+    tmpCrypt        EntryCrypt
+    tmpInfo         EntryInfo
 
     tmpBuf          []byte
 }
@@ -55,10 +53,7 @@ type MemberCrypto struct {
 
 func (mc *MemberCrypto) StartSession(
     inSKISession   ski.Session,
-    inMemberEpoch  pdi.MemberEpoch,
 ) error {
-
-    mc.MemberEpoch = inMemberEpoch
 
     mc.communityKey = mc.CommunityEpoch.CommunityKeyRef()
     mc.skiSession = inSKISession
@@ -89,8 +84,6 @@ func (mc *MemberCrypto) StartSession(
     )
     if err != nil { return err }
 
-    // Set up the txn encoder
-    mc.TxnEncoder = ds.NewTxnEncoder(false, mc.StorageEpoch)
 
     // Use the member's latest txn/storage signing key.
     if err = mc.TxnEncoder.ResetSigner(mc.skiSession, nil); err != nil { 
@@ -110,9 +103,9 @@ func (mc *MemberCrypto) EndSession(inReason string) {
 
 // EncryptAndEncodeEntry encodes entry.tmpInfo and entry.Body into txns, filling out entry.PayloadTxnSet
 func (mc *MemberCrypto) EncryptAndEncodeEntry(
-    ioInfo *pdi.EntryInfo,
+    ioInfo *EntryInfo,
     inBody []byte,
-) (*pdi.PayloadTxnSet, error) {
+) (*PayloadTxnSet, error) {
 
     // Should already be nil
     ioInfo.AuthorSig = nil
@@ -146,7 +139,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
         return nil, err
     }
 
-    tmpCrypt := pdi.EntryCrypt{
+    tmpCrypt := EntryCrypt{
         CommunityEpochID: mc.CommunityEpoch.EpochTID,
         PackedEntry: packedEntry,
     }
