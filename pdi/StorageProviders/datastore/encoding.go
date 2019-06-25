@@ -18,7 +18,7 @@ import (
 const (
 
     // ProtocolDesc appears in StorageEpochs originating from this impl
-    ProtocolDesc = "plan/storage/pdi-datastore/1"
+    ProtocolDesc = "plan/storage/pdi-local/1"
 
 )
 
