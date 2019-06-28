@@ -5,9 +5,11 @@ syntax = "proto3";
 
 package client;
 
-//import "github.com/plan-systems/go-plan/pdi/pdi.proto";
+import "github.com/plan-systems/go-plan/pdi/pdi.proto";
 //import "github.com/plan-systems/go-plan/plan/plan.proto";
 import "github.com/plan-systems/go-plan/plan/plan.proto";
+import "github.com/plan-systems/go-plan/repo/repo.proto";
+import "github.com/plan-systems/go-plan/ski/ski.proto";
 
 
 
@@ -22,15 +24,65 @@ message SessionPB {
 
 
 
-service Workstation {
 
-    // Bootstraps a repo for a given member.
-    rpc         Login(LoginPB)                                      returns (SessionPB);
 
+service WsService {
+
+    rpc         CreateNewSeat(MemberSeatReq)                        returns (MemberSeat);
+
+    // Opens a new member session.
+    rpc         OpenWsSession(stream repo.Msg)                      returns (stream repo.Msg);
+
+    // Opens/Starts a new chanel session for the given channel ID.
+    rpc         StartChannelSession(repo.ChInvocation)              returns (repo.ChSessionInfo);
 
 }
 
 
+
+
+// A community issues this to a person they want to invite into their community.  A copy of this record is written to member registry channel.
+// This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
+message MemberSeed {
+                repo.RepoSeed       repo_seed                   = 1;
+
+    // Exported and exported ski.KeyTome containing all keys needed for the recipient member.
+                bytes               key_tome                    = 3;
+
+                pdi.MemberEpoch     member_epoch                = 6;
+
+    // WHO sent this invitation (note: the member's signing key is used to create this invite)
+                fixed64             origin_memberID             = 7;
+                ski.KeyInfo         origin_signing_key          = 8;
+
+    // A asym key used to encrypt an InvitationResponse
+    //            ski.KeyInfo         reply_to                    = 9;
+
+}
+
+
+message MemberSeatReq {
+                MemberSeed          member_seed                 = 1;
+
+}
+
+message MemberSeat {
+                bytes               seatID                      = 1;
+
+                pdi.MemberEpoch     member_epoch                = 10;
+                repo.RepoSeed       repo_seed                   = 11;
+                repo.GenesisSeed    genesis_seed                = 12;
+}
+
+
+message WsLogin {
+
+    // Rhe workstation seat ID that was issued via WsService.CreateNewSeat().
+                bytes               seatID                      = 1;
+
+    // Used to decrypt the key hive within the given seat. 
+                bytes               pass                        = 2;
+}
 
 
 enum RgnPts {

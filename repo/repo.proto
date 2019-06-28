@@ -7,7 +7,6 @@ syntax = "proto3";
 package repo;
 
 import "github.com/plan-systems/go-plan/plan/plan.proto";
-import "github.com/plan-systems/go-plan/ski/ski.proto";
 import "github.com/plan-systems/go-plan/pdi/pdi.proto";
 
 
@@ -149,11 +148,14 @@ enum MsgOp {
     // Sent to the client following OpenMemberSession.
     MEMBER_SESSION_READY        = 6;
 
-    // Sent in response to a CH_NEW_ENTRY_COMMIT (to the client)
+    // Sent in response to a COMMIT_TXNS (to the client)
     // msg.EntryInfo and msg EntryState contain info associated with the given txn (may be nil)
-    COMMIT_COMPLETE             = 7;
+    COMMIT_TXNS_COMPLETE        = 7;
 
-    RESERVED_8                  = 8;
+    // Sent to the member session when a new channel is to be created.  
+    // BODY is a marshalled ChannelEpoch.
+    CH_GENESIS_ENTRY            = 8;
+
     RESERVED_9                  = 9;
 
    /*****************************************************
@@ -163,9 +165,9 @@ enum MsgOp {
     // Closes the session associated with the session ID.  Any subsequent Msgs addressed to this session ID will be ignored/dropped.
     CLOSE_CH_SESSION            = 10;
 
-    // Sent by the client when the user wishes to author a new content entry in the channel assocated with this sessID.
+    // Sent by the client when the user wishes to author a new content entry in the channel associated with this sessID.
     // The msg's EntryInfo contains basic info about the entry to build from.
-    CH_NEW_ENTRY_REQ            = 11;
+    POST_CH_ENTRY               = 11;
 
     // The ChSession seek to T0 and start returning a stream of CH_ENTRY msgs, effectively "replaying" the channel.
     // The param FLAGS contains number of ChSessionFlags
@@ -187,7 +189,7 @@ enum MsgOp {
     // Sent when an entry changes liveness
     CH_ENTRY_UPDATE             = 17;
 
-    // Sent in response to a CH_NEW_ENTRY_REQ or CH_GENESIS_REQ to the client.
+    // Sent in response to a POST_CH_ENTRY or CH_GENESIS_ENTRY to the client.
     // The msg's EntryInfo is ready to be encoded and encrypted with the body.
     // From there, client is expected to:
     //   1) pack+sign the readied EntryInfo with the entry body
@@ -199,7 +201,18 @@ enum MsgOp {
 
     RESERVED_19                 = 19;
     RESERVED_20                 = 20;
+
+   /*****************************************************
+    ** Workstation -> Client
+    **/
+
+    // Send by the Workstation to the client.
+    // BUF0 is a phost,WsLogin protobuf.
+    // The client echos this msg back to the workstation on success.
+    LOGIN_TO_WS_SEAT            = 21;
+
 }
+
 
 
 
@@ -248,7 +261,7 @@ message RepoConfig {
 
 message RepoSeed {
                 bytes               signed_genesis_seed         = 1;
-    // 
+    
                 string              suggested_dir_name          = 2;
 
     repeated    plan.ServiceInfo    services                    = 5;
@@ -256,25 +269,6 @@ message RepoSeed {
 
 }
 
-
-// A community issues this to a person they want to invite into their community.  A copy of this record is written to member registry channel.
-// This is passed in the clear and is used by a prospective member or guest's client to connect to a community.
-message MemberSeed {
-                RepoSeed            repo_seed                   = 1;
-
-
-                ski.KeyTome         key_tome                    = 3;    // Contains community keyring and first-issue sending, signing, and txn signing keys.
-
-                pdi.MemberEpoch     member_epoch                = 6;
-
-    // WHO sent this invitation (note: the member's signing key is used to create this invite)
-                fixed64             origin_memberID             = 7;
-                ski.KeyInfo         origin_signing_key          = 8;
-
-    // A asym key used to encrypt an InvitationResponse
-    //            ski.KeyInfo         reply_to                    = 9;
-
-}
 
 
 /*****************************************************
@@ -298,14 +292,9 @@ enum EntryStatus {
     // this means EntryState.Flags lacks one or more req'd flags in order for the entry to be live.
     DEFERRED                    = 3;
 
-    // The given entry is currently in conflict with another entry having equal authority.
-    //AMBIGUOUS_CONFLICT          = 2;
-
     // The given entry is considered authentic and a live operating part of the local community repo.
     // The corresponding EntryState.Flags contains all the flags required for an entry to be live.
     LIVE                        = 4;
-
-
 }
 
 
