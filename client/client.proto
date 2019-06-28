@@ -33,9 +33,6 @@ service WsService {
     // Opens a new member session.
     rpc         OpenWsSession(stream repo.Msg)                      returns (stream repo.Msg);
 
-    // Opens/Starts a new chanel session for the given channel ID.
-    rpc         StartChannelSession(repo.ChInvocation)              returns (repo.ChSessionInfo);
-
 }
 
 
