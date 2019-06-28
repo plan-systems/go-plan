@@ -18,12 +18,17 @@ import (
     //"github.om/plan-systems/go-plan/ski/Providers/hive"
 
 
-    //"github.com/plan-systems/go-plan/pdi"
     "github.com/plan-systems/go-plan/plan"
     "github.com/plan-systems/go-plan/ski"
     //"github.com/plan-systems/go-plan/pcore"
 )
 
+
+
+// FormSuggestedDirName forms a file system friendly name that identifies this community to humans.
+func (gs *GenesisSeed) FormSuggestedDirName() string {
+    return gs.StorageEpoch.FormSuggestedDirName()
+}
 
 
 // LoadAndVerifyGenesisSeed unpacks, unmarshals, and verifies the GenesisSeed packed into the given signed file
