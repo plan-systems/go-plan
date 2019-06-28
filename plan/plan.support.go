@@ -42,8 +42,8 @@ func (tid *TIDBlob) TID() TID {
 
 // IsNil returns true if this TID length is 0 or is equal to NilTID
 func (tid TID) IsNil() bool {
-	if len(tid) != TIDSz {
-		return false
+	if len(tid) == 0 {
+		return true
 	}
 
 	if bytes.Equal(tid, NilTID[:]) {
