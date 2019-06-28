@@ -23,9 +23,6 @@ service Repo {
     // The session ID returned from the resulting MsgOp_OK should be used for sending message to member session.
     rpc         OpenMemberSession(MemberSessionReq)                 returns (stream Msg);
 
-    // Opens/Starts a new chanel session for the given channel ID.
-    rpc         StartChannelSession(ChInvocation)                   returns (ChSessionInfo);
-
     // Sends msgs to channel session or the root member session itself, via Msg.SessID. 
     // A client typically only needs one open call to this because all outbound channel traffic plus messages to the 
     // session that control the member session.
@@ -40,13 +37,6 @@ service Repo {
     //    that the member session/repo has all of the security info.
    // rpc         PinFSItem(FSItem)                               returns (stream PinStatus);
 
-}
-
-
-message ChSessionInfo {
-
-    // Unique ID assigned on each gRPC call to OpenMemberSession() and StartChannelSession(). 
-                uint32              sessID                      = 3;
 }
 
 
@@ -210,6 +200,10 @@ enum MsgOp {
     // BUF0 is a phost,WsLogin protobuf.
     // The client echos this msg back to the workstation on success.
     LOGIN_TO_WS_SEAT            = 21;
+
+    // BUF0 is the ChID of the channel to open.
+    START_CH_SESSION            = 22;
+    
 
 }
 

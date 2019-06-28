@@ -387,27 +387,6 @@ func (pn *Pnode) OpenMemberSession(
 	return nil
 }
 
-// StartChannelSession -- see service Repo in repo.proto.
-func (pn *Pnode) StartChannelSession(
-    ctx context.Context, 
-    inInvocation *repo.ChInvocation, 
-) (*repo.ChSessionInfo, error) {
-    ms, err := pn.fetchMemberSession(ctx)
-    if err != nil {
-        return nil, err
-    }
-
-    chSession, err := ms.StartChannelSession(inInvocation)
-    if err != nil {
-        return nil, err
-    }
-
-    info := &repo.ChSessionInfo{
-        SessID: uint32(chSession.ChSessID),
-    }
-
-    return info, nil
-}
 
 // OpenMsgPipe -- see service Repo in repo.proto.
 func (pn *Pnode) OpenMsgPipe(inMsgInlet repo.Repo_OpenMsgPipeServer) error {

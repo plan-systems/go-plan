@@ -636,7 +636,7 @@ func (chMgr *ChMgr) fetchChannel(
     )
 
     if len(inChID) != plan.ChIDSz {
-        return nil, plan.Error(nil, plan.ServiceShutdown, "chMgr is shutting down")
+        return nil, plan.Error(nil, plan.ParamErr, "malformed ChID")
     }
 
     chID := inChID.Blob()
@@ -868,10 +868,10 @@ func (chMgr *ChMgr) NewChAgent(
 // StartChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
 func (chMgr *ChMgr) StartChannelSession(
     inMemberSession *MemberSession,
-    inInvocation *ChInvocation, 
+    inChID plan.ChID,
 ) (*ChSession, error) {
 
-    ch, err := chMgr.FetchChannel(inInvocation.ChID)
+    ch, err := chMgr.FetchChannel(inChID)
     if err != nil {
         return nil, err
     }
@@ -880,7 +880,6 @@ func (chMgr *ChMgr) StartChannelSession(
         MemberSession: inMemberSession,
         ChSessID: ChSessID(atomic.AddUint32(&chMgr.prevSessID, 1)),
         Agent: ch,
-        Invocation: *inInvocation,
         msgInbox: make(chan *Msg, 1),
         entryUpdates: make(chan plan.TIDBlob, 1),
         readerCmdQueue: make(chan uint32, 1),
@@ -912,8 +911,6 @@ type ChSession struct {
 
     // Parent member session
     MemberSession       *MemberSession
-
-    Invocation          ChInvocation
 
     Agent               ChAgent
 

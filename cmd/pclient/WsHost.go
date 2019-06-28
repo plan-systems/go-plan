@@ -302,29 +302,6 @@ func (ws *WsHost) OpenWsSession(
 	return nil
 }
 
-// StartChannelSession -- see service WsService
-func (ws *WsHost) StartChannelSession(
-	ctx context.Context, 
-	inInvocation *repo.ChInvocation, 
-) (*repo.ChSessionInfo, error) {
-	/*
-	ms, err := pn.fetchRepoSession(ctx)
-	if err != nil {
-		return nil, err
-	}*?
-
-	chSession, err := ms.StartChannelSession(inInvocation)
-	if err != nil {
-		return nil, err
-	}
-
-	info := &repo.ChSessionInfo{
-		SessID: 0, //uint32(chSession.ChSessID),
-	}
-
-	return info, nil
-}
-
 
 
 type msgJobID struct {

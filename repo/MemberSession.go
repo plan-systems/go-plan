@@ -370,35 +370,6 @@ func (ms *MemberSession) ctxStopping() {
     }
 }
 
-// StartChannelSession instantiates a nre channel session for the given channel ID (and accompanying params)
-func (ms *MemberSession) StartChannelSession(
-    inInvocation *ChInvocation, 
-) (*ChSession, error) {
-
-    // If this member session is shutting down, this will return an error (and prevent new sessions from starting)
-    err := ms.CtxStatus()
-    if err != nil {
-        return nil, err
-    }
-
-    cs, err := ms.CR.chMgr.StartChannelSession(ms, inInvocation)
-    if err != nil {
-        ms.Infof(1, "channel session failed to start: %v", err)
-        return nil, err
-    }
-
-    ms.CtxAddChild(cs, nil)
-
-    cs.MemberSession.Infof(1, "channel session opened on ch %v (ChSessID %d)", cs.Agent.Store().ChID().SuffixStr(), cs.ChSessID)
-
-    ms.ChSessionsMutex.Lock()
-    ms.ChSessions[cs.ChSessID] = cs
-    ms.ChSessionsMutex.Unlock()
-
-    return cs, nil
-}
-
-
 // OpenMsgPipe blocks until the client closes their pipe or this Member session is closing.
 //
 // WARNING: a client can create multiple pipes, so ensure that all activity is threadsafe.
@@ -411,16 +382,26 @@ func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
             if msg != nil {
                 chSessID := ChSessID(msg.ChSessID)
 
-                if ! ms.handleTopLevelMsgs(msg) {
-                    ms.ChSessionsMutex.RLock()
-                    cs := ms.ChSessions[chSessID]
-                    ms.ChSessionsMutex.RUnlock()
+                handled := ms.handleCommonMsgs(msg)
+                if ! handled {
+                    if chSessID == 0 {
+                        handled = ms.handleSess0(msg)
+                    } else {
+                        ms.ChSessionsMutex.RLock()
+                        cs := ms.ChSessions[chSessID]
+                        ms.ChSessionsMutex.RUnlock()
 
-                    if cs == nil {
-                        ms.Warnf("Unhandled msg to chSessID %d, Op %d", chSessID, msg.Op)
-                    } else if cs.CtxRunning() {
-                        cs.msgInbox <- msg
+                        if cs != nil {
+                            handled = true
+                            if cs.CtxRunning() {
+                                cs.msgInbox <- msg
+                            }
+                        }  
                     }
+                }
+
+                if ! handled {
+                    ms.Warnf("Unhandled msg to chSessID %d, Op %d", chSessID, msg.Op)
                 }
             }
 
@@ -446,7 +427,59 @@ func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
     return nil
 }
 
-func (ms *MemberSession) handleTopLevelMsgs(msg *Msg) bool {
+func (ms *MemberSession) handleSess0(msg *Msg) bool {
+
+    handled := true
+
+    switch msg.Op {
+
+        case MsgOp_START_CH_SESSION: {
+            cs, err := ms.CR.chMgr.StartChannelSession(ms, plan.ChID(msg.BUF0))
+            if err != nil {
+                ms.Infof(1, "channel session failed to start: %v", err)
+
+                msg.Error = err.Error()
+            } else {
+
+                ms.CtxAddChild(cs, nil)
+
+                cs.MemberSession.Infof(1, "channel session opened on ch %v (ChSessID %d)", cs.Agent.Store().ChID().SuffixStr(), cs.ChSessID)
+
+                ms.ChSessionsMutex.Lock()
+                ms.ChSessions[cs.ChSessID] = cs
+                ms.ChSessionsMutex.Unlock()
+
+                // This tells the client what ch sess the ch session is on
+                msg.ChSessID = uint32(cs.ChSessID)
+            }
+
+            ms.msgOutbox <- msg
+        }
+
+        case MsgOp_RETAIN_COMMUNITY_KEYS:
+            //ms.retainCommunityKeysUpto = msg.T0
+        case MsgOp_ADD_COMMUNITY_KEYS:
+            _, err := ms.commCrypto.Keys.DoCryptOp(&ski.CryptOpArgs{
+                CryptOp: ski.CryptOp_IMPORT_USING_PW,
+                BufIn: msg.BUF0,
+                PeerKey: ms.SessionToken,
+            })
+            if err != nil {
+                ms.Warn("ADD_COMMUNITY_KEYS import error: ", err) 
+            } else {
+                ms.CR.spSyncActivate()
+            }
+
+        default:
+            handled = false
+    }
+
+    return handled
+}
+
+
+
+func (ms *MemberSession) handleCommonMsgs(msg *Msg) bool {
 
     handled := true
 
@@ -497,23 +530,8 @@ func (ms *MemberSession) handleTopLevelMsgs(msg *Msg) bool {
             }
         }
 
-        case MsgOp_RETAIN_COMMUNITY_KEYS:
-            //ms.retainCommunityKeysUpto = msg.T0
-        case MsgOp_ADD_COMMUNITY_KEYS:
-            _, err := ms.commCrypto.Keys.DoCryptOp(&ski.CryptOpArgs{
-                CryptOp: ski.CryptOp_IMPORT_USING_PW,
-                BufIn: msg.BUF0,
-                PeerKey: ms.SessionToken,
-            })
-            if err != nil {
-                ms.Warn("ADD_COMMUNITY_KEYS import error: ", err) 
-            } else {
-                ms.CR.spSyncActivate()
-            }
-
         default:
             handled = false
-
     }
 
     return handled
