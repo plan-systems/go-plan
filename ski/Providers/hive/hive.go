@@ -27,17 +27,12 @@ const (
 	providerInvocation = "/plan/ski/Provider/hive/1"
 )
 
-// GetSharedKeyDir returns the local dir of where keys are commonly stored
-func GetSharedKeyDir() (string, error) {
-	return ptools.UseLocalDir("ski.hive")
-}
-
 // StartSession starts a new hive SKI session locally, using a locally encrypted file.
 // If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
 func StartSession(
 	inBaseDir   string,
 	inStoreName string,
-	Passhash  []byte,
+	inPass		[]byte,
 ) (ski.Session, error) {
 
 	sess := &Session{
@@ -45,18 +40,13 @@ func StartSession(
 		BaseDir: inBaseDir,
 		StoreName: inStoreName,
 		keyTomeMgr: ski.NewKeyTomeMgr(),
+		defaultCryptoKit: ski.CryptoKitID_NaCl,
+		hivePass: make([]byte, len(inPass)),
 	}
 
-	sess.SetLogLabel("ski.hive") 
+	copy(sess.hivePass, inPass)
 
-	// Bind the request op scope -- TODO
-	/*
-	for i, domain := range inPB.AccessScopes {
-		allowedOpsForDomain := sess.allowedOps[i]
-		for _, opName := range domain {
-			allowedOpsForDomain[opName] = true
-		}
-	} */
+	sess.SetLogLabel("ski.hive") 
 
 	if err := sess.loadFromFile(); err != nil {
 		return nil, err
@@ -71,18 +61,14 @@ type Session struct {
 	ski.Session
 	ptools.Logger
 
+	defaultCryptoKit	ski.CryptoKitID
 	autoSaveMutex	   sync.Mutex
 	nextAutoSave		time.Time
-	//fsStatus			fsStatus
-
 	StoreName		   string
 	BaseDir			 string
-
-	//allowedOps		  [ski.NumKeyDomains]map[string]bool
-
 	keyTomeMgr		  *ski.KeyTomeMgr	   
-
 	autoSave			*time.Ticker
+	hivePass			[]byte
 }
 
 
@@ -92,13 +78,9 @@ func (sess *Session) dbPathname() string {
 	if len(sess.BaseDir) == 0 || len(sess.StoreName) == 0 {
 		return ""
 	}
-
-	filename := sess.StoreName + ".CryptoProvider.hive.pb"
 	
-	return path.Join(sess.BaseDir, filename)
+	return path.Join(sess.BaseDir, sess.StoreName)
 }
-
-
 
 
 func (sess *Session) loadFromFile() error {
@@ -125,9 +107,10 @@ func (sess *Session) loadFromFile() error {
 			}
 		}
 
-		// TODO: decrypt file buf!
-		{
-
+		if err == nil {
+			var kit *ski.CryptoKit
+			kit, err = ski.GetCryptoKit(sess.defaultCryptoKit)
+			buf, err = kit.DecryptUsingPassword(buf, sess.hivePass)
 		}
 
 		if err == nil && len(buf) > 0 {
@@ -135,10 +118,7 @@ func (sess *Session) loadFromFile() error {
 			doClear = false
 		}
 
-		// Zero out sensitive bytes
-		for i := range buf {
-			buf[i] = 0
-		}
+		ski.Zero(buf)
 	}
 
 	if doClear {
@@ -161,13 +141,14 @@ func (sess *Session) saveToFile() error {
 
 			buf, err := sess.keyTomeMgr.Marshal()
 
-			// TODO: encrypt file buf!
 			if err == nil {
-
+				var kit *ski.CryptoKit
+				kit, err = ski.GetCryptoKit(sess.defaultCryptoKit)
+				buf, err = kit.EncryptUsingPassword(crypto_rand.Reader, buf, sess.hivePass)
 			}
 
 			if err == nil {
-				err = ioutil.WriteFile(pathname, buf, ptools.DefaultFileMode)
+				err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
 				if err != nil {
 					err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write hive")
 				}
@@ -195,7 +176,6 @@ func (sess *Session) resetAutoSave() {
 			sess.autoSave = nil
 		}
 	}
-
 }
 
 
@@ -206,6 +186,7 @@ func (sess *Session) EndSession(inReason string) {
 
 	sess.saveToFile()
 
+	ski.Zero(sess.hivePass)
 }
 
 
