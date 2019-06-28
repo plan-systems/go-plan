@@ -715,7 +715,7 @@ func (chMgr *ChMgr) loadChannel(
         }
     }
 
-    if err := os.MkdirAll(opts.Dir, ptools.DefaultFileMode); err != nil {
+    if err := os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
         return nil, plan.Error(err, plan.FailedToLoadChannel, "failed to create channel dir")
     }
 
@@ -934,7 +934,7 @@ func (cs *ChSession) ctxStartup() error {
 
         for msg := range cs.msgInbox {
             switch msg.Op {                            
-                case MsgOp_CH_NEW_ENTRY_REQ:
+                case MsgOp_POST_CH_ENTRY:
                     cs.AuthorNewEntry(msg)
                 case MsgOp_CLOSE_CH_SESSION:
                     cs.CtxStop("closed by client", nil)

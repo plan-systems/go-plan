@@ -13,7 +13,7 @@ import (
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-ptools"
 
-	ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
+    ds "github.com/plan-systems/go-plan/cmd/pdi-local/datastore"
 
 	"google.golang.org/grpc"
 )
@@ -57,7 +57,7 @@ type Config struct {
 // ApplyDefaults sets std fields and values
 func (config *Config) ApplyDefaults() {
 
-	config.DefaultFileMode = ptools.DefaultFileMode
+	config.DefaultFileMode = plan.DefaultFileMode
 	config.GrpcNetworkName = "tcp"
 	config.GrpcNetworkAddr = ":" + plan.DefaultStorageProviderServicePort
 	config.Version = 1
@@ -75,7 +75,7 @@ func NewSnode(
 	sn.SetLogLabel("pdi-local")
 
 	var err error
-	if sn.BasePath, err = ptools.SetupBaseDir(inBasePath, inDoInit); err != nil {
+	if sn.BasePath, err = plan.SetupBaseDir(inBasePath, inDoInit); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +195,7 @@ func (sn *Snode) CreateNewStore(
 		StorageEpoch: inEpoch,
 	}
 
-	_, err := ptools.CreateNewDir(sn.BasePath, stConfig.HomePath)
+	_, err := plan.CreateNewDir(sn.BasePath, stConfig.HomePath)
 	if err != nil {
 		return err
 	}

@@ -20,7 +20,7 @@ import (
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
 
-    ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
+    ds "github.com/plan-systems/go-plan/cmd/pdi-local/datastore"
 
     "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
@@ -162,7 +162,7 @@ func NewCommunityRepo(
     var err error
 
     CR := &CommunityRepo{
-        DefaultFileMode: ptools.DefaultFileMode,
+        DefaultFileMode: plan.DefaultFileMode,
         unpacker: ski.NewUnpacker(true),
         HomePath: inHomePath,
         spSyncWakeup: make(chan struct{}, 5),

@@ -85,7 +85,7 @@ func NewStore(
 
     St := &Store{
         Config: inConfig,
-        DefaultFileMode: ptools.DefaultFileMode,
+        DefaultFileMode: plan.DefaultFileMode,
         txnDecoder: NewTxnDecoder(true),
     }
 

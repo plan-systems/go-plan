@@ -1,7 +1,6 @@
 package pdi
 
 import (
-	"github.com/plan-systems/go-ptools"
 	"github.com/plan-systems/go-plan/plan"
 	"github.com/plan-systems/go-plan/ski"
 )
@@ -141,9 +140,9 @@ func (epoch *StorageEpoch) CommunityKeyringName() []byte {
 
 // FormSuggestedDirName forms a file system friendly name that identifies this community to humans.
 func (epoch *StorageEpoch) FormSuggestedDirName() string {
-    str := ptools.MakeFSFriendly(
+    str := plan.MakeFSFriendly(
         epoch.Name,
-        epoch.CommunityID[0:2],
+        epoch.CommunityID[0:3],
     )
 
     return str

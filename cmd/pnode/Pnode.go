@@ -51,7 +51,7 @@ type PnodeConfig struct {
 // ApplyDefaults sets std fields and values
 func (config *PnodeConfig) ApplyDefaults() {
 
-    config.DefaultFileMode = ptools.DefaultFileMode
+    config.DefaultFileMode = plan.DefaultFileMode
     config.GrpcNetworkName = "tcp"
     config.GrpcNetworkAddr = ""
     config.Version = 1
@@ -88,12 +88,12 @@ func NewPnode(
     pn.SetLogLabel("pnode")
 
     var err error
-    if pn.BasePath, err = ptools.SetupBaseDir(inBasePath, inDoInit); err != nil {
+    if pn.BasePath, err = plan.SetupBaseDir(inBasePath, inDoInit); err != nil {
         return nil, err
     }
 
     pn.ReposPath = path.Join(pn.BasePath, "seeded")
-    if err = os.MkdirAll(pn.ReposPath, ptools.DefaultFileMode); err != nil {
+    if err = os.MkdirAll(pn.ReposPath, plan.DefaultFileMode); err != nil {
         return nil, err
     }
 
@@ -219,7 +219,7 @@ func (pn *Pnode) createAndStartRepo(
     if inSeed != nil {
         // Only proceed if the dir doesn't exist
         // TODO: change dir name in the event of a name collision.
-        repoPath, err = ptools.CreateNewDir(pn.ReposPath, inRepoSubPath)
+        repoPath, err = plan.CreateNewDir(pn.ReposPath, inRepoSubPath)
 
     } else {
         repoPath = path.Join(pn.ReposPath, inRepoSubPath)

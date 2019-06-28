@@ -16,7 +16,7 @@ import (
     
     "github.com/plan-systems/go-plan/ski/Providers/hive"
 
-    ds "github.com/plan-systems/go-plan/pdi/StorageProviders/datastore"
+    ds "github.com/plan-systems/go-plan/cmd/pdi-local/datastore"
 
     "github.com/plan-systems/go-ptools"
     "github.com/plan-systems/go-plan/pdi"
@@ -416,7 +416,9 @@ func (ms *MemberSession) OpenMsgPipe(inPipe Repo_OpenMsgPipeServer) error {
                     cs := ms.ChSessions[chSessID]
                     ms.ChSessionsMutex.RUnlock()
 
-                    if cs.CtxRunning() {
+                    if cs == nil {
+                        ms.Warnf("Unhandled msg to chSessID %d, Op %d", chSessID, msg.Op)
+                    } else if cs.CtxRunning() {
                         cs.msgInbox <- msg
                     }
                 }
@@ -464,7 +466,7 @@ func (ms *MemberSession) handleTopLevelMsgs(msg *Msg) bool {
                 txnSet.Segs[i] = txn
             }
 
-            msg.Op = MsgOp_COMMIT_COMPLETE
+            msg.Op = MsgOp_COMMIT_TXNS_COMPLETE
             msg.ITEMS = nil
             msg.EntryInfo = nil
             msg.EntryState = nil
