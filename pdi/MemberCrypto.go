@@ -58,19 +58,6 @@ func (mc *MemberCrypto) StartSession(
     mc.communityKey = mc.CommunityEpoch.CommunityKeyRef()
     mc.skiSession = inSKISession
 
-/*
-    skiDir, err := hive.GetSharedKeyDir()
-    if err != nil { return err }
-
-    // TODO: close prev skiSession
-    // TODO: load pw file w/ pw hash, etc
-    mc.PersonalSKI, err = hive.StartSession(
-        skiDir,
-        inMemberEpoch.FormMemberStrID(),
-        inKeyTomePass,
-    )
-    if err != nil { return err }  */
-
     // Set up the entry packer using the singing key associated w/ the member's current MemberEpoch
     mc.Packer = ski.NewPacker(false)
     err := mc.Packer.ResetSession(
