@@ -48,7 +48,6 @@ enum CryptOp {
 	// Decrypts BufIn using the referenced symmetric key.
     DECRYPT_SYM         = 2;
 
-
 	// Encrypts BufIn for a recipient holding the private key associated with the pub key contained in PeerKey,
     //    encrypting using the referenced asymmetric key and placing the encrypted result into BufOut.
     ENCRYPT_TO_PEER     = 3;
@@ -57,31 +56,31 @@ enum CryptOp {
     //    decrypting using the referenced asymmetric key and placing the decrypted result into BufOut.
     DECRYPT_FROM_PEER   = 4;
 
-    // Companion op to EXPORT_USING_PW
+    // Inverse of EXPORT_USING_PW
     // Identical to IMPORT_FROM_PEER except that BufIn is instead decrypted via CryptoKit.DecryptUsingPassword(),
     //    using CryptOp.PeerKey as a the password.
     IMPORT_USING_PW     = 5;
 
-    // Companion op to IMPORT_USING_PW
+    // Inverse of IMPORT_USING_PW
     // Identical to EXPORT_TO_PEER except the output serialized KeyTome is encrypted via CryptoKit.EncryptUsingPassword(),
     //    using CryptOp.PeerKey as a the password.
     EXPORT_USING_PW     = 6;
 
-    // Companion op to EXPORT_TO_PEER
+    // Inverse of EXPORT_TO_PEER
     // First, performs as DECRYPT_FROM_PEER.  
-    // The result/output buf is then unmarshalled (assumed to be a KeyTome protobuf) and is merged into the host KeyTome. 
+    // The result/output buf is then unmarshalled (assumed to be a ski.KeyTome protobuf) and is merged into the host KeyTome. 
     // See ski.ImportKeys() for how the incoming KeyTome is merged into the host KeyTome.
     IMPORT_FROM_PEER    = 7;
 
-    // Companion op to IMPORT_FROM_PEER
+    // Inverse of IMPORT_FROM_PEER
     // For each entry in CryptOpArgs.TomeIn, PubKey is used to lookup a corresponding KeyEntry in the host KeyTome.
     // Each KeyEntry with a matching PubKey is copied into a new temp KeyTome, into the appropriate Keyring, 
     //    creating a Keyring if it does not yet exist.
     // If a Keyring appears in CryptOpArgs.TomeIn but contains no entries, the entire Keyring will be exported.
     // If a Keyring or KeyEntry from TomeIn isn't found, an error is returned.
+    // See KeyTome.ExportUsingGuide() for how TomeIn is handled. 
     // On completion, the temp KeyTome is serialized, assigned to CryptOpArgs.BufIn, and ENCRYPT_TO_PEER is executed.
     EXPORT_TO_PEER      = 8;
-
 
 }
 
