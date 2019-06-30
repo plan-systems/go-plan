@@ -1,14 +1,12 @@
 package pdi
 
 import (
-	"github.com/plan-systems/go-plan/plan"
-	"github.com/plan-systems/go-plan/ski"
+	"github.com/plan-systems/plan-core/plan"
+	"github.com/plan-systems/plan-core/ski"
 )
 
 /**********************************************************************************************************************
   StorageProvider wraps a persistent storage service provider.
-
-  See the service defintion for StorageProvider, located in go-plan/pdi/pdi.proto.
 
   The TxnEncoder/TxnDecoder model is designed to wrap any kind of append-only database,
       particularly a distributed ledger.

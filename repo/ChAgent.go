@@ -19,10 +19,10 @@ import (
     //"encoding/binary"
 
 
-    "github.com/plan-systems/go-ptools"
-    "github.com/plan-systems/go-plan/pdi"
-    "github.com/plan-systems/go-plan/plan"
-    //"github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/pdi"
+    "github.com/plan-systems/plan-core/plan"
+    //"github.com/plan-systems/plan-core/ski"
 
 
     "github.com/dgraph-io/badger"
@@ -158,7 +158,7 @@ ChStore.db
 
 // ChStore is the low-level channel entry manager for a channel.  
 type ChStore struct {
-    ptools.Logger
+    tools.Logger
 
     State                   ChStoreState
     
@@ -496,7 +496,7 @@ func (chSt *ChStore) loadNextEntryToValidate(entry *chEntry) bool {
 
 func (chSt *ChStore) loadOriginalEntryBody(
     entry *chEntry,
-    outBody ptools.Unmarshaller,
+    outBody tools.Unmarshaller,
 ) error {
 
     var err error
@@ -536,7 +536,7 @@ func (chSt *ChStore) loadLatestEntryBody(
     inTxn *badger.Txn,
     inEntryID plan.TID,
     outInfo *pdi.EntryInfo,
-    outBody ptools.Unmarshaller,
+    outBody tools.Unmarshaller,
 ) error {
 
   // If we didn't find the epoch already loaded, look it up in the db
@@ -602,7 +602,7 @@ func writeEntryItem(
     inKey byte, 
     n int, 
     valBuf []byte,
-    v2 ptools.Marshaller,
+    v2 tools.Marshaller,
 ) (int, error) {
 
     N := len(entry.scrap)
@@ -1608,7 +1608,7 @@ func chSessionEntryReader(cs *ChSession) {
 
         var (
             entry chEntry
-            body ptools.Buf
+            body tools.Buf
             curPos, updatedEntry plan.TIDBlob
             chTxn *badger.Txn
         )

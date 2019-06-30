@@ -9,10 +9,10 @@ import (
 
     "testing"
 
-	"github.com/plan-systems/go-plan/ski"
-	//"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/plan-core/ski"
+	//"github.com/plan-systems/plan-core/plan"
 
-    "github.com/plan-systems/go-plan/ski/Providers/hive"
+    "github.com/plan-systems/plan-core/ski/Providers/hive"
 
 )
 

@@ -1,17 +1,17 @@
 package main
 
 import (
-	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/plan-core/plan"
 	"bytes"
 	crypto_rand "crypto/rand"
 	math_rand "math/rand"
 
 	"testing"
 
-	"github.com/plan-systems/go-plan/ski"
+	"github.com/plan-systems/plan-core/ski"
 
-	"github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
-	"github.com/plan-systems/go-plan/ski/CryptoKits/ed25519"
+	"github.com/plan-systems/plan-core/ski/CryptoKits/nacl"
+	"github.com/plan-systems/plan-core/ski/CryptoKits/ed25519"
 )
 
 var gTesting *testing.T

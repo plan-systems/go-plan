@@ -4,8 +4,8 @@ import (
     "bytes"
     "sync"
 
-	"github.com/plan-systems/go-ptools"
-	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/plan-core/tools"
+	"github.com/plan-systems/plan-core/plan"
 )
 
 // DecodedTxn contains the contents of a decoded raw native txn from a StorageProvider
@@ -103,7 +103,7 @@ func RecycleTxnSet(inTxnSet *PayloadTxnSet) {
 
 // UnmarshalPayload re-assumbles the payload as necessary and unmarshals to the givne item
 func (txnSet *PayloadTxnSet) UnmarshalPayload(
-    outItem ptools.Unmarshaller,
+    outItem tools.Unmarshaller,
 ) error {
 
     info := txnSet.Info()

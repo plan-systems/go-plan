@@ -11,13 +11,13 @@ import (
 	"sync"
 	crypto_rand "crypto/rand"
 
-	"github.com/plan-systems/go-ptools"
-	"github.com/plan-systems/go-plan/ski"
-	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/plan-core/tools"
+	"github.com/plan-systems/plan-core/ski"
+	"github.com/plan-systems/plan-core/plan"
 
 	// CryptoKits always available
-	_ "github.com/plan-systems/go-plan/ski/CryptoKits/nacl"
-	_ "github.com/plan-systems/go-plan/ski/CryptoKits/ed25519"
+	_ "github.com/plan-systems/plan-core/ski/CryptoKits/nacl"
+	_ "github.com/plan-systems/plan-core/ski/CryptoKits/ed25519"
 )
 
 
@@ -59,16 +59,16 @@ func StartSession(
 // Session represents a local implementation of the SKI
 type Session struct {
 	ski.Session
-	ptools.Logger
+	tools.Logger
 
-	defaultCryptoKit	ski.CryptoKitID
-	autoSaveMutex	   sync.Mutex
-	nextAutoSave		time.Time
-	StoreName		   string
+	defaultCryptoKit ski.CryptoKitID
+	autoSaveMutex	 sync.Mutex
+	nextAutoSave	 time.Time
+	StoreName		 string
 	BaseDir			 string
-	keyTomeMgr		  *ski.KeyTomeMgr	   
-	autoSave			*time.Ticker
-	hivePass			[]byte
+	keyTomeMgr		 *ski.KeyTomeMgr	   
+	autoSave		 *time.Ticker
+	hivePass		 []byte
 }
 
 

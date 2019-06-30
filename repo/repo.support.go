@@ -13,14 +13,9 @@ import (
     //"sort"
     //"encoding/hex"
     //"encoding/json"
-    //"e
-    
-    //"github.om/plan-systems/go-plan/ski/Providers/hive"
 
-
-    "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/ski"
-    //"github.com/plan-systems/go-plan/pcore"
+    "github.com/plan-systems/plan-core/plan"
+    "github.com/plan-systems/plan-core/ski"
 )
 
 

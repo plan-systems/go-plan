@@ -1,7 +1,7 @@
-Thanks for contributing to go-plan! Please include with your pull request:
+Thanks for contributing to plan-core! Please include with your pull request:
 
 - A description of what you did for the changelog
-- An explanation of why go-plan needs this change
+- An explanation of why plan-core needs this change
 - How to verify that it works (most PRs need tests!)
 - A link to the GitHub issue that it addresses
 

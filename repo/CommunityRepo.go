@@ -20,12 +20,12 @@ import (
  	"google.golang.org/grpc"
     "google.golang.org/grpc/metadata"
 
-    ds "github.com/plan-systems/go-plan/cmd/pdi-local/datastore"
+    ds "github.com/plan-systems/plan-pdi-local/datastore"
 
-    "github.com/plan-systems/go-ptools"
-    "github.com/plan-systems/go-plan/pdi"
-    "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/pdi"
+    "github.com/plan-systems/plan-core/plan"
+    "github.com/plan-systems/plan-core/ski"
 
     "github.com/dgraph-io/badger"
 )
@@ -55,7 +55,7 @@ type CommunityRepoState struct {
 
 // CommunityRepo wraps a community's data repository and responds to queries for the given community.
 type CommunityRepo struct {
-    ptools.Context
+    tools.Context
 
     GenesisSeed             GenesisSeed    
     Config                 *Config
@@ -113,7 +113,7 @@ type CommunityRepo struct {
     commSessionsMutex       sync.RWMutex
     commSessions            []*CommunityCrypto
 
-    memberSessMgr           ptools.Context
+    memberSessMgr           tools.Context
 
     //communitySKI            ski.Session
     //communitySKICond        *sync.Cond
@@ -617,7 +617,7 @@ func (CR *CommunityRepo) connectToStorage() {
         )
 
         if err == nil {
-            CR.spContext, err = ptools.TransferSessionToken(CR.spContext, trailer)
+            CR.spContext, err = tools.TransferSessionToken(CR.spContext, trailer)
             if err != nil {
                 err = plan.Error(err, plan.FailedToConnectStorageProvider, "TransferSessionToken() failed")
             }

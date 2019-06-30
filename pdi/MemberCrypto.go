@@ -15,9 +15,9 @@ import (
     //"fmt"
     
 
-    "github.com/plan-systems/go-ptools"
-    "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/plan"
+    "github.com/plan-systems/plan-core/ski"
 
     //"github.com/dgraph-io/badger"
 
@@ -102,7 +102,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
         return nil, plan.Error(nil, plan.ParamErr, "entry time authored not set")
     }
 
-    mc.tmpBuf = ptools.SmartMarshal(ioInfo, mc.tmpBuf)
+    mc.tmpBuf = tools.SmartMarshal(ioInfo, mc.tmpBuf)
 
     // Have the member sign the header
     var packingInfo ski.PackingInfo
@@ -131,7 +131,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
         PackedEntry: packedEntry,
     }
 
-    mc.tmpBuf = ptools.SmartMarshal(&tmpCrypt, mc.tmpBuf)
+    mc.tmpBuf = tools.SmartMarshal(&tmpCrypt, mc.tmpBuf)
 
     payloadTxnSet, err := mc.TxnEncoder.EncodeToTxns(
         mc.tmpBuf,

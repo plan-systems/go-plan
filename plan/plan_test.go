@@ -1,4 +1,4 @@
-package plan // import "github.com/plan-systems/go-plan/plan"
+package plan
 
 import (
 	//"bytes"

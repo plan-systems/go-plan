@@ -17,10 +17,10 @@ import (
     //"encoding/binary"
     "sync/atomic"
 
-    "github.com/plan-systems/go-ptools"
-    "github.com/plan-systems/go-plan/pdi"
-    "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/pdi"
+    "github.com/plan-systems/plan-core/plan"
+    "github.com/plan-systems/plan-core/ski"
 
 
     "github.com/dgraph-io/badger"
@@ -32,7 +32,7 @@ type ChSessID uint32
 
 // ChMgr is the top level interface for a community's channels.
 type ChMgr struct {
-    ptools.Context
+    tools.Context
 
     HomePath                string
 
@@ -437,7 +437,7 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                 chEpoch.CommunityEpochID = entryCommEpoch.EpochTID
 
                 // Having set the above fields, remarshal the body
-                entry.Body = ptools.SmartMarshal(chEpoch, entry.Body)
+                entry.Body = tools.SmartMarshal(chEpoch, entry.Body)
     
                 // Is the the channel genesis epoch?  If so, the channel ID derives from the channel ID.
                 if chEpoch.IsChannelGenesis() {
@@ -904,7 +904,7 @@ func (chMgr *ChMgr) StartChannelSession(
 //
 // A ChSession is the bridge between a ChAgent and a MemberSession
 type ChSession struct {
-    ptools.Context
+    tools.Context
     //plan.ContextWorker
 
     ChSessID            ChSessID

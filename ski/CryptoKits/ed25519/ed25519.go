@@ -7,8 +7,8 @@ import (
     //"net/http"
     //"log"
     "io"
-	"github.com/plan-systems/go-plan/ski"
-	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/plan-core/ski"
+	"github.com/plan-systems/plan-core/plan"
     
     //"golang.org/x/crypto/pbkdf2"
 

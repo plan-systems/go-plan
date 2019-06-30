@@ -9,11 +9,9 @@ import (
 
     "testing"
 
-	"github.com/plan-systems/go-plan/plan"
+	"github.com/plan-systems/plan-core/plan"
 
 )
-
-
 
 
 var gTesting *testing.T

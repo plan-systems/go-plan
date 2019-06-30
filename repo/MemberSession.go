@@ -14,14 +14,14 @@ import (
     //"context"
     "fmt"
     
-    "github.com/plan-systems/go-plan/ski/Providers/hive"
+    "github.com/plan-systems/plan-core/ski/Providers/hive"
 
-    ds "github.com/plan-systems/go-plan/cmd/pdi-local/datastore"
+    ds "github.com/plan-systems/plan-pdi-local/datastore"
 
-    "github.com/plan-systems/go-ptools"
-    "github.com/plan-systems/go-plan/pdi"
-    "github.com/plan-systems/go-plan/plan"
-    "github.com/plan-systems/go-plan/ski"
+    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/pdi"
+    "github.com/plan-systems/plan-core/plan"
+    "github.com/plan-systems/plan-core/ski"
 
     //"github.com/dgraph-io/badger"
 
@@ -250,7 +250,7 @@ func (cc *CommunityCrypto) EndSession(
 
 // MemberSession represents a user/member "logged in", meaning a SKI session is active.
 type MemberSession struct {
-    ptools.Context
+    tools.Context
 
     CR              *CommunityRepo
 
@@ -354,7 +354,7 @@ func (ms *MemberSession) ctxStartup() error {
 }
 
 
-func (ms *MemberSession) ctxChildAboutToStop(inChild ptools.Ctx) {
+func (ms *MemberSession) ctxChildAboutToStop(inChild tools.Ctx) {
     cs := inChild.(*ChSession)
     ms.ChSessionsMutex.Lock()
     delete(ms.ChSessions, cs.ChSessID)

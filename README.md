@@ -11,7 +11,7 @@ P  L  A  N etwork
 
 ## About
 
-This repo contains PLAN's backend infrastrcuture that ultimately hosts [plan-unity](https://github.com/plan-systems/plan-unity) clients.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `go-plan` is regarded as the official reference implementation.
+This repo contains PLAN's backend infrastrcuture that ultimately hosts [plan-client-unity](https://github.com/plan-systems/plan-client-unity) clients.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `plan-core` is regarded as the official reference implementation.
 
 The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
 
