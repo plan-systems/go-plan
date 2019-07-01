@@ -33,8 +33,3 @@ plan/plan.pb.go
 repo/repo.pb.go
 client/client.pb.go
 
-cmd/pdi-local/pdi-local
-cmd/pdi-local/Shrug Island.seed.plan
-cmd/pnode/pnode
-cmd/pclient/pclient
-

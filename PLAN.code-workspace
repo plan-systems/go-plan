@@ -1,21 +1,27 @@
 {
     "folders": [
-		{
-			"path": "."
-		},
-		{
-			"path": "../design-docs"
-		},
-		{
-			"path": "../plan-protobufs"
-		},
-		{
-			"path": "/Users/aomeara/go/src/github.com/dgraph-io/badger"
-		},
-		{
-			"path": "/Users/aomeara/go/src/github.com/plan-systems/klog"
-		},
-	],
+        {
+            "path": "../plan-client-phost"
+        },
+        {
+            "path": "../plan-pnode"
+        },
+        {
+            "path": "../plan-pdi-local"
+        },
+        {
+            "path": "."
+        },
+        {
+            "path": "../plan-protobufs"
+        },
+        {
+            "path": "../design-docs"
+        },
+        {
+            "path": "../klog"
+        },
+    ],
     "settings": {
     
         "cSpell.words": [
