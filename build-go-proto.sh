@@ -7,28 +7,28 @@
 #
 #
 
+SELF=`basename "$0"`
+
 if [[ $# -ne 2 ]]; then
-    echo "Usage: ./build-go-proto.sh <file>[.proto] <out_path>"
+    echo "Usage: ./build-go-proto.sh <plan_pkg_name> <out_path>"
     exit
 fi
 
-PKG="$1"
-PROTO_FILE="$1.proto"
+PKG_NAME="$1"
 DST_DIR="$2"
 
 BUILD_PROTO="../plan-protobufs/build-proto.sh"
 
+replace='s/#PKG# \"#PKG#\"/#PKG# \"github.com\/plan-systems\/plan-core\/#PKG#\" \/\/\/ Redirected by '$SELF' :)/' 
 
-FIND="\"github.com\/plan-systems\/plan-protobufs\/proto\""
-REPLACE="\"github.com\/plan-systems\/plan-protobufs\/proto\""
+#echo "$replace"
+#echo "${replace//#PKG#/plan}"
 
-replace='s/#PKG# \"github.com\/plan-systems\/plan-protobufs\/proto\"/#PKG# \"github.com\/plan-systems\/plan-core\/#PKG#\"/' 
-
-
-$BUILD_PROTO "$PROTO_FILE" gofast "$DST_DIR"
+$BUILD_PROTO "$PKG_NAME" gofast "$DST_DIR"
 sed -i ''	-e "${replace//#PKG#/plan}" 	\
 			-e "${replace//#PKG#/ski}"		\
+			-e "${replace//#PKG#/client}"   \
 			-e "${replace//#PKG#/pdi}"		\
 			-e "${replace//#PKG#/repo}" 	\
-			"$DST_DIR/$PKG.pb.go"
+			"$DST_DIR/$PKG_NAME/$PKG_NAME.pb.go"
 
