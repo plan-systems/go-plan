@@ -71,7 +71,6 @@ func (buf *Buf) Unmarshal(inSrc []byte) error {
 }
 
 
-
 var (
 	bytesT  = reflect.TypeOf(Bytes(nil))
 )

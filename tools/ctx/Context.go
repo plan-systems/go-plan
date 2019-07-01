@@ -1,5 +1,5 @@
-// Package tools provides project-agnostic utility code for Go projects
-package tools
+// Package ctx provides project-agnostic utility code for Go projects
+package ctx
 
 import (
 	"bytes"
