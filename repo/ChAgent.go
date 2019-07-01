@@ -18,15 +18,13 @@ import (
     //"encoding/base64"
     //"encoding/binary"
 
-
     "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/tools/ctx"
     "github.com/plan-systems/plan-core/pdi"
     "github.com/plan-systems/plan-core/plan"
     //"github.com/plan-systems/plan-core/ski"
 
-
     "github.com/dgraph-io/badger"
-
 )
 
 
@@ -158,7 +156,7 @@ ChStore.db
 
 // ChStore is the low-level channel entry manager for a channel.  
 type ChStore struct {
-    tools.Logger
+    ctx.Logger
 
     State                   ChStoreState
     

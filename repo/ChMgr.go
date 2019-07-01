@@ -18,6 +18,7 @@ import (
     "sync/atomic"
 
     "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/tools/ctx"
     "github.com/plan-systems/plan-core/pdi"
     "github.com/plan-systems/plan-core/plan"
     "github.com/plan-systems/plan-core/ski"
@@ -32,7 +33,7 @@ type ChSessID uint32
 
 // ChMgr is the top level interface for a community's channels.
 type ChMgr struct {
-    tools.Context
+    ctx.Context
 
     HomePath                string
 
@@ -904,7 +905,7 @@ func (chMgr *ChMgr) StartChannelSession(
 //
 // A ChSession is the bridge between a ChAgent and a MemberSession
 type ChSession struct {
-    tools.Context
+    ctx.Context
     //plan.ContextWorker
 
     ChSessID            ChSessID

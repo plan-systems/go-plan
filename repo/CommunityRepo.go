@@ -22,7 +22,7 @@ import (
 
     ds "github.com/plan-systems/plan-pdi-local/datastore"
 
-    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/tools/ctx"
     "github.com/plan-systems/plan-core/pdi"
     "github.com/plan-systems/plan-core/plan"
     "github.com/plan-systems/plan-core/ski"
@@ -55,7 +55,7 @@ type CommunityRepoState struct {
 
 // CommunityRepo wraps a community's data repository and responds to queries for the given community.
 type CommunityRepo struct {
-    tools.Context
+    ctx.Context
 
     GenesisSeed             GenesisSeed    
     Config                 *Config
@@ -113,7 +113,7 @@ type CommunityRepo struct {
     commSessionsMutex       sync.RWMutex
     commSessions            []*CommunityCrypto
 
-    memberSessMgr           tools.Context
+    memberSessMgr           ctx.Context
 
     //communitySKI            ski.Session
     //communitySKICond        *sync.Cond
@@ -617,7 +617,7 @@ func (CR *CommunityRepo) connectToStorage() {
         )
 
         if err == nil {
-            CR.spContext, err = tools.TransferSessionToken(CR.spContext, trailer)
+            CR.spContext, err = ctx.TransferSessionToken(CR.spContext, trailer)
             if err != nil {
                 err = plan.Error(err, plan.FailedToConnectStorageProvider, "TransferSessionToken() failed")
             }

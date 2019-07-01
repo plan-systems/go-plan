@@ -11,7 +11,7 @@ import (
 	"sync"
 	crypto_rand "crypto/rand"
 
-	"github.com/plan-systems/plan-core/tools"
+	"github.com/plan-systems/plan-core/tools/ctx"
 	"github.com/plan-systems/plan-core/ski"
 	"github.com/plan-systems/plan-core/plan"
 
@@ -59,7 +59,7 @@ func StartSession(
 // Session represents a local implementation of the SKI
 type Session struct {
 	ski.Session
-	tools.Logger
+	ctx.Logger
 
 	defaultCryptoKit ski.CryptoKitID
 	autoSaveMutex	 sync.Mutex

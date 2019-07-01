@@ -18,7 +18,7 @@ import (
 
     ds "github.com/plan-systems/plan-pdi-local/datastore"
 
-    "github.com/plan-systems/plan-core/tools"
+    "github.com/plan-systems/plan-core/tools/ctx"
     "github.com/plan-systems/plan-core/pdi"
     "github.com/plan-systems/plan-core/plan"
     "github.com/plan-systems/plan-core/ski"
@@ -26,81 +26,6 @@ import (
     //"github.com/dgraph-io/badger"
 
 )
-
-/*
-
-Huge!
-
-Every Repo maintains a list of when the latest entry from a given member has been witnessed.  
-
-this prevents any member from holding onto a "submarine" entry intended to disrupt the community etc.
-
-entries that are older than a set const delta from the latest post are auto-rejected since there's no way
-one entry would be offline for weeks/months while *behind* another that is live.
-*************
-
-Newly authoered entries sit around until there's a storage provider 
-
-*/
-
-/*
-
-
-// Shutdown calls Shutdown() on each MemberSession and blocks until all sessions have completed shutting down.
-func (mgr *MemberSessMgr) Shutdown(
-    inReason string,
-    inBlocker *sync.WaitGroup,
-) {
-
-    activeSessions := sync.WaitGroup{}
-
-    for {
-        mgr.Lock()
-        N := len(mgr.List)
-        mgr.CR.Infof(1, "ending %d member sessions", N)
-        activeSessions.Add(N)
-        for i := 0; i < N; i++ {
-            ms := mgr.List[i]
-            go func() {
-                ms.EndSession(inReason)
-                activeSessions.Done()
-            }()
-        }
-        mgr.Unlock()
-
-        if N == 0 {
-            break
-        }
-
-        activeSessions.Wait()
-    }
-
-    if inBlocker != nil {
-       inBlocker.Done()
-    }
-}
-
-
-// detachSession is called after a MemberSession has completed shutting down
-//
-// THREADSAFE
-func (mgr *MemberSessMgr) detachSession(inSess *MemberSession) {
-
-    mgr.Lock()
-    N := len(mgr.List)
-    for i := 0; i < N; i++ {
-        if mgr.List[i] == inSess {
-            N--
-            mgr.List[i] = mgr.List[N]
-            mgr.List[N] = nil
-            mgr.List = mgr.List[:N]
-            break
-        }
-    }
-    mgr.Unlock()
-
-}
-*/
 
 
 // NewMemberSession sets up a MemberSession for use.
@@ -250,7 +175,7 @@ func (cc *CommunityCrypto) EndSession(
 
 // MemberSession represents a user/member "logged in", meaning a SKI session is active.
 type MemberSession struct {
-    tools.Context
+    ctx.Context
 
     CR              *CommunityRepo
 
@@ -354,7 +279,7 @@ func (ms *MemberSession) ctxStartup() error {
 }
 
 
-func (ms *MemberSession) ctxChildAboutToStop(inChild tools.Ctx) {
+func (ms *MemberSession) ctxChildAboutToStop(inChild ctx.Ctx) {
     cs := inChild.(*ChSession)
     ms.ChSessionsMutex.Lock()
     delete(ms.ChSessions, cs.ChSessID)
