@@ -1,12 +1,11 @@
-
-#!/bin/sh
+#!/bin/bash
 #
 # See:
-#    plan-systems/plan-protobuf/README.md 
+#    plan-systems/plan-protobuf/README.md
 #    http://plan-systems.org
 #
 #
-
+set -e
 
 SELF_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
@@ -14,11 +13,11 @@ BUILD_GO_ROTO="./build-go-proto.sh"
 
 
 PKGS=(
-    "plan" 
-    "ski" 
+    "plan"
+    "ski"
     "pdi"
     "repo"
-	"client"
+    "client"
 )
 NUM_PKGS=$(( ${#PKGS[@]} ))
 
@@ -35,4 +34,3 @@ do
 	$BUILD_GO_ROTO "$PKG" "$DST_DIR"
 
 done
-
