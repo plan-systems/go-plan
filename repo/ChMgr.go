@@ -703,12 +703,7 @@ func (chMgr *ChMgr) loadChannel(
     inChGenesis *pdi.ChannelEpoch,
 ) (ChAgent, error) {
 
-    opts := badger.DefaultOptions
-    opts.Dir = path.Join(
-        chMgr.HomePath,
-        inChID.Str(),
-    )
-    opts.ValueDir = opts.Dir
+    opts := badger.DefaultOptions(path.Join(chMgr.HomePath, inChID.Str()))
 
     if ! inAutoCreate {
         if _, err := os.Stat(opts.Dir); os.IsNotExist(err) {

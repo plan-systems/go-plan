@@ -253,9 +253,7 @@ func (CR *CommunityRepo) ctxStartup() error {
         return err
     }
 
-    opts := badger.DefaultOptions
-    opts.Dir = path.Join(CR.HomePath, "txnDB")
-    opts.ValueDir = opts.Dir
+    opts := badger.DefaultOptions(path.Join(CR.HomePath, "txnDB"))
 
     if CR.txnDB, err = badger.Open(opts); err != nil {
         return plan.Error(err, plan.StorageNotReady, "CommunityRepo.txnDB.Open() failed")
