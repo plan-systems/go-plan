@@ -21,7 +21,7 @@ BUILD_PROTO="../plan-protobufs/build-proto.sh"
 $BUILD_PROTO "$PKG_NAME" gofast "$DST_DIR"
 
 # we need the canonical go import path, so edit the generated file
-replace='s~#PKG# "#PKG#"~#PKG# "github.com/plan-systems/plan-core" /// Redirected by '$SELF' :)~'
+replace='s~#PKG# "#PKG#"~#PKG# "github.com/plan-systems/plan-core/#PKG#" /// Redirected by '$SELF' :)~' 
 
 output_file="$DST_DIR/$PKG_NAME/$PKG_NAME.pb.go"
 
