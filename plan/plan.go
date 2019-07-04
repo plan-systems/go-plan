@@ -1,12 +1,3 @@
-/**********************************************************************************************************************
-
-         P urposeful
-         L ogistics
-         A rchitecture
-P  L  A  N etwork
-
-May PLAN support her users, the members of PLAN Systems, and myself so that I could not wish for more.  ~ Drew  */
-
 package plan
 
 import (
