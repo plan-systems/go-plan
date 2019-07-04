@@ -359,7 +359,15 @@ func (ms *MemberSession) handleSess0(msg *Msg) bool {
     switch msg.Op {
 
         case MsgOp_START_CH_SESSION: {
-            cs, err := ms.CR.chMgr.StartChannelSession(ms, plan.ChID(msg.BUF0))
+
+            invocation := plan.ChInvocation{};
+            err := invocation.Unmarshal(msg.BUF0)
+
+            var cs *ChSession
+            if err == nil {
+                cs, err = ms.CR.chMgr.StartChannelSession(ms, plan.ChID(invocation.ChID))
+            }
+
             if err != nil {
                 ms.Infof(1, "channel session failed to start: %v", err)
 
