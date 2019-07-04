@@ -6,7 +6,7 @@ import (
     //"os"
     //"path"
     //"io/ioutil"
-    //"strings"
+    "strings"
     "sync"
     //"sync/atomic"
     //"context"
@@ -28,7 +28,6 @@ import (
 )
 
 
-
 // ChAgentFactory is a ChAgent factory function. 
 // It returns a new ChAgent instance associated with the given channel protocol invocation.
 type ChAgentFactory func(inChProtocol string) ChAgent
@@ -41,27 +40,26 @@ var gChAgentRegistry = map[string]ChAgentFactory{}
 
 const (
 
-    // BuiltinProtocolPrefix is the prefix used for all builtin channel protocols.
-    BuiltinProtocolPrefix           = "ch/_/"
+    // ChProtocolBase is the prefix used for all builtin channel protocols.
+    ChProtocolBase                  = "ch/"
+
+    // StdChProtocol is the prefix used for all builtin channel protocols.
+    StdChProtocol                   = ChProtocolBase + "std/"
 
     // ChProtocolACC is used for RootACChannelID and all other ACCs
-    ChProtocolACC                   = BuiltinProtocolPrefix + "acc"
+    ChProtocolACC                   = StdChProtocol + "ACC"
 
     // ChProtocolMemberRegistry is used for plan.MemberRegistryChannelID
-    ChProtocolMemberRegistry        = BuiltinProtocolPrefix + "member-registry"
+    ChProtocolMemberRegistry        = StdChProtocol + "MemberRegistry"
 
     // ChProtocolCommunityEpochs is used for plan.MemberRegistryChannelID
-    ChProtocolCommunityEpochs       = BuiltinProtocolPrefix + "community-epochs"
-
-    // ChProtocolTalk is for conventional group chat sequential text streams
-    ChProtocolTalk                  = BuiltinProtocolPrefix + "talk"
-
-    // ChProtocolNotes is a set of text-based "pages" that (similar to iOS's notes) 
-    ChProtocolNotes                 = BuiltinProtocolPrefix + "notes"
+    ChProtocolCommunityEpochs       = StdChProtocol + "CommunityEpochs"
 
     // ChProtocolSpace is a navigable spatial container/vessel such that each entry is pinned/linked to areas, parameters, or points,
-    ChProtocolSpace                 = BuiltinProtocolPrefix + "space"
+    ChProtocolSpace                 = StdChProtocol + "Space"
 
+    // ChProtocolLinks is a basic channel of where each content entry is a plan.Link 
+    ChProtocolLinks                 = StdChProtocol + "Links"
 
 )
 
@@ -1836,9 +1834,6 @@ func init() {
             epochLookup: map[plan.TIDBlob]*pdi.MemberEpoch{},
         }
     }
-    gChAgentRegistry[ChProtocolTalk] = func(inChProtocol string) ChAgent {
-        return &ChTalk{}
-    }
     gChAgentRegistry[ChProtocolSpace] = func(inChProtocol string) ChAgent {
         return &ChSpace{}
     }
@@ -1848,7 +1843,39 @@ func init() {
     }
 }
 
-// ChUnknown -- ChAgent for a protocol not recognized or not yet known.
+
+func NewChAgentFromProtocolStr(inChProtocol string) ChAgent {
+    factory := gChAgentRegistry[inChProtocol]
+    if factory != nil {
+        return factory(inChProtocol)
+    } else if strings.HasPrefix(inChProtocol, ChProtocolBase) {
+        return &ChGeneric{}
+    } else {
+        return &ChUnknown{}
+    }
+}
+
+
+
+
+
+// ChGeneric -- ChAgent for channels that do not require any special handling
+type ChGeneric struct {
+    ChStore
+
+}
+
+// MergePost -- see ChAgent.MergePost
+func (ch *ChGeneric) MergePost(
+    entry *chEntry,
+) error {
+
+    return nil
+}
+
+
+
+// ChUnknown -- ChAgent for a protocol is not yet known (where ch content entries arrive before the genesis channel epoch).
 type ChUnknown struct {
     ChStore
 
@@ -2247,24 +2274,6 @@ func (ch *ChCommunityEpochs) FetchCommunityEpoch(inEpochID []byte, inLiveOnly bo
 
     return nil
 }
-
-
-
-
-// ChTalk -- ChAgent for ChProtocolTalk 
-type ChTalk struct {
-    ChStore
-
-}
-
-// MergePost -- see ChAgent.MergePost
-func (ch *ChTalk) MergePost(
-    entry *chEntry,
-) error {
-
-    return nil
-}
-
 
 
 // ChSpace -- ChAgent for ChProtocolTalk 

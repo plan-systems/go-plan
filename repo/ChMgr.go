@@ -471,8 +471,7 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                     &ChStoreState{
                         ChProtocol: chGenesisEpoch.ChProtocol,
                         ChannelID: chID.Clone(),
-                    }, 
-                    false,
+                    },
                 )
 
                 if chNew == nil {
@@ -755,7 +754,7 @@ func (chMgr *ChMgr) loadChannel(
             chState.ChProtocol = inChGenesis.ChProtocol
         }
 
-        ch = chMgr.NewChAgent(&chState, true)
+        ch = chMgr.NewChAgent(&chState)
 
         chSt := ch.Store()
         chSt.db = chDb
@@ -778,27 +777,17 @@ func (chMgr *ChMgr) loadChannel(
 // If inAutoCreate is set and the protocol string was not recognized, then an ChUnknown is created.
 func (chMgr *ChMgr) NewChAgent(
     inChState *ChStoreState,
-    inAutoCreate bool,
 ) ChAgent {
-    var ch ChAgent
-
-    agentFactory := gChAgentRegistry[inChState.ChProtocol]
-    if agentFactory != nil {
-        ch = agentFactory(inChState.ChProtocol)
-    }
-
-    mergeEnabled := true
-
-    if ch == nil && inAutoCreate {
-        ch = &ChUnknown{}
-        mergeEnabled = false
-    }
+    ch := NewChAgentFromProtocolStr(inChState.ChProtocol)
 
     if ch != nil {
         chSt := ch.Store()
 
         chSt.chMgr = chMgr
         chSt.entriesToMerge = make(chan *chEntry, 2)
+
+        _, protocolUnknown := ch.(*ChUnknown)
+        mergeEnabled := ! protocolUnknown
 
         // If we're loading the channel and discover that merge has never been enabled, reset the validation bookmark.
         if ! chSt.State.MergeEnabled && mergeEnabled {
