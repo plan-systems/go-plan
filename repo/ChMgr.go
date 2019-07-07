@@ -470,7 +470,7 @@ func (chMgr *ChMgr) QueueEntryForMerge(
                 chNew := chMgr.NewChAgent(
                     &ChStoreState{
                         ChProtocol: chGenesisEpoch.ChProtocol,
-                        ChannelID: chID.Clone(),
+                        ChID: chID.Clone(),
                     },
                 )
 
@@ -736,12 +736,12 @@ func (chMgr *ChMgr) loadChannel(
                 return chState.Unmarshal(val)
             })
             if err == nil {
-                if ! bytes.Equal(chState.ChannelID, inChID) {
-                    err = plan.Errorf(nil, plan.FailedToLoadChannel, "channel ID in state does not match %v, got %v", inChID, chState.ChannelID)
+                if ! bytes.Equal(chState.ChID, inChID) {
+                    err = plan.Errorf(nil, plan.FailedToLoadChannel, "channel ID in state does not match %v, got %v", inChID, chState.ChID)
                 }
             }
         } else if dbErr == badger.ErrKeyNotFound {
-            chState.ChannelID = inChID
+            chState.ChID = inChID
         }
 
         chTxn.Discard()
@@ -796,7 +796,7 @@ func (chMgr *ChMgr) NewChAgent(
         
         chSt.State.MergeEnabled = mergeEnabled
         chSt.State.ChProtocol = inChState.ChProtocol
-        chSt.State.ChannelID = append(chSt.State.ChannelID[:0], inChState.ChannelID...)
+        chSt.State.ChID = append(chSt.State.ChID[:0], inChState.ChID...)
         chSt.revalAfter = pdi.URIDTimestampMax
 
         shortStr := chSt.ChID().SuffixStr()
@@ -900,9 +900,7 @@ type ChSession struct {
     Agent               ChAgent
 
     msgInbox            chan *Msg
-
     readerCmdQueue      chan uint32
-
 
     // EntryTIDs that have changed liveness.
     entryUpdates        chan plan.TIDBlob  
@@ -915,9 +913,15 @@ func (cs *ChSession) ctxStartup() error {
     cs.CtxGo(func() {
 
         for msg := range cs.msgInbox {
-            switch msg.Op {                            
+            switch msg.Op {
                 case MsgOp_POST_CH_ENTRY:
                     cs.AuthorNewEntry(msg)
+                case MsgOp_LATEST_CH_EPOCH:
+                    msg.BUF0 = cs.Agent.Store().ExportLatestChEpoch(msg.BUF0)
+                    cs.MemberSession.msgOutbox <- msg
+                case MsgOp_LATEST_CH_INFO:
+                    msg.BUF0 = cs.Agent.Store().ExportLatestChInfo(msg.BUF0)
+                    cs.MemberSession.msgOutbox <- msg
                 case MsgOp_CLOSE_CH_SESSION:
                     cs.CtxStop("closed by client", nil)
                 case MsgOp_RESET_ENTRY_READER:

@@ -389,6 +389,19 @@ func (ms *MemberSession) handleSess0(msg *Msg) bool {
             ms.msgOutbox <- msg
         }
 
+            case MsgOp_LATEST_CH_EPOCH:
+                fallthrough
+            case MsgOp_LATEST_CH_INFO:
+                ch, err := ms.CR.chMgr.FetchChannel(plan.ChID(msg.BUF0))
+                if err != nil {
+                    msg.Error = err.Error()
+                } else if msg.Op == MsgOp_LATEST_CH_EPOCH {
+                    msg.BUF0 = ch.Store().ExportLatestChEpoch(msg.BUF0)
+                } else {
+                    msg.BUF0 = ch.Store().ExportLatestChInfo(msg.BUF0)
+                }
+
+
         case MsgOp_RETAIN_COMMUNITY_KEYS:
             //ms.retainCommunityKeysUpto = msg.T0
         case MsgOp_ADD_COMMUNITY_KEYS:

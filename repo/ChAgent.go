@@ -225,7 +225,7 @@ func (chSt *ChStore) Store() *ChStore {
 
 // ChID returns the channel ID for this ChStore
 func (chSt *ChStore) ChID() plan.ChID {
-    return plan.ChID(chSt.State.ChannelID)
+    return plan.ChID(chSt.State.ChID)
 }
 
 // Startup -- see ChAgent.Startup()
@@ -756,6 +756,38 @@ func (chSt *ChStore) OnLivenessChanged(
 }
 
 
+// ExportLatestChInfo constructs the most up to date pdi.ChInfo and serializes it (recycling the given buf if possible)
+func (chSt *ChStore) ExportLatestChInfo(recycle []byte) []byte {
+
+    info := &pdi.ChInfo{}
+
+    node := chSt.GetActiveChEpoch()
+    if node != nil {
+        info.Epoch = &node.Epoch
+    }
+
+    // TODO: add ChInfo attribs
+    { }
+
+    return tools.SmartMarshal(info, recycle)
+}
+
+// ExportLatestChEpoch marshals the latest pdi.ChannelEpoch (recycling the given buf if possible)
+func (chSt *ChStore) ExportLatestChEpoch(recycle []byte) []byte {
+
+    epoch := pdi.ChannelEpoch{}
+
+    node := chSt.GetActiveChEpoch()
+    if node != nil {
+        epoch = node.Epoch
+    }
+
+    return tools.SmartMarshal(&epoch, recycle)
+}
+
+
+
+// FetchChEpoch returns the ChEpochNode associated with the given entry TID (or nil)
 func (chSt *ChStore) FetchChEpoch(
    inEntryID plan.TID,
 ) *ChEpochNode {
@@ -925,7 +957,7 @@ func (chSt *ChStore) IsEntryAuthorized(
 
     epoch := chSt.FetchChEpoch(inCitedEpoch)
     if epoch == nil {
-        return plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v in acc %v not found", entry.Info.ChannelEpochID(), chSt.State.ChannelID)
+        return plan.Errorf(nil, plan.ChannelEpochNotFound, "channel epoch %v in acc %v not found", entry.Info.ChannelEpochID(), chSt.State.ChID)
     }
 
     // Normal permissions lookup. boring: do last :\
