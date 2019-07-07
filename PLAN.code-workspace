@@ -1,6 +1,9 @@
 {
     "folders": [
         {
+            "path": "../plan-client-unity"
+        },
+        {
             "path": "../plan-client-phost"
         },
         {
@@ -20,7 +23,7 @@
         },
         {
             "path": "../klog"
-        },
+        }
     ],
     "settings": {
     
@@ -28,6 +31,8 @@
             "Err",
             "access",
             "asym",
+            "attribs",
+            "ch",
             "ckid",
             "crypto",
             "grpc",
