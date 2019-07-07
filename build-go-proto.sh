@@ -17,7 +17,10 @@ fi
 PKG_NAME="$1"
 DST_DIR="$2"
 
-BUILD_PROTO="../plan-protobufs/build-proto.sh"
+SELF_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
+
+# Invoke protoc and build the output file
+BUILD_PROTO="$SELF_DIR/../plan-protobufs/build-proto.sh"
 $BUILD_PROTO "$PKG_NAME" gofast "$DST_DIR"
 
 # we need the canonical go import path, so edit the generated file
@@ -34,4 +37,4 @@ sed \
     "$output_file" > "${output_file}.tmp"
 mv "${output_file}.tmp" "$output_file"
 
-echo "$output_file"
+#echo "$output_file"

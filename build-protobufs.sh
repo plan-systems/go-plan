@@ -1,16 +1,16 @@
 #!/bin/bash
 #
 # See:
-#    plan-systems/plan-protobuf/README.md
+#    http://github.com/plan-systems/plan-protobuf/README.md
 #    http://plan-systems.org
 #
 #
+
 set -e
 
 SELF_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
-BUILD_GO_PROTO="./build-go-proto.sh"
-
+BUILD_GO_PROTO="$SELF_DIR/build-go-proto.sh"
 
 PKGS=(
     "plan"
