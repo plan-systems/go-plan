@@ -37,15 +37,13 @@ const (
 
 	// MemberAliasMaxLen is the max UTF8 string length a community member can use for their member alias
 	MemberAliasMaxLen = 127
+)
 
-	// DefaultStorageProviderServicePort is the default port to host the grpc service StorageProvider, used for serving Repo clients.
-	DefaultStorageProviderServicePort = "5190"
-
-	// DefaultRepoServicePort is the default port used to host the grpc service Repo, used for serving PLAN clients.
-	DefaultRepoServicePort = "5191"
-
-	// DefaultWorkstationServicePort is the default port used to host the gprc service WsService, used for serving PLAN workstations.
-	DefaultWorkstationServicePort = "5192"
+// Default ports used in PLAN
+const (
+	DefaultStorageProviderServicePort = "5190" // hosts the grpc service StorageProvider, used for serving Repo clients.
+	DefaultRepoServicePort            = "5191" // hosts the grpc service Repo, used for serving PLAN clients.
+	DefaultWorkstationServicePort     = "5192" // hosts the gprc service WsService, used for serving PLAN workstations.
 )
 
 // Multicodec is a compact way of specifying a binary format -- see https://github.com/plan-systems/multicodec
