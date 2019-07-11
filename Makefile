@@ -5,6 +5,12 @@ SHELL := /bin/bash
 
 .PHONY: *
 
+protobufs:
+	./build-protobufs --protos ../plan-protobufs/pkg --dest .
+
+setup: protobufs
+	go get ./...
+
 build: build/pdi build/plan build/repo build/ski build/tools
 build/%:
 	go build ./$*
