@@ -89,7 +89,7 @@ func ReadVarBuf(dAtA []byte, offset int) (int, []byte, error) {
 // SegmentIntoTxns is a utility that chops up a payload buffer into segments <= inMaxSegmentSize
 func SegmentIntoTxns(
 	inPayload         []byte,
-    inPayloadEnc      plan.Encoding, 
+    inPayloadCodec    plan.Multicodec, 
 	inMaxSegmentSize  uint32,
 ) (*PayloadTxnSet, error) {
 
@@ -113,7 +113,7 @@ func SegmentIntoTxns(
 			segSz = inMaxSegmentSize
 		}
 
-        seg.Info.PayloadEncoding = inPayloadEnc
+        seg.Info.PayloadCodec = uint32(inPayloadCodec)
         seg.Info.SegSz = segSz
 		seg.Info.SegIndex = i
 		seg.Info.SegTotal = N

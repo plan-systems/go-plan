@@ -40,12 +40,28 @@ const (
 
 	// DefaultStorageProviderServicePort is the default port to host the grpc service StorageProvider, used for serving Repo clients.
 	DefaultStorageProviderServicePort = "5190"
-	
+
 	// DefaultRepoServicePort is the default port used to host the grpc service Repo, used for serving PLAN clients.
 	DefaultRepoServicePort = "5191"
 
 	// DefaultWorkstationServicePort is the default port used to host the gprc service WsService, used for serving PLAN workstations.
 	DefaultWorkstationServicePort = "5192"
+)
+
+// Multicodec is a compact way of specifying a binary format -- see https://github.com/plan-systems/multicodec
+type Multicodec uint32
+
+// Multicodec standard values used in PLAN.  See https://github.com/plan-systems/multicodec/blob/master/table.csv
+const (
+	UnspecifiedCodec Multicodec = 0
+	TxnSegmentCodec  Multicodec = 0x3050
+	TxnInfoCodec     Multicodec = 0x3051
+	SigHeaderCodec   Multicodec = 0x3052
+	EntryCryptCodec  Multicodec = 0x3053
+	EntryInfoCodec   Multicodec = 0x3054
+	BlockCodec       Multicodec = 0x3055
+	LinkCodec        Multicodec = 0x3056
+	URICodec         Multicodec = 0x3057
 )
 
 // CommunityID identifies a PLAN community and is randomly generated during its genesis.
@@ -86,7 +102,7 @@ type ChID []byte
 type ChIDBlob [ChIDSz]byte
 
 var (
-    // BinEncoding is used to encode/decode binary bufs in PLAN.
+	// BinEncoding is used to encode/decode binary bufs in PLAN.
 	BinEncoding = base64.RawURLEncoding
 
 	// GenesisMemberID is the genesis member ID
@@ -133,4 +149,3 @@ var NilTID = TIDBlob{
 	0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0,
 }
-

@@ -107,7 +107,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
     // Have the member sign the header
     var packingInfo ski.PackingInfo
     err := mc.Packer.PackAndSign(
-        plan.Encoding_Pb_EntryInfo,
+        plan.EntryInfoCodec,
         mc.tmpBuf,
         inBody,
         0,
@@ -135,7 +135,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
 
     payloadTxnSet, err := mc.TxnEncoder.EncodeToTxns(
         mc.tmpBuf,
-        plan.Encoding_Pb_EntryCrypt,
+        plan.EntryCryptCodec,
         nil,
         timeAuthored,
     )

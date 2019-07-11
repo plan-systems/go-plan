@@ -150,12 +150,12 @@ func (txnSet *PayloadTxnSet) Info() *TxnInfo {
     return nil
 }
 
-// PayloadEncoding returns the encoding int associated with the payload contained in this txn set.
-func (txnSet *PayloadTxnSet) PayloadEncoding() plan.Encoding {
+// PayloadCodec returns the encoding int associated with the payload contained in this txn set.
+func (txnSet *PayloadTxnSet) PayloadCodec() plan.Multicodec {
     if info := txnSet.Info(); info != nil {
-        return info.PayloadEncoding
+        return plan.Multicodec(info.PayloadCodec)
     }
-    return plan.Encoding_Unspecified
+    return plan.UnspecifiedCodec
 }
 
 // Verify verifies that all the segments, verify all segments are linked\ and consistent
@@ -175,7 +175,7 @@ func (txnSet *PayloadTxnSet) Verify() error {
 
             if seg == nil {
                 return plan.Error(nil, plan.TxnNotConsistent, "missing at least one txn")
-            } else if seg.Info.SegTotal != info.SegTotal || seg.Info.PayloadEncoding != info.PayloadEncoding {
+            } else if seg.Info.SegTotal != info.SegTotal || seg.Info.PayloadCodec != info.PayloadCodec {
                 return plan.Errorf(nil, plan.TxnNotConsistent, "txn set %v not consistent", seg.URIDStr())
             } else if ! bytes.Equal(seg.Info.PrevURID, prevURID) {
                 return plan.Errorf(nil, plan.TxnNotConsistent, "txn %v: expects prev seg URID %v, got %v", seg.URIDStr(), seg.Info.PrevURID, prevURID)

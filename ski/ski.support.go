@@ -1032,7 +1032,7 @@ type PackingInfo struct {
 //
 // THREADSAFE
 func (P *PayloadPacker) PackAndSign(
-    inEncoding    plan.Encoding,
+    inHeaderCodec plan.Multicodec,
     inHeader      []byte,
     inBody        []byte,
     inExtraAlloc  int,
@@ -1048,7 +1048,7 @@ func (P *PayloadPacker) PackAndSign(
         SignerCryptoKit: P.signingKey.CryptoKit,
         SignerPubKey:    P.signingKey.PubKey,
         HashKit:         P.hashKit.HashKitID,
-        HeaderEncoding:  inEncoding,
+        HeaderCodec: 	 uint32(inHeaderCodec),
         HeaderSz:        uint32(len(inHeader)),
         BodySz:          uint64(len(inBody)),
     }
@@ -1149,13 +1149,13 @@ func (P *PayloadPacker) checkReady() error {
 
 // SignedPayload are the params associated with signing a payload buffer.
 type SignedPayload struct {
-    Encoding        plan.Encoding // Client-specified encoding
-    Header          []byte        // Client payload (hashed into .HeaderSig)
-    Body            []byte        // Client body (NOT hashed into sig)
-    HashKit         HashKitID     // The ID of the hash kit that generated .Hash 
-    Hash            []byte        // A hash digest generated from .Header and .Body
-    HashSig         []byte        // Signature of .Hash by .Signer
-    Signer          KeyInfo       // The pub key that orginated .Sig
+    HeaderCodec     plan.Multicodec	// Client-specified encoding
+    Header          []byte         	// Client payload (hashed into .HeaderSig)
+    Body            []byte        	// Client body (NOT hashed into sig)
+    HashKit         HashKitID     	// The ID of the hash kit that generated .Hash 
+    Hash            []byte        	// A hash digest generated from .Header and .Body
+    HashSig         []byte        	// Signature of .Hash by .Signer
+    Signer          KeyInfo       	// The pub key that orginated .Sig
 }
 
 // PayloadUnpacker unpacks and decodes signed buffers IAW ski.SigHeader
@@ -1259,7 +1259,7 @@ func (U* PayloadUnpacker) UnpackAndVerify(
 	}
 
     out.Header           = inSignedBuf[headerPos:headerEnd]
-    out.Encoding         = hdr.HeaderEncoding
+    out.HeaderCodec      = plan.Multicodec(hdr.HeaderCodec)
     out.HashKit          = hdr.HashKit
     out.HashSig          = inSignedBuf[sigPos:sigEnd]
     out.Body             = inSignedBuf[bodyPos:bodyEnd]

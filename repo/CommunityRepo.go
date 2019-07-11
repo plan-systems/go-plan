@@ -396,15 +396,15 @@ func (CR *CommunityRepo) ctxStartup() error {
             if err != nil {
                 CR.Warnf("error processing txn %v: %v", txnIn.URID, err)
             } else {
-                payloadEncoding := txnSet.PayloadEncoding()
+                payloadCodec := txnSet.PayloadCodec()
 
-                switch payloadEncoding {
-                    case plan.Encoding_Pb_EntryCrypt:
+                switch payloadCodec {
+                    case plan.EntryCryptCodec:
                         entry := NewChEntry(entryFromStorageProvider)
                         entry.PayloadTxnSet = txnSet
                         CR.entriesToMerge <- entry
                     default:
-                        CR.Warn("encountered unhandled payload encoding: ", payloadEncoding)
+                        CR.Warn("encountered unhandled payload multicodec: ", payloadCodec)
                 }
             }
         }
