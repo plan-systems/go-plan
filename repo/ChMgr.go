@@ -197,8 +197,8 @@ var chEntryPool = sync.Pool{
 	},
 }
 
-// NewChEntry is equivalent to instantiating a fresh chEntry (but saves on allocations)
-func NewChEntry(inOrigin chEntryOrigin) *chEntry {
+// newChEntry is equivalent to instantiating a fresh chEntry (but saves on allocations)
+func newChEntry(inOrigin chEntryOrigin) *chEntry {
     entry := chEntryPool.Get().(*chEntry)
     entry.Reset()
 
@@ -227,6 +227,7 @@ const (
     partTouched
 )
 
+// chEntry is the working struct for an entry being merged and validated in a repo channel.
 type chEntry struct {
     Body                []byte
     
@@ -234,7 +235,7 @@ type chEntry struct {
     State               EntryState
     StatePrev           EntryState
 
-    PayloadTxnSet         *pdi.PayloadTxnSet
+    PayloadTxnSet       *pdi.PayloadTxnSet
 
     origin              chEntryOrigin
 
@@ -672,6 +673,8 @@ func (chMgr *ChMgr) fetchChannel(
     
     // TODO: rebuild channel if db load fails?
     if err != nil {
+        chMgr.Error("failed to load channel ", inChID.Str(), ": ", err)
+
         ch = nil
     }
 
@@ -711,12 +714,12 @@ func (chMgr *ChMgr) loadChannel(
     }
 
     if err := os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
-        return nil, plan.Error(err, plan.FailedToLoadChannel, "failed to create channel dir")
+        return nil, err
     }
 
     chDb, err := badger.Open(opts)
     if err != nil {
-        err = plan.Error(err, plan.FailedToLoadChannel, "failed to open channel db")
+        return nil, err
     }
 
     var (
@@ -763,7 +766,6 @@ func (chMgr *ChMgr) loadChannel(
     }
 
     if err != nil {
-        panic(err)
         ch = nil
     }
 

@@ -400,7 +400,7 @@ func (CR *CommunityRepo) ctxStartup() error {
 
                 switch payloadCodec {
                     case plan.EntryCryptCodec:
-                        entry := NewChEntry(entryFromStorageProvider)
+                        entry := newChEntry(entryFromStorageProvider)
                         entry.PayloadTxnSet = txnSet
                         CR.entriesToMerge <- entry
                     default:

@@ -1532,7 +1532,7 @@ func chEntryProcessor(ch ChAgent) {
                 moreToValidate = false
             } else {
                 if entryTmp == nil {
-                    entryTmp = NewChEntry(entryRevalidating)
+                    entryTmp = newChEntry(entryRevalidating)
                 }
 
                 moreToValidate = chSt.loadNextEntryToValidate(entryTmp)

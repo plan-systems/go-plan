@@ -465,8 +465,8 @@ func (ms *MemberSession) handleCommonMsgs(msg *Msg) bool {
             if err == nil {
                 txnSet.NewlyAuthored = true
 
-                // With the merge complete, send a masg back to the client saying so, along w/ the entry info
-                entry := NewChEntry(entryWasAuthored)
+                // With the merge complete, send a msg back to the client saying so, along w/ the entry info
+                entry := newChEntry(entryWasAuthored)
                 entry.PayloadTxnSet = txnSet
                 entry.onMergeComplete = onMergeComplete
 
