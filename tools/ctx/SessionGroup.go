@@ -252,7 +252,8 @@ func (group *SessionGroup) EndInactiveSessions(inExpirationTime int64) {
 		group.Unlock()
 
 		for _, i := range expired {
-			go i.OnEndSession(i, ClientInactive)
+			sess := i
+			go sess.OnEndSession(sess, ClientInactive)
 		}
 	}
 }
@@ -265,8 +266,9 @@ func (group *SessionGroup) EndAllSessions(inReason string) {
 	group.table = make(map[string]*ClientSession)
 	group.Unlock()
 
-	for _, session := range oldTable {
-		go session.OnEndSession(session, inReason)
+	for _, i := range oldTable {
+		sess := i
+		go sess.OnEndSession(sess, inReason)
 	}
 
 }
