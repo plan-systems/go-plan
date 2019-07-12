@@ -12,7 +12,7 @@ import (
     //"context"
     "fmt"
     "sort"
-   //"reflect"
+   "reflect"
     //"encoding/hex"
     //"encoding/json"
     //"encoding/base64"
@@ -37,42 +37,36 @@ type ChAgentFactory func(inChProtocol string) ChAgent
 var gChAgentRegistry = map[string]ChAgentFactory{}
 
 
+// TODO
+// use ChProtocolBase for ChProtocolACC, ChProtocolMemberRegistry, ChProtocolCommunityEpochs?
 
+// ChProtocol are common and built-in
 const (
 
-    // ChProtocolBase is the prefix used for all builtin channel protocols.
+    // ChProtocolBase is the prefix used for all possbile channel protocols.
     ChProtocolBase                  = "ch/"
 
-    // StdChProtocol is the prefix used for all builtin channel protocols.
-    StdChProtocol                   = ChProtocolBase + "std/"
+    // ChProtocolStd prefixes channel protocols that operate generically and use default entry handling/processing.
+    ChProtocolStd                   = ChProtocolBase + "std/"
 
-    // ChProtocolACC is used for RootACChannelID and all other ACCs
-    ChProtocolACC                   = StdChProtocol + "ACC"
+    // ChProtocolReserved prefixes reserved/special channel protocols.
+    ChProtocolReserved              = ChProtocolBase + "_/"
 
-    // ChProtocolMemberRegistry is used for plan.MemberRegistryChannelID
-    ChProtocolMemberRegistry        = StdChProtocol + "MemberRegistry"
+    // Used internally and externally in PLAN 
+    ChProtocolACC                   = ChProtocolReserved + "ACC"
+    ChProtocolMemberRegistry        = ChProtocolReserved + "MemberRegistry"
+    ChProtocolCommunityEpochs       = ChProtocolReserved + "CommunityEpochs"
 
-    // ChProtocolCommunityEpochs is used for plan.MemberRegistryChannelID
-    ChProtocolCommunityEpochs       = StdChProtocol + "CommunityEpochs"
-
-    // ChProtocolSpace is a navigable spatial container/vessel such that each entry is pinned/linked to areas, parameters, or points,
-    ChProtocolSpace                 = StdChProtocol + "Space"
-
-    // ChProtocolLinks is a basic channel of where each content entry is a plan.Link 
-    ChProtocolLinks                 = StdChProtocol + "Links"
-
+    // See plan-protobufs/pkg/ch
+    ChProtocolSpace                 = ChProtocolStd + "Space"
+    ChProtocolLinks                 = ChProtocolStd + "Links"
 )
 
 
 // ChAgent is a protocol-specific implementation built to interact with a ChStore
 type ChAgent interface {
 
-    //AttachToChStore(chSt *ChStore)
-    Store() *ChStore
-
-    Startup() error
-
-    //NewAssetForContent() pcore.Marshaller
+    OnStartup(chSt *ChStore) error
 
     OnLivenessChanged(
         entry *chEntry,
@@ -83,11 +77,32 @@ type ChAgent interface {
         entry *chEntry,
     ) error
 
+}
 
-    MergeNewChannelEpoch(
-        entry *chEntry,
-    ) error
+// ChStdAgent is a foundation/base"for a ChAgent that operates genically.
+type ChStdAgent struct {
+    chSt *ChStore
+}
 
+
+// OnStartup -- see ChAgent interface
+func (std *ChStdAgent) OnStartup(chSt *ChStore) error {
+    std.chSt = chSt
+    return nil
+}
+
+// OnLivenessChanged -- see ChAgent interface
+func (std *ChStdAgent) OnLivenessChanged(
+    entry *chEntry,
+) error {
+    return nil
+}
+
+// MergePost -- see ChAgent interface
+func (std *ChStdAgent) MergePost(
+    entry *chEntry,
+) error {
+    return nil
 }
 
 
@@ -160,7 +175,9 @@ type ChStore struct {
     
     // A Ch store needs to have each active channel sessions available so changes/notifications can be sent out.
     chSessions              []*ChSession
-    chSessionsMutex         sync.RWMutex 
+    chSessionsMutex         sync.RWMutex
+
+    agent                   ChAgent
 
     // ChEntry keyed by entry URID
     db                     *badger.DB
@@ -218,11 +235,6 @@ func (chSt *ChStore) Log(inErr error, inMsg string) {
     }
 }
 
-// Store -- see ChAgent.Startup()
-func (chSt *ChStore) Store() *ChStore {
-    return chSt
-}
-
 // ChID returns the channel ID for this ChStore
 func (chSt *ChStore) ChID() plan.ChID {
     return plan.ChID(chSt.State.ChID)
@@ -232,6 +244,7 @@ func (chSt *ChStore) ChID() plan.ChID {
 func (chSt *ChStore) Startup() error {
     return nil
 }
+
 
 func (chSt *ChStore) ShutdownEntryProcessing(inBlockUntilComplete bool) {
 
@@ -736,25 +749,6 @@ func (chSt *ChStore) flushEntry(entry *chEntry) error {
 
 
 
-// ReverseEntry -- see ChAgent.ReverseEntry
-func (chSt *ChStore) ReverseEntry(
-    inURID []byte,
-) error {
-
-    return nil
-
-}
-
-
-// OnLivenessChanged -- see ChAgent.OnLivenessChanged
-func (chSt *ChStore) OnLivenessChanged(
-    entry *chEntry,
-) error {
-
-    return nil
-
-}
-
 
 // ExportLatestChInfo constructs the most up to date pdi.ChInfo and serializes it (recycling the given buf if possible)
 func (chSt *ChStore) ExportLatestChInfo(recycle []byte) []byte {
@@ -880,7 +874,7 @@ func (chSt *ChStore) FetchAuthoringTIDs(
     if epochNode.Epoch.HasACC() {
         acc, fetchErr := chSt.chMgr.FetchACC(epochNode.Epoch.ACC)
         if fetchErr == nil {
-            accEpoch := acc.Store().GetActiveChEpoch()
+            accEpoch := acc.chSt.GetActiveChEpoch()
             if accEpoch == nil {
                 err = plan.Error(nil, plan.ChannelEpochNotFound, "failed to find live ACC epoch")
             }
@@ -986,8 +980,27 @@ func (chSt *ChStore) MergePost(
     entry *chEntry,
 ) error {
 
-    return nil
+    if chSt.agent == nil {
+        return nil
+    }
+
+    return chSt.agent.MergePost(entry)
 }
+
+
+// OnLivenessChanged -- see ChAgent.MergePost
+func (chSt *ChStore) OnLivenessChanged(
+    entry *chEntry,
+) error {
+
+    if chSt.agent == nil {
+        return nil
+    }
+
+    return chSt.agent.OnLivenessChanged(entry)
+
+}
+
 
 
 
@@ -1125,7 +1138,7 @@ func (chSt *ChStore) ValidateEntry(
                 
                 // Write the dependency so this entry will be revalidated if the dep changes liveness.
                 if ! entry.HasFlags(EntryFlag_AUTHOR_DEPENDENCY_WRITTEN) {
-                    err = registry.AddDependency(entry.Info.AuthorEntryID(), chSt.ChID(), &entry.Info)
+                    err = registry.chSt.AddDependency(entry.Info.AuthorEntryID(), chSt.ChID(), &entry.Info)
                     if err == nil {
                         entry.AddFlags(EntryFlag_AUTHOR_DEPENDENCY_WRITTEN)
                     }
@@ -1176,18 +1189,18 @@ func (chSt *ChStore) ValidateEntry(
 
                 // If the entry cites an ACC epoch, then fetch the ACC and use that for authorization.
                 if chEpochHasACC {
-                    var acc ChAgent
+                    var acc *ChACC
                     acc, err = chSt.chMgr.FetchACC(epochNode.Epoch.ACC)
                     if err == nil {
 
                         // Write the ACC dependency so that we know to revalidate this entry if the cited entry changes
                         if ! entry.HasFlags(EntryFlag_ACC_DEPENDENCY_WRITTEN) {
-                            err = acc.Store().AddDependency(accEntryID, chSt.ChID(), &entry.Info)
+                            err = acc.chSt.AddDependency(accEntryID, chSt.ChID(), &entry.Info)
                             if err == nil {
                                 entry.AddFlags(EntryFlag_AUTHOR_DEPENDENCY_WRITTEN)
                             }
                             if err == nil {
-                                err = acc.Store().IsEntryAuthorized(accEntryID, entry)
+                                err = acc.chSt.IsEntryAuthorized(accEntryID, entry)
                             }
                         }
                     } else {
@@ -1311,7 +1324,7 @@ func (chSt *ChStore) RevalidateDependencies(
     chEntry *pdi.EntryInfo,
 ) {
 
-    
+
     var (
         searchKey [chEntryKeySz]byte
         chDep ChDependency
@@ -1365,7 +1378,7 @@ func (chSt *ChStore) RevalidateDependencies(
                     // Maybe just keep sleepping for a few ms until its non-nil?
                     {}
                 } else {
-                    depCh.Store().QueueRevalidation(plan.TimeFS(chDep.DepTime))
+                    depCh.QueueRevalidation(plan.TimeFS(chDep.DepTime))
                 }
             }
 
@@ -1379,13 +1392,16 @@ func (chSt *ChStore) RevalidateDependencies(
 
 // QueueRevalidation queues all entries on or after the given time index for revalidation.
 func (chSt *ChStore) QueueRevalidation(inAfterTime plan.TimeFS) {
-
-    chSt.Infof(1, "QueueRevalidation to %v", inAfterTime)
+    chSt.Infof(1, "request rewind revalidation back to %v", inAfterTime)
 
     chSt.revalRequestMutex.Lock()
     if inAfterTime < chSt.revalAfter {
         chSt.revalAfter = inAfterTime
-        chSt.Infof(1, "revalAfter = %v", inAfterTime)
+
+        // If revalidation is just sitting there waiting for entries to merge, wake it up so it calls dequeueRevalidation()
+        if chSt.processingEntries && len(chSt.entriesToMerge) == 0 {
+            chSt.entriesToMerge <- nil
+        }
     }
     chSt.revalRequestMutex.Unlock()
 }
@@ -1401,7 +1417,7 @@ func (chSt *ChStore) dequeueRevalidation() {
 
     chSt.revalRequestMutex.Lock()
     if valUpto.SelectEarlier(chSt.revalAfter) {
-        chSt.Infof(1, "rewinding re-validation head to %v", chSt.revalAfter)
+        chSt.Infof(1, "resetting revalidation back to %v", chSt.revalAfter)
     }
     chSt.revalAfter = plan.TimeFSMax
     chSt.revalRequestMutex.Unlock()
@@ -1411,27 +1427,25 @@ func (chSt *ChStore) dequeueRevalidation() {
 }
 
 
+// ReadyToMerge returns true if the ChStore is able to read and merge entries (which is only possible if a channel protocol is set)
+func (chSt *ChStore) ReadyToMerge() bool {
+    return chSt.agent != nil
+}
 
 
 
-
-
-func mergeEntry(
-    ch ChAgent,
+func (chSt *ChStore) mergeEntry(
     entry *chEntry,
 ) error {
-    chSt := ch.Store()
 
     var err error
 
-    if ! chSt.State.MergeEnabled {
-        // entry.entryAsset = entry.Body
-    } else {
+    if chSt.ReadyToMerge() {
         switch entry.Info.EntryOp {
             case pdi.EntryOp_NEW_CHANNEL_EPOCH:
-                err = ch.MergeNewChannelEpoch(entry)
+                err = chSt.MergeNewChannelEpoch(entry)
             case pdi.EntryOp_POST_CONTENT:
-                err = ch.MergePost(entry)
+                err = chSt.MergePost(entry)
         }
         if plan.IsError(err, plan.ChEntryIsMalformed) {
             entry.ThrowMalformed(err)
@@ -1446,25 +1460,61 @@ func mergeEntry(
     return err
 }
 
+func (chSt *ChStore) setupChAgent() error {
+    if chSt.agent != nil {
+        panic("chSt.agent already created")
+    }
 
-func startupChannel(ch ChAgent) error {
+    var err error
 
-    chSt := ch.Store()
+    chProtocol := chSt.State.ChProtocol
+    agent := NewChAgentFromProtocolStr(chProtocol)
+    if agent == nil {
+        if len(chProtocol) > 0 {
+            chSt.Warnf("channel protocol '%v' not recognized", chProtocol)
+        }
+        return nil
+    }
+
+    if agent != nil {
+        revalidateAll := false
+
+        // Revlaidate everything if the chProtocol was set
+        agentID := "plan-core/go/" + reflect.TypeOf(agent).Elem().Name()
+        if chSt.State.AssignedAgentID != agentID {
+            chSt.State.AssignedAgentID = agentID
+            revalidateAll = true
+        }
+
+        err = agent.OnStartup(chSt)
+
+        // Only when the agent is ready do we put it live
+        if err == nil {
+            chSt.agent = agent
+
+            // Revlaidate everything if the chProtocol was set
+            if revalidateAll {
+                chSt.QueueRevalidation(0)
+            }
+        }
+    }
+
+    return err
+}
+
+func (chSt *ChStore) startEntryProcessor() error {
 
     err := chSt.loadChEpochs()
     if err != nil {
-        panic("error loading ch epochs")
+        return err
     }
 
-    err = ch.Startup()
-
     if err == nil {
-
         if chSt.processingEntries {
             panic("channel not in startup state")
         }
 
-        go chEntryProcessor(ch)
+        go chSt.chEntryProcessor()
     }
 
     return err
@@ -1473,16 +1523,13 @@ func startupChannel(ch ChAgent) error {
 
 
 
-func chEntryProcessor(ch ChAgent) {
-
-    chSt := ch.Store()
+func (chSt *ChStore) chEntryProcessor() {
 
     var (
-        shuttingDown bool
         entryTmp *chEntry
     )
 
-    moreToValidate := true
+    validating := true
 
     chSt.processingEntries = true
     chSt.chShutdown.Add(1)
@@ -1496,27 +1543,20 @@ func chEntryProcessor(ch ChAgent) {
         // Prioritize entries that are ready to merge over entries pending validation
         select {
             case entry = <- chSt.entriesToMerge:
-                if entry == nil {
-                    shuttingDown = true
-                }
             default:
-                // If we're not told anything new, keep validating deferred entries!
-        }
 
-        // Only block when we have no entry to merge AND we're up to date with validation
-        if entry == nil && ! moreToValidate && ! shuttingDown {
-            if entryTmp != nil {
-                RecycleChEntry(entryTmp)
-                entryTmp = nil
-            }
-            entry = <- chSt.entriesToMerge
-            if entry == nil {
-                shuttingDown = true
-            }
+                // Only block when there's no entries to merge AND if up to date with validation
+                if ! validating {
+                    if entryTmp != nil {
+                        RecycleChEntry(entryTmp)
+                        entryTmp = nil
+                    }
+                    entry = <- chSt.entriesToMerge
+                }
         }
 
         // Sending a nil entry value is a signal to shutdown this channel
-        if shuttingDown {
+        if entry == nil && ! chSt.processingEntries && len(chSt.entriesToMerge) == 0 {
             break
         }
         
@@ -1527,16 +1567,17 @@ func chEntryProcessor(ch ChAgent) {
 
             // Do initial merge or load the ChEntry from the chDB
             if entry != nil {
-                logInfo =  "merging"
-            } else if ! chSt.State.MergeEnabled {
-                moreToValidate = false
+                logInfo = "merging"
+                validating = true   // Ensure that we get another crack at loadNextEntryToValidate before sleeping
+            } else if ! chSt.ReadyToMerge() {
+                validating = false
             } else {
                 if entryTmp == nil {
                     entryTmp = newChEntry(entryRevalidating)
                 }
 
-                moreToValidate = chSt.loadNextEntryToValidate(entryTmp)
-                if moreToValidate {
+                validating = chSt.loadNextEntryToValidate(entryTmp)
+                if validating {
                     entry = entryTmp
 
                     logInfo =  "validating"
@@ -1563,7 +1604,7 @@ func chEntryProcessor(ch ChAgent) {
 
             // Does the entry need to be merged?
             if entry.State.Status == EntryStatus_AWAITING_MERGE {
-                err = mergeEntry(ch, entry)
+                err = chSt.mergeEntry(entry)
                 chSt.chMgr.CtxOnFault(err, "merging entry")
             }
 
@@ -1578,7 +1619,7 @@ func chEntryProcessor(ch ChAgent) {
             err = chSt.flushEntry(entry)
 
             if entry.onMergeComplete != nil {
-                entry.onMergeComplete(entry, ch, err)
+                entry.onMergeComplete(entry, chSt, err)
                 entry.onMergeComplete = nil
             }
 
@@ -1604,7 +1645,7 @@ func chEntryProcessor(ch ChAgent) {
 
                     chSt.RevalidateDependencies(&entry.Info)
 
-                    ch.OnLivenessChanged(entry)
+                    chSt.OnLivenessChanged(entry)
                 }
             }
 
@@ -1621,13 +1662,12 @@ func chEntryProcessor(ch ChAgent) {
 
 
 func chSessionEntryReader(cs *ChSession) {
-
     const batchMax = 10
 
-    chSt := cs.Agent.Store()
+    chSt := cs.chSt
 
     var (
-        includeDeferred,includeBody,includeContent, includeChEpochs bool
+        includeDeferred, includeBody, includeContent, includeChEpochs bool
     )
 
     autoReading := false
@@ -1866,70 +1906,28 @@ func init() {
             epochLookup: map[plan.TIDBlob]*pdi.MemberEpoch{},
         }
     }
-    gChAgentRegistry[ChProtocolSpace] = func(inChProtocol string) ChAgent {
-        return &ChSpace{}
-    }
     gChAgentRegistry[ChProtocolCommunityEpochs] = func(inChProtocol string) ChAgent {
-        return &ChCommunityEpochs{
-        }
+        return &ChCommunityEpochs{}
     }
 }
 
-
+// NewChAgentFromProtocolStr instantiates a new ChAgent that is associated with the given channel protocol string.
 func NewChAgentFromProtocolStr(inChProtocol string) ChAgent {
-    factory := gChAgentRegistry[inChProtocol]
-    if factory != nil {
+    if factory := gChAgentRegistry[inChProtocol]; factory != nil {
         return factory(inChProtocol)
-    } else if strings.HasPrefix(inChProtocol, ChProtocolBase) {
-        return &ChGeneric{}
-    } else {
-        return &ChUnknown{}
+    } else if strings.HasPrefix(inChProtocol, ChProtocolStd) {
+        return &ChStdAgent{}
     }
-}
-
-
-
-
-
-// ChGeneric -- ChAgent for channels that do not require any special handling
-type ChGeneric struct {
-    ChStore
-
-}
-
-// MergePost -- see ChAgent.MergePost
-func (ch *ChGeneric) MergePost(
-    entry *chEntry,
-) error {
-
+    
     return nil
-}
-
-
-
-// ChUnknown -- ChAgent for a protocol is not yet known (where ch content entries arrive before the genesis channel epoch).
-type ChUnknown struct {
-    ChStore
-
-}
-
-
-// MergePost -- see ChAgent.MergePost
-func (ch *ChUnknown) MergePost(
-    entry *chEntry,
-) error {
-
-    return plan.Error(nil, plan.AssertFailed, "ChUnknown cannot merge entries")
 }
 
 
 
 // ChACC -- ChAgent for ChProtocolACC 
 type ChACC struct {
-    ChStore
-
+    ChStdAgent
 }
-
 
 
 // MergePost -- see ChAgent.MergePost
@@ -1941,32 +1939,21 @@ func (acc *ChACC) MergePost(
 }
 
 
-
-/*
-const (
-    MemberEpochCodec = ChProtocolMemberRegistry + "/MemberEpoch"
-)
-*/
 var (
     epochNotFound = &pdi.MemberEpoch{}
 )
 
-/* 
-ChMemberRegistry -- ChAgent for ChProtocolMemberRegistry 
-*/
+// ChMemberRegistry is a ChAgent that uses entries on the member registry channel to validate authorship of entries
 type ChMemberRegistry struct {
-    ChStore
+    ChStdAgent
 
     lookupMutex         sync.RWMutex
     epochLookup         map[plan.TIDBlob]*pdi.MemberEpoch
-
 }
 
 
-
-
 // MergePost -- see ChAgent.MergePost
-func (ch *ChMemberRegistry) MergePost(entry *chEntry) error {
+func (reg *ChMemberRegistry) MergePost(entry *chEntry) error {
 
     epoch := pdi.MemberEpoch{}
     err := epoch.Unmarshal(entry.Body)
@@ -1978,11 +1965,11 @@ func (ch *ChMemberRegistry) MergePost(entry *chEntry) error {
 }
 
 
-func (ch *ChMemberRegistry) ValidateAuthor(
+func (reg *ChMemberRegistry) ValidateAuthor(
     entry *chEntry,
 ) error {
-     
-    memberEpoch, err := ch.FetchMemberEpoch(entry.Info.AuthorEntryID())
+
+    memberEpoch, err := reg.FetchMemberEpoch(entry.Info.AuthorEntryID())
     if err != nil {
         return err
     }
@@ -1999,14 +1986,14 @@ func (ch *ChMemberRegistry) ValidateAuthor(
 }
 
 // FetchMemberEpoch returns the MemberEpoch associated with the given entry ID
-func (ch *ChMemberRegistry) FetchMemberEpoch(inEntryID plan.TID) (*pdi.MemberEpoch, error) {
+func (reg *ChMemberRegistry) FetchMemberEpoch(inEntryID plan.TID) (*pdi.MemberEpoch, error) {
 
     entryID := inEntryID.Blob()
 
     // Is the epoch already loaded?
-    ch.lookupMutex.RLock()
-    memEpoch := ch.epochLookup[entryID]
-    ch.lookupMutex.RUnlock()
+    reg.lookupMutex.RLock()
+    memEpoch := reg.epochLookup[entryID]
+    reg.lookupMutex.RUnlock()
 
     // TODO: check that the epoch is live!
     var err error
@@ -2014,16 +2001,16 @@ func (ch *ChMemberRegistry) FetchMemberEpoch(inEntryID plan.TID) (*pdi.MemberEpo
     if memEpoch == nil {
         memEpoch = &pdi.MemberEpoch{}
 
-        err := ch.loadLatestEntryBody(nil, inEntryID, nil, memEpoch)
+        err := reg.chSt.loadLatestEntryBody(nil, inEntryID, nil, memEpoch)
 
         if err == nil {
 
             // Alternatively, we could write this when the entry is merged, but why waste space
             memEpoch.EpochTID = append(memEpoch.EpochTID[:0], inEntryID...)
 
-            ch.lookupMutex.Lock()
-            ch.epochLookup[entryID] = memEpoch
-            ch.lookupMutex.Unlock()
+            reg.lookupMutex.Lock()
+            reg.epochLookup[entryID] = memEpoch
+            reg.lookupMutex.Unlock()
         }
     }
 
@@ -2041,7 +2028,6 @@ func (ch *ChMemberRegistry) FetchMemberEpoch(inEntryID plan.TID) (*pdi.MemberEpo
 
 
 type ChEpochNode struct {
-
     Prev    *ChEpochNode
     Next    []*ChEpochNode
 
@@ -2155,23 +2141,24 @@ func (a ByEpochTID) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByEpochTID) Less(i, j int) bool { return bytes.Compare(a[i].Epoch.EpochTID, a[j].Epoch.EpochTID) < 0 }
 
 
-
+// ChCommunityEpochs ia a ChAgent that uses entries on a community epoch channel for entry validation.
 type ChCommunityEpochs struct {
-    ChStore
+    ChStdAgent
 
     lookupMutex         sync.RWMutex
     epochHistory        []*pdi.CommunityEpoch
 }
 
 
-func (ch *ChCommunityEpochs) Startup() error {
+func (ch *ChCommunityEpochs) OnStartup(chSt *ChStore) error {
+    ch.chSt = chSt
 
     var (
         entry chEntry
         err error
     )
 
-    chTxn := ch.db.NewTransaction(false)
+    chTxn := chSt.db.NewTransaction(false)
     defer chTxn.Discard()
 
     // Scan all entries from the start
@@ -2179,7 +2166,7 @@ func (ch *ChCommunityEpochs) Startup() error {
 
 
         // TODO: handle error
-        haveEntry, loadErr := ch.loadNextEntry(
+        haveEntry, loadErr := chSt.loadNextEntry(
             chTxn,
             entry.Info.EntryID(),
             &entry,
@@ -2199,7 +2186,7 @@ func (ch *ChCommunityEpochs) Startup() error {
 
         commEpoch := &pdi.CommunityEpoch{}
 
-        ch.loadOriginalEntryBody(&entry, commEpoch)
+        chSt.loadOriginalEntryBody(&entry, commEpoch)
 
         if loadErr == nil {
             ch.epochHistory = append(ch.epochHistory, commEpoch)
@@ -2223,7 +2210,7 @@ func (ch *ChCommunityEpochs) OnLivenessChanged(
 
             commEpoch := &pdi.CommunityEpoch{}
 
-            err := ch.loadEntry(
+            err := ch.chSt.loadEntry(
                 entryID,
                 nil,
                 nil,
@@ -2308,19 +2295,6 @@ func (ch *ChCommunityEpochs) FetchCommunityEpoch(inEpochID []byte, inLiveOnly bo
 }
 
 
-// ChSpace -- ChAgent for ChProtocolTalk 
-type ChSpace struct {
-    ChStore
-
-}
-
-// MergePost -- see ChAgent.MergePost
-func (ch *ChSpace) MergePost(
-    entry *chEntry,
-) error {
-
-    return nil
-}
 
 
 
@@ -2330,17 +2304,5 @@ func (ch *ChSpace) MergePost(
 
 
 
-
-
-
-// IsEmpty returns true if this IntSet contains no values.
-func (set *IntSet) IsEmpty() bool {
-
-    if len(set.Ints) == 0 && set.From >= set.To {
-        return true
-    }
-
-    return false
-}
 
 

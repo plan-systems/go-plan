@@ -376,7 +376,7 @@ func (ms *MemberSession) handleSess0(msg *Msg) bool {
 
                 ms.CtxAddChild(cs, nil)
 
-                cs.MemberSession.Infof(1, "channel session opened on ch %v (ChSessID %d)", cs.Agent.Store().ChID().SuffixStr(), cs.ChSessID)
+                cs.MemberSession.Infof(1, "channel session opened on ch %v (ChSessID %d)", cs.chSt.ChID().SuffixStr(), cs.ChSessID)
 
                 ms.ChSessionsMutex.Lock()
                 ms.ChSessions[cs.ChSessID] = cs
@@ -392,13 +392,13 @@ func (ms *MemberSession) handleSess0(msg *Msg) bool {
             case MsgOp_LATEST_CH_EPOCH:
                 fallthrough
             case MsgOp_LATEST_CH_INFO:
-                ch, err := ms.CR.chMgr.FetchChannel(plan.ChID(msg.BUF0))
+                chSt, err := ms.CR.chMgr.FetchChannel(plan.ChID(msg.BUF0))
                 if err != nil {
                     msg.Error = err.Error()
                 } else if msg.Op == MsgOp_LATEST_CH_EPOCH {
-                    msg.BUF0 = ch.Store().ExportLatestChEpoch(msg.BUF0)
+                    msg.BUF0 = chSt.ExportLatestChEpoch(msg.BUF0)
                 } else {
-                    msg.BUF0 = ch.Store().ExportLatestChInfo(msg.BUF0)
+                    msg.BUF0 = chSt.ExportLatestChInfo(msg.BUF0)
                 }
 
 
@@ -451,7 +451,7 @@ func (ms *MemberSession) handleCommonMsgs(msg *Msg) bool {
             msg.EntryState = nil
             msg.BUF0 = msg.BUF0[:0]
 
-            onMergeComplete := func(entry *chEntry, ch ChAgent, inErr error) {
+            onMergeComplete := func(entry *chEntry, chSt *ChStore, inErr error) {
                 if entry != nil {
                     msg.EntryInfo = entry.Info.Clone()
                     msg.EntryState = entry.State.Clone()

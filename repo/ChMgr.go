@@ -36,20 +36,15 @@ type ChMgr struct {
     ctx.Context
 
     HomePath                string
-
     prevSessID              uint32
     StorageEpoch            pdi.StorageEpoch               
     CR                      *CommunityRepo
+    chMutex                 sync.RWMutex
+    chLoaded                map[plan.ChIDBlob]*ChStore
+
 
     //db                      *badger.DB
     //State                   ChMgrState
-
-    //fsNameEncoding          *base64.Encoding
-
-
-   // revalQueue              chan revalidateMsg
-    chMutex                 sync.RWMutex
-    chLoaded                map[plan.ChIDBlob]ChAgent
 }
 
 
@@ -60,7 +55,7 @@ func NewChMgr(
 ) *ChMgr {
 
     chMgr := &ChMgr{
-        chLoaded: make(map[plan.ChIDBlob]ChAgent),
+        chLoaded: make(map[plan.ChIDBlob]*ChStore),
         HomePath: path.Join(inHomeDir, "ChMgr"),
         prevSessID: 0,
         StorageEpoch: *CR.GenesisSeed.StorageEpoch,
@@ -143,13 +138,12 @@ func (chMgr *ChMgr) ctxStopping() {
                 waitingOn = waitingOn[:0]
             }
             channels.Add(N)
-            for _, ch := range chMgr.chLoaded {
-                chSt := ch.Store()
-                waitingOn = append(waitingOn, chSt)
-                go func() {
+            for _, i := range chMgr.chLoaded {
+                waitingOn = append(waitingOn, i)
+                go func(chSt *ChStore) {
                     chSt.ShutdownEntryProcessing(true)
                     channels.Done()
-                }()
+                }(i)
             }
         }
         chMgr.chMutex.RUnlock()
@@ -165,7 +159,8 @@ func (chMgr *ChMgr) ctxStopping() {
 
         // At this point, nothing is running (so no futher calls to FetchChannel() should/will be made), so now we can fully shutdown each channel.
         channels.Add(len(waitingOn))
-        for _, chSt := range waitingOn {
+        for _, i := range waitingOn {
+            chSt := i
             chMgr.detachChannel(chSt.ChID())
             go chSt.Shutdown(channels)
         }
@@ -247,7 +242,7 @@ type chEntry struct {
     stateStatus          chEntryPartStatus
     bodyStatus           chEntryPartStatus
 
-    onMergeComplete     func(entry *chEntry, ch ChAgent, inErr error)
+    onMergeComplete     func(entry *chEntry, chSt *ChStore, inErr error)
 
 }
 
@@ -410,8 +405,6 @@ func (entry *chEntry) IsWellFormed() bool {
     return (entry.State.Flags & (1 << byte(EntryFlag_WELL_FORMED))) != 0
 }
 
-
-
 // QueueEntryForMerge is called when an entry arrives to a repo and must be merged into the repo.
 func (chMgr *ChMgr) QueueEntryForMerge(
     entryCommEpoch *pdi.CommunityEpoch,
@@ -419,7 +412,6 @@ func (chMgr *ChMgr) QueueEntryForMerge(
 ) {
 
     var (
-        ch ChAgent
         chGenesisEpoch *pdi.ChannelEpoch
         err error
     )
@@ -458,55 +450,18 @@ func (chMgr *ChMgr) QueueEntryForMerge(
         entry.ThrowMalformed(err)
     }
 
+    var chSt *ChStore
+
     if entry.IsWellFormed() {
-        ch, err = chMgr.fetchChannel(entry.Info.ChannelID, true, chGenesisEpoch)
+        chSt, err = chMgr.fetchChannel(entry.Info.ChannelID, true, chGenesisEpoch)
 
-        // Is this the channel genesis entry but the channel has ChUnknown?   This occurs when
-        //    entries are merged into a channel before the channel's genesis entry arrives.
-        if chGenesisEpoch != nil {
-            chUnknown, _ := ch.(*ChUnknown)
-            if chUnknown != nil {
-                chUnk := ch.Store()
-
-                chNew := chMgr.NewChAgent(
-                    &ChStoreState{
-                        ChProtocol: chGenesisEpoch.ChProtocol,
-                        ChID: chID.Clone(),
-                    },
-                )
-
-                if chNew == nil {
-                    chUnk.Warnf("channel protocol %v not recognized", chGenesisEpoch.ChProtocol)
-                } else {
-
-                    // Stop entry processing for the ChUnknown we want to take off service
-                    chUnk.Info(1, "rebooting channel")
-                    chUnk.ShutdownEntryProcessing(true)
-
-                    // Hot swap the ChUnknown with the new agent
-                    chMgr.chMutex.Lock()
-                    {
-                        chSt := chNew.Store()
-
-                        chSt.db = chUnk.db
-                        chUnk.db = nil
-                        
-                        // When switching to a real 
-                        chSt.State.ValidatedUpto = nil
-
-                        chMgr.chLoaded[chID.Blob()] = chNew
-                    }
-                    chMgr.chMutex.Unlock()
-
-                    ch = chNew
-                    err = startupChannel(chNew)
-                }
-            }
+        if err != nil {
+            chMgr.Errorf("failed to fetch channel: ", plan.BinEncode(entry.Info.ChannelID))
         }
     }
 
 
-    if ch == nil {
+    if chSt == nil {
         //chEntry.Status = EntryStatus_DEFERRED
         panic("TODO")
     } else {
@@ -515,7 +470,7 @@ func (chMgr *ChMgr) QueueEntryForMerge(
         // We zero it here to ensure entry.Info.ChannelID isn't used accidentally. 
         entry.Info.ChannelID = entry.Info.ChannelID[:0]
 
-        ch.Store().entriesToMerge <- entry
+        chSt.entriesToMerge <- entry
     }
 
 
@@ -527,23 +482,24 @@ func (chMgr *ChMgr) QueueEntryForMerge(
 // FetchACC returns the given channel known/presumed to be an ACC.
 func (chMgr *ChMgr) FetchACC(
     inChID plan.ChID,
-) (ChAgent, error) {
+) (*ChACC, error) {
 
     ch, err := chMgr.ChannelExists(inChID)
-
-    /*
-    if ch != nil {
-        acc, _ := ch.(*ChACC)
-        if acc == nil {
-            err = plan.Errorf(nil, plan.NotAnACC, "cited channel %v is not an access control channel", inChID)
-        }
-    }*/
-
     if err != nil {
         return nil, err
     }
 
-    return ch, nil
+    var acc *ChACC
+
+    if ch != nil && ch.agent != nil {
+        acc, _ = ch.agent.(*ChACC)
+    }
+
+    if acc == nil {
+        return nil, plan.Errorf(nil, plan.NotAnACC, "cited channel %v is not an access control channel", inChID.SuffixStr())
+    }
+
+    return acc, nil
 }
 
 
@@ -555,12 +511,12 @@ func (chMgr *ChMgr) FetchMemberRegistry() (*ChMemberRegistry, error) {
         return nil, err
     }
 
-    memberRegistry, ok := ch.(*ChMemberRegistry)
+    reg, ok := ch.agent.(*ChMemberRegistry)
     if ! ok {
         return nil, plan.Error(nil, plan.AssertFailed, "member registry not available")
     }
 
-    return memberRegistry, nil
+    return reg, nil
 }
 
 
@@ -572,43 +528,17 @@ func (chMgr *ChMgr) FetchCommunityEpochsChannel() *ChCommunityEpochs {
         return nil
     }
 
-    chCE, _ := ch.(*ChCommunityEpochs)
+    chCE, _ := ch.agent.(*ChCommunityEpochs)
 
     return chCE
 }
 
 
 
-/*
-func (chMgr *ChMgr) rebootChannel(
-    inChID plan.ChID,
-    inChEpoch *pdi.ChannelEpoch,
-) (ChAgent, error) {
-
-    chID := inChID.Blob()
-
-    chMgr.chMutex.Lock()
-    ch := chMgr.chLoaded[chID]
-    delete(chMgr.chLoaded, chID)
-    chMgr.chMutex.Unlock()
-
-    if ch != nil {
-        shutdown := sync.WaitGroup{}
-
-        shutdown.Add(1)
-        ch.Store().Shutdown(&shutdown)
-
-        shutdown.Wait()
-    }
-
-    return chMgr.FetchChannel(inChID, inChEpoch)
-}
-*/
-
 // ChannelExists returns the given channel, loading it if necessary.  If the channel is not found, then it isn not autho
 func (chMgr *ChMgr) ChannelExists(
     inChID plan.ChID,
-) (ChAgent, error) {
+) (*ChStore, error) {
 
     return chMgr.fetchChannel(inChID, false, nil)
 }
@@ -618,7 +548,7 @@ func (chMgr *ChMgr) ChannelExists(
 // If inGenesisEpoch is set, channel genesis is performed. 
 func (chMgr *ChMgr) FetchChannel(
     inChID plan.ChID,
-) (ChAgent, error) {
+) (*ChStore, error) {
 
     return chMgr.fetchChannel(inChID, true, nil)
 }
@@ -630,7 +560,7 @@ func (chMgr *ChMgr) fetchChannel(
     inChID plan.ChID,
     inAutoCreate bool,
     inChGenesis *pdi.ChannelEpoch,
-) (ChAgent, error) {
+) (*ChStore, error) {
 
     var (
         err error
@@ -643,42 +573,69 @@ func (chMgr *ChMgr) fetchChannel(
     chID := inChID.Blob()
 
     chMgr.chMutex.RLock()
-    ch := chMgr.chLoaded[chID]
+    chSt := chMgr.chLoaded[chID]
     chMgr.chMutex.RUnlock()
 
+    loading := false
 
-    if ch != nil {
-        return ch, nil
-    }
-
-    if ! chMgr.CtxRunning() {
-        return nil, plan.Error(nil, plan.ServiceShutdown, "chMgr is shutting down")
-    }
-
-    chMgr.chMutex.Lock()
-    defer chMgr.chMutex.Unlock()
+    if chSt == nil {  
+        chMgr.chMutex.Lock()
+        loading = true
+        defer chMgr.chMutex.Unlock()
     
-    // Recheck to handle race condition
-    ch = chMgr.chLoaded[chID]
+        // If the ch store isn't already loaded, try to load it (recheck for race condition)
+        if chSt = chMgr.chLoaded[chID]; chSt == nil { 
+            chSt, err = chMgr.loadChannel(inChID, inAutoCreate)
 
-    // If the ch store isn't already loaded, try to load it.
-    if ch == nil { 
-        ch, err = chMgr.loadChannel(inChID, inAutoCreate, inChGenesis)
+            if err == nil {
+                err = chSt.startEntryProcessor()
+            }
 
-        // We've already mutexed for this write condition (above)
+            // We've already mutexed for this write condition (above)
+            if err == nil {
+                chMgr.chLoaded[chID] = chSt
+            }
+        }
+    }
+
+    if err == nil && chSt.agent == nil {
+        msg := "loading channel (%s)"
+
+        // Are we processing a channel genesis entry but the channel's agent is nil?  
+        // MOSTLY, this occurs when the first entry to be processed is a channel genesis entry.
+        // But this also occurs when entries are merged into a channel BEFORE the channel's genesis entry arrives.
+        if inChGenesis != nil {
+            if len(chSt.State.ChProtocol) == 0 {
+                chSt.State.ChProtocol = inChGenesis.ChProtocol
+                if loading {
+                    msg = "initializing channel with protocol '%s'"
+                } else {
+                    msg = "retroactively assigning channel protocol to '%s'"
+                }
+            } else if chSt.State.ChProtocol != inChGenesis.ChProtocol {
+                err = plan.Errorf(nil, plan.FailedToLoadChannel, "ch protocol mismatch")
+            }
+        }
+
         if err == nil {
-            chMgr.chLoaded[chID] = ch
-        }  
+            chSt.Infof(2, msg, chSt.State.ChProtocol)
+
+            // TODO: set chSt state so it doesn't keep failing to load agent every time it get fetched
+            err = chSt.setupChAgent()
+            if err != nil {
+                chSt.Error("failed to setup channel agent: ", err)
+            }
+        }
     }
-    
+
     // TODO: rebuild channel if db load fails?
     if err != nil {
         chMgr.Error("failed to load channel ", inChID.Str(), ": ", err)
 
-        ch = nil
+        chSt = nil
     }
 
-    return ch, err
+    return chSt, err
 }
 
 
@@ -702,8 +659,11 @@ func (chMgr *ChMgr) detachChannel(
 func (chMgr *ChMgr) loadChannel(
     inChID plan.ChID,
     inAutoCreate bool,
-    inChGenesis *pdi.ChannelEpoch,
-) (ChAgent, error) {
+) (*ChStore, error) {
+
+    if ! chMgr.CtxRunning() {
+        return nil, plan.Error(nil, plan.ServiceShutdown, "chMgr is not available")
+    }
 
     opts := badger.DefaultOptions(path.Join(chMgr.HomePath, inChID.Str()))
 
@@ -713,101 +673,55 @@ func (chMgr *ChMgr) loadChannel(
         }
     }
 
-    if err := os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
+    var err error
+    if err = os.MkdirAll(opts.Dir, plan.DefaultFileMode); err != nil {
         return nil, err
     }
 
-    chDb, err := badger.Open(opts)
+    chSt := &ChStore{
+        chMgr: chMgr,
+        entriesToMerge: make(chan *chEntry, 2),
+        revalAfter: pdi.URIDTimestampMax,
+    }
+
+    chSt.db, err = badger.Open(opts)
     if err != nil {
         return nil, err
     }
 
-    var (
-        ch ChAgent
-        chState ChStoreState
-    )
-
     // First load the latest channel state object from the chDB
     if err == nil {
-        chTxn := chDb.NewTransaction(false)
+        chTxn := chSt.db.NewTransaction(false)
 
         var item *badger.Item
 
         item, dbErr := chTxn.Get(chStateKey)
         if dbErr == nil {
             err = item.Value(func(val []byte) error {
-                return chState.Unmarshal(val)
+                return chSt.State.Unmarshal(val)
             })
             if err == nil {
-                if ! bytes.Equal(chState.ChID, inChID) {
-                    err = plan.Errorf(nil, plan.FailedToLoadChannel, "channel ID in state does not match %v, got %v", inChID, chState.ChID)
+                if ! bytes.Equal(chSt.State.ChID, inChID) {
+                    err = plan.Errorf(nil, plan.FailedToLoadChannel, "chID in state does not match %v, got %v", inChID, chSt.State.ChID)
                 }
             }
         } else if dbErr == badger.ErrKeyNotFound {
-            chState.ChID = inChID
+            chSt.State.ChID =  append(chSt.State.ChID[:0], inChID...)
         }
 
         chTxn.Discard()
     }
     
-
-    if err == nil {
-
-        if len(chState.ChProtocol) == 0 && inChGenesis != nil {
-            chState.ChProtocol = inChGenesis.ChProtocol
-        }
-
-        ch = chMgr.NewChAgent(&chState)
-
-        chSt := ch.Store()
-        chSt.db = chDb
-        
-        err = startupChannel(ch)
-    }
-
     if err != nil {
-        ch = nil
+        // TODO: close db and mark as failed
+        chSt = nil
     }
 
-    return ch, err
+    return chSt, err
 }
 
 
 
-// NewChAgent instantiates a new ChAgent from a channel protocol string.
-//
-// If inAutoCreate is set and the protocol string was not recognized, then an ChUnknown is created.
-func (chMgr *ChMgr) NewChAgent(
-    inChState *ChStoreState,
-) ChAgent {
-    ch := NewChAgentFromProtocolStr(inChState.ChProtocol)
-
-    if ch != nil {
-        chSt := ch.Store()
-
-        chSt.chMgr = chMgr
-        chSt.entriesToMerge = make(chan *chEntry, 2)
-
-        _, protocolUnknown := ch.(*ChUnknown)
-        mergeEnabled := ! protocolUnknown
-
-        // If we're loading the channel and discover that merge has never been enabled, reset the validation bookmark.
-        if ! chSt.State.MergeEnabled && mergeEnabled {
-            chSt.State.ValidatedUpto = nil
-        }
-        
-        chSt.State.MergeEnabled = mergeEnabled
-        chSt.State.ChProtocol = inChState.ChProtocol
-        chSt.State.ChID = append(chSt.State.ChID[:0], inChState.ChID...)
-        chSt.revalAfter = pdi.URIDTimestampMax
-
-        shortStr := chSt.ChID().SuffixStr()
-        chSt.SetLogLabel(fmt.Sprintf("Ch %s", shortStr))
-        chSt.Infof(1, "instantiating channel %v with protocol '%s'", chSt.ChID().Str(), chSt.State.ChProtocol)
-    }
-
-    return ch
-}
 
 
 
@@ -858,7 +772,7 @@ func (chMgr *ChMgr) StartChannelSession(
     inChID plan.ChID,
 ) (*ChSession, error) {
 
-    ch, err := chMgr.FetchChannel(inChID)
+    chSt, err := chMgr.FetchChannel(inChID)
     if err != nil {
         return nil, err
     }
@@ -866,7 +780,7 @@ func (chMgr *ChMgr) StartChannelSession(
     cs := &ChSession{
         MemberSession: inMemberSession,
         ChSessID: ChSessID(atomic.AddUint32(&chMgr.prevSessID, 1)),
-        Agent: ch,
+        chSt: chSt,
         msgInbox: make(chan *Msg, 1),
         entryUpdates: make(chan plan.TIDBlob, 1),
         readerCmdQueue: make(chan uint32, 1),
@@ -899,7 +813,7 @@ type ChSession struct {
     // Parent member session
     MemberSession       *MemberSession
 
-    Agent               ChAgent
+    chSt                *ChStore
 
     msgInbox            chan *Msg
     readerCmdQueue      chan uint32
@@ -910,7 +824,7 @@ type ChSession struct {
 
 func (cs *ChSession) ctxStartup() error {
 
-    cs.Agent.Store().attachChSession(cs)
+    cs.chSt.attachChSession(cs)
 
     cs.CtxGo(func() {
 
@@ -919,10 +833,10 @@ func (cs *ChSession) ctxStartup() error {
                 case MsgOp_POST_CH_ENTRY:
                     cs.AuthorNewEntry(msg)
                 case MsgOp_LATEST_CH_EPOCH:
-                    msg.BUF0 = cs.Agent.Store().ExportLatestChEpoch(msg.BUF0)
+                    msg.BUF0 = cs.chSt.ExportLatestChEpoch(msg.BUF0)
                     cs.MemberSession.msgOutbox <- msg
                 case MsgOp_LATEST_CH_INFO:
-                    msg.BUF0 = cs.Agent.Store().ExportLatestChInfo(msg.BUF0)
+                    msg.BUF0 = cs.chSt.ExportLatestChInfo(msg.BUF0)
                     cs.MemberSession.msgOutbox <- msg
                 case MsgOp_CLOSE_CH_SESSION:
                     cs.CtxStop("closed by client", nil)
@@ -943,7 +857,7 @@ func (cs *ChSession) ctxStartup() error {
 }
 
 func (cs *ChSession) ctxAboutToStop() {
-    cs.Agent.Store().detachChSession(cs)
+    cs.chSt.detachChSession(cs)
 }
 
 func (cs *ChSession) ctxStopping() {
@@ -964,7 +878,6 @@ func (cs *ChSession) AuthorNewEntry(
 
     var (
         err error
-        chSt *ChStore
     )
 
     info := msg.EntryInfo
@@ -973,10 +886,9 @@ func (cs *ChSession) AuthorNewEntry(
     info.AuthorSig = nil
     copy(info.AuthorEntryID(), cs.MemberSession.MemberEpoch.EpochTID)
 
-    chSt = cs.Agent.Store()
-    info.ChannelID = append(info.ChannelID[:0], chSt.ChID()...)
+    info.ChannelID = append(info.ChannelID[:0], cs.chSt.ChID()...)
 
-    err = chSt.FetchAuthoringTIDs(
+    err = cs.chSt.FetchAuthoringTIDs(
         info.ChannelEpochID(),
         info.ACCEntryID(),
     )
