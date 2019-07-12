@@ -94,7 +94,7 @@ If you are contributing new features to `plan-core`, you may end up needing to u
 5. Invoke the build scripts, giving it the path to the protobufs files and this repo. Then commit the changes:
 
     ```
-    ./build-protobufs --protos ../plan-protobufs/pkg --dest .
+    ./build-protobufs.sh --protos ../plan-protobufs/pkg --dest .
     git add .
     git commit -m "updated protobufs from v1.2.3"
     ```

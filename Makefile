@@ -6,7 +6,7 @@ SHELL := /bin/bash
 .PHONY: *
 
 protobufs:
-	./build-protobufs --protos ../plan-protobufs/pkg --dest .
+	./build-protobufs.sh --protos ../plan-protobufs/pkg --dest .
 
 setup: protobufs
 	go get ./...
