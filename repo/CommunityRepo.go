@@ -46,9 +46,6 @@ type Config struct {
 // CommunityRepoState stores repo state
 type CommunityRepoState struct {
     LastTxnTimeRead         int64               `json:"last_txn_time_read"`     // Time index where repo should resume reading a community StorageProvider
-
-    //LatestCommunityEpoch    pdi.CommunityEpoch  `json:"lastest_community_epoch"`
-
     Services                []*plan.ServiceInfo  `json:"services"`
 }
 
@@ -60,95 +57,39 @@ type CommunityRepo struct {
     GenesisSeed             GenesisSeed    
     Config                 *Config
     HomePath                string
-
+    DefaultFileMode         os.FileMode
     State                   CommunityRepoState
 
-    // This will move and is just a hack for now
-    //activeSession           ClientSession
-
-    DefaultFileMode         os.FileMode
-
-    txnDB                   *badger.DB      // Complete record of community txns (by URID); i.e. a replica "follower" of StorageProvider
-
+    entriesToMerge          chan *chEntry
     chMgr                   *ChMgr
 
-    //txnsDeferred            ds.Datastore        // Values point to txn?
-
-
+    // StoragProvider connection mgmt
     spSyncStatus            spSyncStatus
     spSyncActive            bool
     spSyncWakeup            chan struct{}
     spSyncWorkers           sync.WaitGroup
-
     spClient                pdi.StorageProviderClient
     spInfo                 *pdi.StorageInfo
     spCancel                context.CancelFunc
     spContext               context.Context
 
-    //spCommitContext         context.Context
-    //spCommitCancel          context.CancelFunc
-
-  //  spScanContext           context.Context
-  //  spScanCancel            context.CancelFunc
-
-    //spCommitTxns            pdi.StorageProvider_CommitTxnsClient
-
-    unpacker                ski.PayloadUnpacker
-
-
+    txnDB                   *badger.DB      // Complete record of community txns (by URID); i.e. a replica "follower" of StorageProvider
     txnsToDecode            chan pdi.RawTxn
     txnsToWrite             chan *pdi.PayloadTxnSet
     txnsToCommit            chan *pdi.PayloadTxnSet
-
     txnsToFetch             chan *pdi.TxnList         // URIDs to be fetched from the SP (that the repo needs)
     txnCollater             pdi.TxnCollater
-
-    txnWorklist             *badger.DB      // Status info by txn URID
-
-    entriesToMerge          chan *chEntry
-
-    // Used to save on allocations
-    commKeyRef              ski.KeyRef
+    unpacker                ski.PayloadUnpacker
 
     commSessionsMutex       sync.RWMutex
     commSessions            []*CommunityCrypto
-
     memberSessMgr           ctx.Context
 
-    //communitySKI            ski.Session
-    //communitySKICond        *sync.Cond
-    //communitySKIMutex       sync.RWMutex
-
-    //txnScanning             sync.WaitGroup
-
-    //pipelines               sync.WaitGroup
-
-
-    // Used for unpacking txns intenrally
-    tmpCrypt            pdi.EntryCrypt
-
-
-
-/*
-
-
-    // Newly authored entries from active sessions on this pnode that are using this CommunityRepo.
-    // These entries are first validated/processed as if they came off the wire, merged with the local db, and committed to the active storage sessions.
-    authoredInbox           chan *pdi.EntryCrypt
-
-    // deamonSKIs makes it possible for community public encrypted data to be decrypted, even when there are NO
-    //     client sessions open.  Or, a community repo may have its security settings such that the community keyring
-    //     is dropped when there are no more active client sessions open.
-    //deamonSKIs              []plan.SyncSKI
-
-    // Includes both open and loaded channels
-    loadedChannels          ChannelStoreGroup
-
-    // This group is checked first when looking up a channel and is a group of channels that are open/hot in one way or another.
-    openChannels            ChannelStoreGroup*/
+    // Scrap for in-place ops that save GC allocations
+    tmpCrypt                pdi.EntryCrypt
+    commKeyRef              ski.KeyRef
 
 }
-
 
 
 // NewCommunityRepo creates a CommunityRepo for use.
@@ -168,6 +109,7 @@ func NewCommunityRepo(
         spSyncWakeup: make(chan struct{}, 5),
         spSyncActive: false,
         spSyncStatus: spSyncStopped,
+        txnCollater: pdi.NewTxnCollater(),
     }
 
     name := fmt.Sprintf(path.Base(CR.HomePath))
@@ -383,11 +325,11 @@ func (CR *CommunityRepo) ctxStartup() error {
     //
     // txnsToDecode processor
     //
-    // Decodes incoming raw txns and inserts them into the collator, which performs callbacks to merge payloads (entries)
+    // Decodes incoming raw txns and inserts them into the collator, which reassembles txn segments into the original (entries).
     CR.txnsToDecode = make(chan pdi.RawTxn, 1)
     CR.CtxGo(func() {
 
-        // TODO: choose different encoder based on spInfo
+        // TODO: choose different txn decoder based on spInfo
         txnDecoder := ds.NewTxnDecoder(false)
 
         for txnIn := range CR.txnsToDecode {
@@ -395,7 +337,7 @@ func (CR *CommunityRepo) ctxStartup() error {
             txnSet, err := CR.txnCollater.DecodeAndCollateTxn(txnDecoder, &txnIn)
             if err != nil {
                 CR.Warnf("error processing txn %v: %v", txnIn.URID, err)
-            } else {
+            } else if txnSet != nil {
                 payloadCodec := txnSet.PayloadCodec()
 
                 switch payloadCodec {
