@@ -456,7 +456,7 @@ func (chMgr *ChMgr) QueueEntryForMerge(
         chSt, err = chMgr.fetchChannel(entry.Info.ChannelID, true, chGenesisEpoch)
 
         if err != nil {
-            chMgr.Errorf("failed to fetch channel: ", plan.BinEncode(entry.Info.ChannelID))
+            chMgr.Error("failed to fetch channel: ", plan.BinEncode(entry.Info.ChannelID))
         }
     }
 
