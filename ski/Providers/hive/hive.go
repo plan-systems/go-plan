@@ -2,7 +2,6 @@
 package hive
 
 import (
-	//"encoding/json"
 	"path"
 	"io/ioutil"
 	"os"
@@ -67,7 +66,8 @@ type Session struct {
 	StoreName		 string
 	BaseDir			 string
 	keyTomeMgr		 *ski.KeyTomeMgr	   
-	autoSave		 *time.Ticker
+	saveTicker		 *time.Ticker
+    saveNeeded       bool
 	hivePass		 []byte
 }
 
@@ -88,7 +88,7 @@ func (sess *Session) loadFromFile() error {
 	sess.autoSaveMutex.Lock()
 	defer sess.autoSaveMutex.Unlock()
 
-	sess.resetAutoSave()
+	sess.clearSave()
 
 	doClear := true
 	var err error
@@ -135,10 +135,9 @@ func (sess *Session) saveToFile() error {
 	sess.autoSaveMutex.Lock()
 	defer sess.autoSaveMutex.Unlock()
 
-	if sess.autoSave != nil {
+	if sess.saveNeeded {
 		pathname := sess.dbPathname()
 		if len(pathname) > 0 {
-
 			buf, err := sess.keyTomeMgr.Marshal()
 
 			if err == nil {
@@ -154,26 +153,26 @@ func (sess *Session) saveToFile() error {
 				}
 			}
 
+            // TODO: on key save failure, save to crash file?
 			if err != nil {
 				sess.Error("couldn't save to file: ", err)
+    			return err
 			}
-
-			return err
 		}
-		sess.resetAutoSave()
+		sess.clearSave()
 	}
 
 	return nil
 }
 
 
-func (sess *Session) resetAutoSave() {
+func (sess *Session) clearSave() {
 
-	// When we save out successfully, stop the autosave gor outine
+	// When we save out successfully, stop the autosave goroutine
 	{
-		if sess.autoSave != nil {
-			sess.autoSave.Stop()
-			sess.autoSave = nil
+		if sess.saveNeeded {
+            sess.saveNeeded = false
+			sess.saveTicker.Stop()
 		}
 	}
 }
@@ -380,10 +379,10 @@ func (sess *Session) bumpAutoSave() {
 
 	sess.autoSaveMutex.Lock()
 	sess.nextAutoSave = time.Now().Add(1600 * time.Millisecond)
-	if sess.autoSave == nil {
-		sess.autoSave = time.NewTicker(500 * time.Millisecond)
+	if !sess.saveNeeded {
+		sess.saveTicker = time.NewTicker(500 * time.Millisecond)
 		go func() {
-			for t := range sess.autoSave.C {
+			for t := range sess.saveTicker.C {
 				sess.autoSaveMutex.Lock()
 				saveNow := t.After(sess.nextAutoSave)
 				sess.autoSaveMutex.Unlock()
