@@ -110,36 +110,20 @@ TODO: check than a session w/ the same member ID + warksation isn't already open
 }
 
 
-
+// FUTURE
 // The Unity client and repo process are the "same" machine in that they are bound at the hip like simese twins
 // for their existence, swapping session tokens from StartSession() to StartSession(). 
 // The MemberClient and Unint Client may not be on the same machine, but the sessions are lockstep.
 // The other main reason the the are on the same machine is b/c of the LOCAL FILE SYSTEM.  Otherwise, heavy
 //     file object and graphics assets can't be transferred.  The CFI 
 
-/*
-type MemberClientLifetimeSession struct {
-type MemberClient struct {
-type MemberTerminal struct {
-
-    //repoPath/memberID/unityID/sessionSig/  => 
-
-*/
-
-
 // CommunityCrypto wraps a community keyring session.
 type CommunityCrypto struct {
-
-    // The current community epoch
-    //communityEpoch  pdi.CommunityEpoch
-
     RetainUpto      int64
     Keys            ski.Session
-
 }
 
-
-
+// CommunityEncrypt encrypts the given buffer with the given community key ref (presumed ot be a symmetric key).
 func (cc *CommunityCrypto) CommunityEncrypt(
     inBuf       []byte,
     inKeyRef    *ski.KeyRef,
@@ -157,7 +141,7 @@ func (cc *CommunityCrypto) CommunityEncrypt(
     return out.BufOut, nil
 }
 
-
+// EndSession ends this 
 func (cc *CommunityCrypto) EndSession(
     inReason string,
 ) {

@@ -48,7 +48,7 @@ type ChMgr struct {
 }
 
 
-
+// NewChMgr creates and inits a new ChMgr instance.
 func NewChMgr(
     inHomeDir string,
     CR *CommunityRepo,
@@ -871,7 +871,7 @@ func (cs *ChSession) ctxStopping() {
     close(cs.msgInbox)
 }
 
-
+// AuthorNewEntry recycles the given repo.Msg, seting its EntryInfo so that it's compliant with the latest ChannelEpoch from the channel associated with this ChSession.
 func (cs *ChSession) AuthorNewEntry(
     msg *Msg,
 ) {
@@ -902,15 +902,5 @@ func (cs *ChSession) AuthorNewEntry(
     //msg.BUF0 = plan.SmartMarshal(&info, msg.BUF0)
     cs.MemberSession.msgOutbox <- msg
 
-}
-
-
-
-
-
-
-type EntryRange struct {
-    Start   pdi.URID        // Inclusive
-    end     pdi.URID        // Inclusive
 }
 

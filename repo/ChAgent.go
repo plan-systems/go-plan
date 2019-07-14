@@ -27,7 +27,6 @@ import (
     "github.com/dgraph-io/badger"
 )
 
-
 // ChAgentFactory is a ChAgent factory function. 
 // It returns a new ChAgent instance associated with the given channel protocol invocation.
 type ChAgentFactory func(inChProtocol string) ChAgent
@@ -35,10 +34,6 @@ type ChAgentFactory func(inChProtocol string) ChAgent
 // ChAgentRegistry is a read-only registry that maps a channel protocol string to a ChAgentFactory.
 // This is used when a ChStore is being created and requires an accompanying ChAgent.
 var gChAgentRegistry = map[string]ChAgentFactory{}
-
-
-// TODO
-// use ChProtocolBase for ChProtocolACC, ChProtocolMemberRegistry, ChProtocolCommunityEpochs?
 
 // ChProtocol are common and built-in
 const (
@@ -245,21 +240,6 @@ func (chSt *ChStore) Startup() error {
     return nil
 }
 
-
-func (chSt *ChStore) ShutdownEntryProcessing(inBlockUntilComplete bool) {
-
-    // Cause the ch validator loop to wake and get nil msgs
-    if chSt.processingEntries {
-        chSt.processingEntries = false
-        close(chSt.entriesToMerge)
-    }
-
-    // TODO: we could just use an atomic state int instead and int32 poll it (since channel shutdown is rare)
-    if inBlockUntilComplete {
-        chSt.chShutdown.Wait()
-    }
-}
-
 // Shutdown initiates a channel shutdown and blocks until complete.
 // If inWait is given, then this function will call inWait.Done() before exiting
 func (chSt *ChStore) Shutdown(inWait *sync.WaitGroup) {
@@ -291,6 +271,20 @@ func (chSt *ChStore) Shutdown(inWait *sync.WaitGroup) {
     }
 }
 
+// ShutdownEntryProcessing causes a ChStore's entry validation goroutine to exit.
+func (chSt *ChStore) ShutdownEntryProcessing(inBlockUntilComplete bool) {
+
+    // Cause the ch validator loop to wake and get nil msgs
+    if chSt.processingEntries {
+        chSt.processingEntries = false
+        close(chSt.entriesToMerge)
+    }
+
+    // TODO: we could just use an atomic state int instead and int32 poll it (since channel shutdown is rare)
+    if inBlockUntilComplete {
+        chSt.chShutdown.Wait()
+    }
+}
 
 // NewWrite -- see ChAgent.NewWrite
 func (chSt *ChStore) NewWrite(
@@ -1964,7 +1958,7 @@ func (reg *ChMemberRegistry) MergePost(entry *chEntry) error {
     return err
 }
 
-
+// ValidateAuthor looks up the given entry's author member and verifies that the entry's author sig matches the sig on record in this member registry.
 func (reg *ChMemberRegistry) ValidateAuthor(
     entry *chEntry,
 ) error {
@@ -2023,17 +2017,14 @@ func (reg *ChMemberRegistry) FetchMemberEpoch(inEntryID plan.TID) (*pdi.MemberEp
     }
 
     return memEpoch, nil
-
 }
 
-
+// ChEpochNode allows a tree to be made out of ChannelEpochs, facilitaing analysis.
 type ChEpochNode struct {
     Prev    *ChEpochNode
     Next    []*ChEpochNode
-
     Epoch   pdi.ChannelEpoch
     Status  EntryStatus
-
 }
 
 
@@ -2149,7 +2140,7 @@ type ChCommunityEpochs struct {
     epochHistory        []*pdi.CommunityEpoch
 }
 
-
+// OnStartup -- see ChAgent.OnStartup
 func (ch *ChCommunityEpochs) OnStartup(chSt *ChStore) error {
     ch.chSt = chSt
 
@@ -2260,7 +2251,7 @@ func (ch *ChCommunityEpochs) MergePost(entry *chEntry) error {
     return err
 }
 
-
+// LatestCommunityEpoch returns the most recent and live CommunityEpoch
 func (ch *ChCommunityEpochs) LatestCommunityEpoch() *pdi.CommunityEpoch {
 
     var (
@@ -2281,7 +2272,7 @@ func (ch *ChCommunityEpochs) LatestCommunityEpoch() *pdi.CommunityEpoch {
 }
 
 
-
+// FetchCommunityEpoch returns the requested CommunityEpoch by TID.
 func (ch *ChCommunityEpochs) FetchCommunityEpoch(inEpochID []byte, inLiveOnly bool) *pdi.CommunityEpoch {
 
     // TODO: Sort my time issued and do binary search

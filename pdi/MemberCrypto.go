@@ -14,7 +14,6 @@ import (
     //"context"
     //"fmt"
     
-
     "github.com/plan-systems/plan-core/tools"
     "github.com/plan-systems/plan-core/plan"
     "github.com/plan-systems/plan-core/ski"
@@ -45,12 +44,11 @@ type MemberCrypto struct {
     // packing scrap
     tmpCrypt        EntryCrypt
     tmpInfo         EntryInfo
-
     tmpBuf          []byte
 }
 
 
-
+// StartSession sets up this MemberCrypto to use the given SKI session.
 func (mc *MemberCrypto) StartSession(
     inSKISession   ski.Session,
 ) error {
@@ -80,6 +78,7 @@ func (mc *MemberCrypto) StartSession(
     return nil
 }
 
+// EndSession reflects that the member is logging out and keys should be put away, etc.
 func (mc *MemberCrypto) EndSession(inReason string) {
     if mc.skiSession != nil {
         mc.skiSession.EndSession(inReason)
@@ -148,7 +147,7 @@ func (mc *MemberCrypto) EncryptAndEncodeEntry(
 }
 
 
-
+// CommunityEncrypt encrypts the given buffer using the latest active community key that this member has access to.
 func (mc *MemberCrypto) CommunityEncrypt(
     inBuf    []byte,
 ) ([]byte, error) {
@@ -165,7 +164,7 @@ func (mc *MemberCrypto) CommunityEncrypt(
     return out.BufOut, nil
 }
 
-
+// ExportCommunityKeyring exports the member's community keyring into a KeyTome protobuf, encrypted using the given pass baf.
 func (mc *MemberCrypto) ExportCommunityKeyring(
     inPass []byte,
 ) ([]byte, error) {
