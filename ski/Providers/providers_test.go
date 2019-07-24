@@ -4,10 +4,6 @@ import (
 	"bytes"
 	"math/rand"
 
-	//"fmt"
-	//"time"
-	//"ioutil"
-
 	"testing"
 
 	"github.com/plan-systems/plan-core/ski"
@@ -20,11 +16,9 @@ var gTesting *testing.T
 var gCommunityID = []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 
 func TestFileSysSKI(t *testing.T) {
-
 	gTesting = t
 
 	{
-
 		A := newSession("Alice")
 		B := newSession("Bob")
 
@@ -33,7 +27,6 @@ func TestFileSysSKI(t *testing.T) {
 		A.EndSession("done A")
 		B.EndSession("done B")
 	}
-
 }
 
 func doProviderTest(A, B *testSession) {
