@@ -812,7 +812,7 @@ func GenerateNewKey(
 	}
 
 	if kr == nil || kr.Keys[0] == nil || kr.Keys[0].KeyInfo == nil {
-		return nil, plan.Error(nil, plan.AssertFailed, "no keys returned")
+		return nil, plan.Errorf(nil, plan.AssertFailed, "no keys returned")
 	}
 
 	if kr.Keys[0].KeyInfo.KeyType !=  inKeyInfo.KeyType {
@@ -848,6 +848,7 @@ func NewSessionTool(
 	st := &SessionTool{
 		UserID: inUserID,
         Session: inSession,
+        CryptoKitID: CryptoKitID_NaCl,
 		CommunityKey: KeyRef{
 			KeyringName: inCommunityID,
 		},
