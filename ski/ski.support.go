@@ -802,8 +802,12 @@ func GenerateNewKey(
         },
 	})
 
+    if err != nil {
+        return nil, err
+    }
+
 	var kr *Keyring
-	if err == nil && tomeOut != nil && tomeOut.Keyrings[0] != nil {
+	if tomeOut != nil && tomeOut.Keyrings[0] != nil {
 		kr = tomeOut.Keyrings[0]
 	}
 
