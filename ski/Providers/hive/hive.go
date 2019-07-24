@@ -19,7 +19,6 @@ import (
 	_ "github.com/plan-systems/plan-core/ski/CryptoKits/ed25519"
 )
 
-
 const (
 
 	// ProviderInvocation should be passed for inInvocation when calling SKI.provider.StartSession()
@@ -54,7 +53,6 @@ func StartSession(
 	return sess, nil
 }
 
-
 // Session represents a local implementation of the SKI
 type Session struct {
 	ski.Session
@@ -67,11 +65,9 @@ type Session struct {
 	BaseDir			 string
 	keyTomeMgr		 *ski.KeyTomeMgr	   
 	saveTicker		 *time.Ticker
-    saveNeeded       bool
+    savePending      bool
 	hivePass		 []byte
 }
-
-
 
 func (sess *Session) dbPathname() string {
 
@@ -82,7 +78,6 @@ func (sess *Session) dbPathname() string {
 	return path.Join(sess.BaseDir, sess.StoreName)
 }
 
-
 func (sess *Session) loadFromFile() error {
 
 	sess.autoSaveMutex.Lock()
@@ -91,32 +86,33 @@ func (sess *Session) loadFromFile() error {
 	sess.clearSave()
 
 	doClear := true
-	var err error
+	
+    kit, err := ski.GetCryptoKit(sess.defaultCryptoKit)
+	if err != nil {
+        return err
+    }
 
 	pathname := sess.dbPathname()
 	if len(pathname) > 0 {
 		var buf []byte
 		buf, err = ioutil.ReadFile(pathname)
-		if err != nil {
-
-			// If file doesn't exist, don't consider it an error
-			if os.IsNotExist(err) {
-				err = nil //os.MkdirAll(path.Dir(pathname), plan.DefaultFileMode)
-			} else {
-				err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key tome %v", pathname)
-			}
-		}
-
-		if err == nil {
-			var kit *ski.CryptoKit
-			kit, err = ski.GetCryptoKit(sess.defaultCryptoKit)
+        if err == nil {
 			buf, err = kit.DecryptUsingPassword(buf, sess.hivePass)
-		}
 
-		if err == nil && len(buf) > 0 {
-			err = sess.keyTomeMgr.Unmarshal(buf)
-			doClear = false
-		}
+            if err == nil && len(buf) > 0 {
+			    err = sess.keyTomeMgr.Unmarshal(buf)
+                if err == nil {
+			        doClear = false
+                }
+		    }
+        } else {
+            // If file doesn't exist, don't consider it an error
+			if os.IsNotExist(err) {
+				err = nil 
+			} else {
+				err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key hive %v", pathname)
+			}
+        }
 
 		ski.Zero(buf)
 	}
@@ -128,14 +124,12 @@ func (sess *Session) loadFromFile() error {
 	return err
 }
 
-
-
 func (sess *Session) saveToFile() error {
 
 	sess.autoSaveMutex.Lock()
 	defer sess.autoSaveMutex.Unlock()
 
-	if sess.saveNeeded {
+	if sess.savePending {
 		pathname := sess.dbPathname()
 		if len(pathname) > 0 {
 			buf, err := sess.keyTomeMgr.Marshal()
@@ -165,20 +159,16 @@ func (sess *Session) saveToFile() error {
 	return nil
 }
 
-
 func (sess *Session) clearSave() {
 
 	// When we save out successfully, stop the autosave goroutine
 	{
-		if sess.saveNeeded {
-            sess.saveNeeded = false
+		if sess.savePending {
+            sess.savePending = false
 			sess.saveTicker.Stop()
 		}
 	}
 }
-
-
-
 
 // EndSession -- see ski.Session
 func (sess *Session) EndSession(inReason string) {
@@ -187,7 +177,6 @@ func (sess *Session) EndSession(inReason string) {
 
 	ski.Zero(sess.hivePass)
 }
-
 
 // GenerateKeys -- see ski.Session
 func (sess *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
@@ -219,7 +208,6 @@ func (sess *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
 	return srcTome, nil
 }
 
-
 // FetchKeyInfo -- see ski.Session
 func (sess *Session) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
 
@@ -231,8 +219,6 @@ func (sess *Session) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
 	return opKey.KeyInfo, nil
 
 }
-
-
 
 // DoCryptOp -- see ski.Session
 func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
@@ -256,11 +242,9 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 		}
 	}
 
-  
 	/*****************************************************
 	** 1) LOAD OP CRYPTO KEY & KIT
 	**/
-
 	var (
 		opKey *ski.KeyEntry
 		cryptoKit *ski.CryptoKit
@@ -287,7 +271,6 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 	/*****************************************************
 	** 2) DO OP
 	**/
-
 	if err == nil {
 		switch opArgs.CryptOp {
 
@@ -338,7 +321,6 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 		}
 	}
 
-
 	/*****************************************************
 	** 3) POST OP
 	**/
@@ -372,14 +354,16 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 	}   
 
 	return opOut, nil
-
 }
  
 func (sess *Session) bumpAutoSave() {
 
 	sess.autoSaveMutex.Lock()
 	sess.nextAutoSave = time.Now().Add(1600 * time.Millisecond)
-	if !sess.saveNeeded {
+
+    // If there's already a save pending/queued, then we can move on.
+	if ! sess.savePending {
+        sess.savePending = true
 		sess.saveTicker = time.NewTicker(500 * time.Millisecond)
 		go func() {
 			for t := range sess.saveTicker.C {
@@ -394,5 +378,4 @@ func (sess *Session) bumpAutoSave() {
 		}()
 	}
 	sess.autoSaveMutex.Unlock()
-	
 }
