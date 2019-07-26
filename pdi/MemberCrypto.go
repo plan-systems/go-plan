@@ -167,10 +167,11 @@ func (mc *MemberCrypto) CommunityEncrypt(
 // ExportCommunityKeyring exports the member's community keyring into a KeyTome protobuf, encrypted using the given pass baf.
 func (mc *MemberCrypto) ExportCommunityKeyring(
     inPass []byte,
-) ([]byte, error) {
+) (*ski.KeyTomeCrypt, error) {
 
     out, err := mc.skiSession.DoCryptOp(&ski.CryptOpArgs{
         CryptOp: ski.CryptOp_EXPORT_USING_PW,
+        DefaultCryptoKit: mc.CommunityEpoch.DefaultCryptoKit,
         PeerKey: inPass,
         TomeIn: &ski.KeyTome{
             Keyrings: []*ski.Keyring{
@@ -185,7 +186,14 @@ func (mc *MemberCrypto) ExportCommunityKeyring(
         return nil, err
     }
 
-    return out.BufOut, nil
+    crypt := &ski.KeyTomeCrypt{
+        Tome: out.BufOut,
+        KeyInfo: &ski.KeyInfo{
+            CryptoKit: mc.CommunityEpoch.DefaultCryptoKit,
+        },
+    }
+
+    return crypt, nil
 }
 
 

@@ -174,8 +174,7 @@ type MemberSession struct {
 
     SessionToken    []byte
 
-    // Ah, a contraction?
-    // Nay, the MemberClient more long-winded name is the *MemberClientLifetimeSession*
+    // the MemberClient more long-winded name is the *MemberClientLifetimeSession*
     // Sequence of sigs/token exchanged by Unity client and here, ensuring that there can't be an imposter session w/o
     //    the member from knowing it next login.   
     // Note that both non-time-dependent (TLS cert exchange) and this approach feature a no-password UX (though a device
@@ -183,14 +182,10 @@ type MemberSession struct {
     //sessionDB      *badger.DB
     // Host 
 
-
     MemberEpoch     pdi.MemberEpoch
     MemberIDStr     string
 
-
     txnDecoder      pdi.TxnDecoder
-    //PersonalSKI     ski.Session
-
     commCrypto      *CommunityCrypto
 
     ChSessionsCount sync.WaitGroup
@@ -389,11 +384,17 @@ func (ms *MemberSession) handleSess0(msg *Msg) bool {
         case MsgOp_RETAIN_COMMUNITY_KEYS:
             //ms.retainCommunityKeysUpto = msg.T0
         case MsgOp_ADD_COMMUNITY_KEYS:
-            _, err := ms.commCrypto.Keys.DoCryptOp(&ski.CryptOpArgs{
-                CryptOp: ski.CryptOp_IMPORT_USING_PW,
-                BufIn: msg.BUF0,
-                PeerKey: ms.SessionToken,
-            })
+
+            var keyTomeCrypt ski.KeyTomeCrypt
+            err := keyTomeCrypt.Unmarshal(msg.BUF0)
+            if err == nil {
+                _, err = ms.commCrypto.Keys.DoCryptOp(&ski.CryptOpArgs{
+                    CryptOp: ski.CryptOp_IMPORT_USING_PW,
+                    DefaultCryptoKit: keyTomeCrypt.KeyInfo.CryptoKit,
+                    BufIn: keyTomeCrypt.Tome,
+                    PeerKey: ms.SessionToken,
+                })
+            }
             if err != nil {
                 ms.Warn("ADD_COMMUNITY_KEYS import error: ", err) 
             } else {
