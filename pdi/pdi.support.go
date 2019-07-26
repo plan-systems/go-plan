@@ -314,6 +314,8 @@ func (epoch *CommunityEpoch) CommunityKeyRef() ski.KeyRef {
 
 
 // FormGenesisKeyringName returns the name of the keyring name that stores keys created during community genesis.
+//
+// Only members that performed community genesis will have this keyring.
 func (epoch *CommunityEpoch) FormGenesisKeyringName() []byte {
 
     krName := make([]byte, len(epoch.CommunityID))

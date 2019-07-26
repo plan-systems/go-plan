@@ -19,7 +19,6 @@ import (
 )
 
 
-
 // FormSuggestedDirName forms a file system friendly name that identifies this community to humans.
 func (gs *GenesisSeed) FormSuggestedDirName() string {
     return gs.StorageEpoch.FormSuggestedDirName()
