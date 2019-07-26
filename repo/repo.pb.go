@@ -70,7 +70,7 @@ type MsgOp int32
 const (
 	// This Msg functionally does nothing but serves as a heartbeat to indicate the channel session is open and operating normally.
 	MsgOp_OK MsgOp = 0
-	// Msg.BUF0 is a ski.KeyTome protobuf that contains community keys that should be added to the member session on the repo side.
+	// Msg.BUF0 is a ski.KeyTomeCrypt protobuf that contains community keys that should be added to the member session on the repo side.
 	MsgOp_ADD_COMMUNITY_KEYS MsgOp = 1
 	// When the repo sees this op, it will retain the community keyring up to the given unix timestamp in T0.
 	// If the community keyring should not be retained, set T0 to 0 (or any timestamp in the past),
@@ -854,7 +854,7 @@ func (m *ChMgrState) GetValidationRev() int64 {
 type ChStoreState struct {
 	ChID []byte `protobuf:"bytes,1,opt,name=chID,proto3" json:"chID,omitempty"`
 	// ChProtocol is the channel protocol identifying how clients should interpret content entries in this channel.
-	// It originates from this channel's genesis ChannelEpoch and is regarded as immutable.
+	// Its value and originates from this channel's genesis ChannelEpoch and is regarded as immutable.
 	// If not set, then channel content entries arrived *before* the genesis ChannelEpoch and so the protocol is still unknown.
 	ChProtocol string `protobuf:"bytes,2,opt,name=ch_protocol,json=chProtocol,proto3" json:"ch_protocol,omitempty"`
 	// This identifies what agent type/class last maintained this channel (or empty if no agent has ever been assigned).
