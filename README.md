@@ -71,7 +71,10 @@ If you are contributing new features to `plan-core`, you may end up needing to u
 
     3. Copy the binary appropriate for your platform to somewhere on your `$PATH` and give it executable permissions:
         ```
-        cp ./Grpc.Tools/tools/macosx_x64/protoc /usr/local/bin
+        cp ./Grpc.Tools/tools/macosx_x64/protoc  /usr/local/bin
+        cp ./Grpc.Tools/tools/linux_x64/protoc   /usr/local/bin
+        cp ./Grpc.Tools/tools/windows_x64/protoc /usr/local/bin
+        
         chmod +x /usr/local/bin/protoc
         ```
 
