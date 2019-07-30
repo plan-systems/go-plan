@@ -1603,7 +1603,7 @@ func (chSt *ChStore) chEntryProcessor() {
 			}
 
 			switch entry.State.Status {
-				case EntryStatus_MERGED		fallthrough 
+				case EntryStatus_MERGED:	fallthrough 
 				case EntryStatus_DEFERRED:	fallthrough 
 				case EntryStatus_LIVE:
 					chSt.ValidateEntry(entry)
