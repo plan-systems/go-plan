@@ -143,7 +143,7 @@ func (C *Context) CtxStop(
 		C.stopReason = inReason
 		C.Infof(2, "CtxStop (%s)", C.stopReason)
 
-		// 3. Now hand it over to client-level execution to finish stopping/cleanup.
+		// Hand it over to client-level execution to finish stopping/cleanup.
 		if onAboutToStop := C.onAboutToStop; onAboutToStop != nil {
 			C.onAboutToStop = nil
 			onAboutToStop()
@@ -153,10 +153,10 @@ func (C *Context) CtxStop(
 			C.parent.childStopping(C)
 		}
 
-		// 1_ Stop the all children so that leaf children are stopped first.
+		// Stop the all children so that leaf children are stopped first.
 		C.CtxStopChildren("parent is stopping")
 
-		// 2. Calling this *after* stopping children the entire hierarchy to closed leaf-first.
+		// Calling this *after* stopping children causes the entire hierarchy to be closed/cancelled leaf-first.
 		ctxCancel()
 
 		initiated = true
@@ -271,14 +271,14 @@ func (C *Context) CtxStatus() error {
 	return C.Ctx.Err()
 }
 
-// CtxRunning returns true has been started and is no stopping.
+// CtxRunning returns true has been started and has not stopped. See also CtxStopped().
 //
-// Warning: since this go from true to false at any time, this call is typically
-// used to poll a context in order to detect if/when a workflow should cease.
+// Warning: since this can change from true to false at any time, this is typically
+// used to detect if/when a workflow should cease.
+//
 //
 // THREADSAFE
 func (C *Context) CtxRunning() bool {
-
 	if C.Ctx == nil {
 		return false
 	}
@@ -290,6 +290,17 @@ func (C *Context) CtxRunning() bool {
 	}
 
 	return true
+}
+
+// CtxStopped returns true if CtxStop() is currently being executed or has completed.
+//
+// Warning: this is NOT the opposite of CtxRunning.  C.CtxStopped() will return true
+// when C.CtxStop() is called while C.CtxRunning() won't return false until C's children have
+// all been stopped.
+//
+// THREADSAFE
+func (C *Context) CtxStopped() bool {
+	return C.Ctx == nil
 }
 
 // CtxOnFault is called when the given error has occurred an represents an unexpected fault that alone doesn't
