@@ -4,6 +4,9 @@ import (
 	"bytes"
 )
 
+
+const summaryStrLen = 6
+
 // BinEncode encodes the given binary buffer into PLAN's std encoding (BinEncoding)
 func BinEncode(in []byte) string {
 	return BinEncoding.EncodeToString(in)
@@ -32,7 +35,12 @@ func (chID ChID) Clone() ChID {
 
 // SuffixStr returns the last few digits of this ChID in string form (for easy reading, logs, etc)
 func (chID ChID) SuffixStr() string {
-	return BinEncoding.EncodeToString(chID[ChIDSz-6:])
+	R := len(chID)
+	L := R - summaryStrLen
+	if L < 0 {
+		L = 0
+	}
+	return BinEncoding.EncodeToString(chID[L:R])
 }
 
 // TID is a convenience function that returns the TID contained within this TIDBlob.
@@ -74,19 +82,30 @@ func (tid TID) Str() string {
 	return BinEncoding.EncodeToString(tid)
 }
 
+// PrefixStr returns the left-hand part of this TID as plan.Base64 (typically used to visually inspect the timestamp of this TID)
+func (tid TID) PrefixStr() string {
+	L := 0
+	R := len(tid)
+	if R > 9 {
+		R = 9
+	}
+	return BinEncoding.EncodeToString(tid[L:R])
+}
+
 // SuffixStr returns the last few digits of this TID in string form (for easy reading, logs, etc)
 func (tid TID) SuffixStr() string {
-	return BinEncoding.EncodeToString(tid[TIDSz-6:])
+	R := len(tid)
+	L := R - summaryStrLen
+	if L < 0 {
+		L = 0
+	}
+	return BinEncoding.EncodeToString(tid[L:R])
 }
 
 // SetTimeAndHash writes the given timestamp and the right-most part of inSig into this TID.
 //
-// Byte layout is designed so that TIDs can be sorted by its leading embedded timestamp:
-//    0:6   - Standard UTC timestamp in unix seconds (BE)
-//    6:8   - Timestamp fraction (BE)
-//    8:27  - Hash bytes
+// See comments for plan.TIDSz
 func (tid TID) SetTimeAndHash(inTime TimeFS, inHash []byte) {
-
 	tid.SetTimeFS(inTime)
 	tid.SetHash(inHash)
 }
@@ -147,8 +166,11 @@ func (tid TID) ExtractTime() int64 {
 	return t
 }
 
-// SelectEarlier looks in inTime and if it is later than the time embedded in ioURID, then this function has no effect and returns false.
-// If inTime is earlier than the embedded time, then ioURID is initialized to inTime (and zeroed out) and returns true.
+// SelectEarlier looks in inTime a chooses whichever is earlier.
+//
+// If inTime is later than the time embedded in this TID, then this function has no effect and returns false.
+//
+// If inTime is earlier, then this TID is initialized to inTime (and the rest zeroed out) and returns true.
 func (tid TID) SelectEarlier(inTime TimeFS) bool {
 
 	t := tid.ExtractTimeFS()
