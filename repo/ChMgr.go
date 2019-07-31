@@ -681,8 +681,9 @@ func (chMgr *ChMgr) loadChannel(
     chSt := &ChStore{
         chMgr: chMgr,
         entriesToMerge: make(chan *chEntry, 2),
-        revalAfter: pdi.URIDTimestampMax,
     }
+
+    chSt.SetLogLabel(fmt.Sprint("Ch…", inChID.SuffixStr()))
 
     chSt.db, err = badger.Open(opts)
     if err != nil {
@@ -706,7 +707,8 @@ func (chMgr *ChMgr) loadChannel(
                 }
             }
         } else if dbErr == badger.ErrKeyNotFound {
-            chSt.State.ChID =  append(chSt.State.ChID[:0], inChID...)
+            chSt.State.ChID = append(chSt.State.ChID[:0], inChID...)
+            chSt.State.Rev  = 1
         }
 
         chTxn.Discard()
@@ -715,6 +717,11 @@ func (chMgr *ChMgr) loadChannel(
     if err != nil {
         // TODO: close db and mark as failed
         chSt = nil
+    } else {
+        chSt.StateRevOnDisk = chSt.State.Rev
+        if len(chSt.State.ValidatedUpto) != plan.TIDSz {
+            chSt.State.ValidatedUpto = make([]byte, plan.TIDSz)
+        }
     }
 
     return chSt, err
@@ -861,13 +868,6 @@ func (cs *ChSession) ctxAboutToStop() {
 }
 
 func (cs *ChSession) ctxStopping() {
-
-    if cs.MemberSession.CtxRunning() {
-        cs.MemberSession.msgOutbox <- &Msg{
-            Op: MsgOp_CH_SESSION_CLOSED,
-            ChSessID: uint32(cs.ChSessID),
-        }
-    }
     close(cs.msgInbox)
 }
 

@@ -166,6 +166,7 @@ type ChStore struct {
 	ctx.Logger
 
 	State					ChStoreState
+	StateRevOnDisk			int64
 	
 	// A Ch store needs to have each active channel sessions available so changes/notifications can be sent out.
 	chSessions				[]*ChSession
@@ -183,7 +184,6 @@ type ChStore struct {
 	chMgr					*ChMgr
 
 	revalRequestMutex		sync.Mutex 
-	revalAfter				plan.TimeFS
 
 	entriesToMerge			chan *chEntry
 	processingEntries		bool
@@ -245,20 +245,22 @@ func (chSt *ChStore) Shutdown(inWait *sync.WaitGroup) {
 	
 	chSt.ShutdownEntryProcessing(true)
 
-	// Update ChState before we go
-	chSt.dequeueRevalidation()
-
 	if chSt.db != nil {
-		buf, _ := chSt.State.Marshal()
+		if chSt.StateRevOnDisk != chSt.State.Rev {
+			buf, _ := chSt.State.Marshal()
 
-		{
-			chTxn := chSt.NewWrite()
+			{
+				chTxn := chSt.NewWrite()
 
-			err := chTxn.Set(chStateKey, buf)
-			chSt.Log(err, "writing ChState")
+				err := chTxn.Set(chStateKey, buf)
+				chSt.Log(err, "setting ChState")
 
-			err = chTxn.Commit()
-			chSt.Log(err, "committing ChState")
+				err = chTxn.Commit()
+				chSt.Log(err, "writing ChState")
+				if err == nil {
+					chSt.StateRevOnDisk = chSt.State.Rev
+				}
+			}
 		}
 
 		chSt.db.Close()
@@ -479,17 +481,23 @@ func (chSt *ChStore) seekToNextEntry(
 
 
 // loadNextEntryToValidate reads the given entry from this ChStore that requires validation
-func (chSt *ChStore) loadNextEntryToValidate(entry *chEntry) bool {
+func (chSt *ChStore) loadNextEntryToValidate(
+	entry *chEntry,
+	vpos *validatePos,
+) bool {
 
-	// update chSt.State.ValidatedUpto
-	// TODO: use badger steam read
-	chSt.dequeueRevalidation()
+	// TODO: use badger steam read?
+	*vpos = chSt.nextValidationStep()
  
 	haveEntry, _ := chSt.loadNextEntry(
 		nil, 
-		chSt.State.ValidatedUpto,
+		vpos.entryID[:],
 		entry,
 	)
+
+	if haveEntry {
+		copy(vpos.entryID[:], entry.Info.EntryID())
+	}
 
 	return haveEntry
 
@@ -1231,7 +1239,7 @@ func (chSt *ChStore) ValidateEntry(
 			errStr = fmt.Sprintf(" (%v)", valErr)
 		}
 
-		chSt.Info(1, "entry ", entry.Info.EntryID().SuffixStr(), " => ", gEntryStatusDesc[entry.State.Status], errStr)
+		chSt.Info(1, "entry …", entry.Info.EntryID().SuffixStr(), " => ", gEntryStatusDesc[entry.State.Status], errStr)
 	}
 }
 
@@ -1332,7 +1340,7 @@ func (chSt *ChStore) RevalidateDependencies(
 	// First, if the entry could affect subsequent entries WITHIN this channel, queue revalidation
 	switch chEntry.EntryOp {
 		case pdi.EntryOp_NEW_CHANNEL_EPOCH:
-			chSt.QueueRevalidation(chEntry.TimeAuthoredFS() /* - communityEpoch.MaxMemberClockDelta? */)
+			chSt.RewindValidation(chEntry.TimeAuthoredFS(), "new channel epoch")
 	}
 
 
@@ -1351,7 +1359,6 @@ func (chSt *ChStore) RevalidateDependencies(
 
 	// Make a new iterator, search for a dep key match for each type of dependency
 	{
-
 		// Iterate thru all channel dependencies that reference this entry by this entry's entry ID
 		for itr.Seek(searchKey[:]); itr.Valid(); itr.Next() {
 			item := itr.Item()
@@ -1372,7 +1379,7 @@ func (chSt *ChStore) RevalidateDependencies(
 					// Maybe just keep sleepping for a few ms until its non-nil?
 					{}
 				} else {
-					depCh.QueueRevalidation(plan.TimeFS(chDep.DepTime))
+					depCh.RewindValidation(plan.TimeFS(chDep.DepTime), "dependency")
 				}
 			}
 
@@ -1384,13 +1391,21 @@ func (chSt *ChStore) RevalidateDependencies(
 
 }
 
-// QueueRevalidation queues all entries on or after the given time index for revalidation.
-func (chSt *ChStore) QueueRevalidation(inAfterTime plan.TimeFS) {
-	chSt.Infof(1, "request rewind revalidation back to %v", inAfterTime)
+type validatePos struct {
+	rev		int64
+	entryID plan.TIDBlob
+}
+
+// RewindValidation queues all entries on or after the given time index for revalidation.
+func (chSt *ChStore) RewindValidation(inAfterTime plan.TimeFS, inReason string) {
+
+	validationReset := false
 
 	chSt.revalRequestMutex.Lock()
-	if inAfterTime < chSt.revalAfter {
-		chSt.revalAfter = inAfterTime
+	valUpto := plan.TID(chSt.State.ValidatedUpto)
+	if valUpto.SelectEarlier(inAfterTime) {
+		chSt.State.Rev++
+		validationReset = true
 
 		// If revalidation is just sitting there waiting for entries to merge, wake it up so it calls dequeueRevalidation()
 		if chSt.processingEntries && len(chSt.entriesToMerge) == 0 {
@@ -1398,27 +1413,44 @@ func (chSt *ChStore) QueueRevalidation(inAfterTime plan.TimeFS) {
 		}
 	}
 	chSt.revalRequestMutex.Unlock()
+
+	if validationReset && chSt.LogV(2) {
+		var entryID plan.TIDBlob
+		entryID.TID().SetTimeFS(inAfterTime)
+		chSt.Infof(2, "validation reset back to %v… (%s)", entryID.TID().PrefixStr(), inReason)
+	}
+	
 }
 
-// dequeueRevalidation flushes queued revalidation messages with the current reval state.
-func (chSt *ChStore) dequeueRevalidation() {
+// nextValidationStep flushes queued revalidation messages with the current reval state.
+func (chSt *ChStore) nextValidationStep() validatePos {
 
-	if len(chSt.State.ValidatedUpto) != plan.TIDSz {
-		chSt.State.ValidatedUpto = make([]byte, plan.TIDSz)
-	}
-
-	valUpto := plan.TID(chSt.State.ValidatedUpto)
+	vpos := validatePos{}
 
 	chSt.revalRequestMutex.Lock()
-	if valUpto.SelectEarlier(chSt.revalAfter) {
-		chSt.Infof(1, "resetting revalidation back to %v", chSt.revalAfter)
+	defer chSt.revalRequestMutex.Unlock()
+
+	vpos.rev = chSt.State.Rev
+	copy(vpos.entryID[:], chSt.State.ValidatedUpto)
+
+	return vpos
+}
+
+// onValidationStepComplete updates chSt.State.ValidatedUpto iff QueueRevalidation() hasn't been called, voiding the this validation step.
+func (chSt *ChStore) onValidationStepComplete(vpos *validatePos) {
+
+	chSt.revalRequestMutex.Lock()
+	defer chSt.revalRequestMutex.Unlock()
+
+	if chSt.State.Rev == vpos.rev {
+		copy(chSt.State.ValidatedUpto, vpos.entryID[:])
+		chSt.State.Rev++
 	}
-	chSt.revalAfter = plan.TimeFSMax
-	chSt.revalRequestMutex.Unlock()
 
 	// TODO: flush to disk so a crash doesn't cause validation state to get dropped
 
 }
+
 
 
 // ReadyToMerge returns true if the ChStore is able to read and merge entries (which is only possible if a channel protocol is set)
@@ -1488,7 +1520,7 @@ func (chSt *ChStore) setupChAgent() error {
 
 			// Revlaidate everything if the chProtocol was set
 			if revalidateAll {
-				chSt.QueueRevalidation(0)
+				chSt.RewindValidation(0, "new channel agent")
 			}
 		}
 	}
@@ -1521,6 +1553,7 @@ func (chSt *ChStore) chEntryProcessor() {
 
 	var (
 		entryTmp *chEntry
+		vpos validatePos
 	)
 
 	validating := true
@@ -1570,7 +1603,7 @@ func (chSt *ChStore) chEntryProcessor() {
 					entryTmp = newChEntry(entryRevalidating)
 				}
 
-				validating = chSt.loadNextEntryToValidate(entryTmp)
+				validating = chSt.loadNextEntryToValidate(entryTmp, &vpos)
 				if validating {
 					entry = entryTmp
 
@@ -1591,7 +1624,7 @@ func (chSt *ChStore) chEntryProcessor() {
 			}
 			
 			if verboseLog {
-				chSt.Infof(1, "%s entry %s (%s, %s)", logInfo, entry.Info.EntryID().SuffixStr(), pdi.EntryOp_name[int32(entry.Info.EntryOp)], EntryStatus_name[int32(entry.State.Status)])
+				chSt.Infof(1, "%s entry …%s (%s, %s)", logInfo, entry.Info.EntryID().SuffixStr(), pdi.EntryOp_name[int32(entry.Info.EntryOp)], EntryStatus_name[int32(entry.State.Status)])
 			}
 
 			var err error
@@ -1629,8 +1662,9 @@ func (chSt *ChStore) chEntryProcessor() {
 					entry.PayloadTxnSet = nil
 				}
 
+				//onValidation(
 				if entry.origin == entryRevalidating {
-					copy(chSt.State.ValidatedUpto, entry.Info.EntryID())
+					chSt.onValidationStepComplete(&vpos)
 				}
 
 				// If the status of this entry has changed, revalidate channels that are known to be dependent.
