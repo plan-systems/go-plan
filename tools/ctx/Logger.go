@@ -35,7 +35,7 @@ func (l *Logger) SetLogLabel(inLabel string) {
 	l.logLabel = inLabel
 	l.hasPrefix = len(inLabel) > 0
 	if l.hasPrefix {
-		l.logPrefix = fmt.Sprintf("<%s> ", inLabel)
+		l.logPrefix = fmt.Sprintf("%s>> ", inLabel)
 	}
 }
 
