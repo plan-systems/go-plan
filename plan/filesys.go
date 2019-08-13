@@ -2,7 +2,6 @@ package plan
 
 import (
 	"os"
-	"os/user"
 	"path"
 	"strings"
 
@@ -15,29 +14,6 @@ var (
 	// DefaultFileMode is used to express the default mode of file creation.
 	DefaultFileMode = os.FileMode(0775)
 )
-
-// UseLocalDir ensures the dir pathname associated with PLAN exists and returns the final absolute pathname
-// inSubDir can be any relative pathname
-func UseLocalDir(inSubDir string) (string, error) {
-	usr, err := user.Current()
-	if err != nil {
-		return "", err
-	}
-
-	pathname := usr.HomeDir
-	pathname = path.Clean(path.Join(pathname, "_.plan"))
-
-	if len(inSubDir) > 0 {
-		pathname = path.Join(pathname, inSubDir)
-	}
-
-	err = os.MkdirAll(pathname, DefaultFileMode)
-	if err != nil {
-		return "", err
-	}
-
-	return pathname, nil
-}
 
 // SetupBaseDir parses/expands inLocalPath and then verifies it's existence or non-existence,
 // depending on inCreate and returning the the expanded path.
