@@ -45,8 +45,8 @@ type Config struct {
 
 // CommunityRepoState stores repo state
 type CommunityRepoState struct {
-    LastTxnTimeRead         int64               `json:"last_txn_time_read"`     // Time index where repo should resume reading a community StorageProvider
-    Services                []*plan.ServiceInfo  `json:"services"`
+    LastTxnTimeRead         int64               `json:"last_txn_time_read"`     // Unix timpesamp where repo should resume reading a community StorageProvider
+    Services                []*plan.ServiceInfo `json:"services"`
 }
 
 
@@ -670,10 +670,11 @@ const (
     spSyncStopping
 )
 
-
-func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
+// Returns the newest timestamp from the list of given txn URIDs.
+func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) (int64, error) {
 
     var err error
+    var newestTxnTime int64
 
     count := 0
     N := len(ioTxnList.URIDs)
@@ -684,7 +685,7 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
         }
         err = plan.Error(nil, plan.StorageNotConsistent, "received inconsistent TxnList")
         CR.Warn(err)
-        return err
+        return 0, err
     }
 
     if N > 0 {
@@ -707,6 +708,11 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
                         itemErr = plan.Errorf(itemErr, plan.TxnDBNotReady, "error reading txn DB key %v", pdi.URID(URID).Str())
                         CR.CtxOnFault(itemErr, "reading txn db key")
                     }
+
+                    txnTime := pdi.URID(URID).ExtractTime()
+                    if txnTime > newestTxnTime {
+                        newestTxnTime = txnTime
+                    }
             }
         }
         dbTxn.Discard()
@@ -715,7 +721,7 @@ func (CR *CommunityRepo) filterNeededTxns(ioTxnList *pdi.TxnList) error {
     ioTxnList.URIDs = ioTxnList.URIDs[:count]
     ioTxnList.Statuses = ioTxnList.Statuses[:0]
 
-    return nil
+    return newestTxnTime, nil
 }
 
             
@@ -741,14 +747,22 @@ func (CR *CommunityRepo) backwardTxnScanner() {
 // When it receives URID updates, reconciles that with the repo's txn db, and sends off requests for missing txns.
 func (CR *CommunityRepo) forwardTxnScanner() {
 
+    // If resuming, start reading from two days ago.  
+    // TODO: many choices here!
+    resumeTime := CR.State.LastTxnTimeRead
+    if resumeTime > 0 {
+        resumeTime -= 60 * 60 * 24 * 2
+    }
+    
     doScan := true
     for doScan {
         CR.Info(1, "starting forward txn scan")
 
+
         scanner, err := CR.spClient.Scan(
             CR.spContext,
             &pdi.TxnScan{
-                TimestampStart: CR.State.LastTxnTimeRead,
+                TimestampStart: resumeTime,
                 TimestampStop: pdi.URIDTimestampMax,
                 SendTxnUpdates: true,
             },
@@ -767,7 +781,11 @@ func (CR *CommunityRepo) forwardTxnScanner() {
             } else if txnList != nil {
 
                 // Filter for txn we need
-                CR.filterNeededTxns(txnList)
+                latestTxnTime, _ := CR.filterNeededTxns(txnList)
+                if latestTxnTime > CR.State.LastTxnTimeRead {
+                    CR.State.LastTxnTimeRead = latestTxnTime
+                    resumeTime = latestTxnTime - 60 * 5
+                }
 
                 // Request txns we're missing
                 if len(txnList.URIDs) > 0 {

@@ -17,7 +17,7 @@
             //"args": [ "-v", "1" ],
             //"args": [ "-init" ],
             //"args": ["-init", "-seed", "/Users/aomeara/go/src/github.com/plan-systems/plan-core/cmd/pdi-local/Shrug Island.seed.plan"],
-            //"args": [ "-genesis", "/Users/aomeara/go/src/github.com/plan-systems/plan-core/cmd/pdi-local/Shrug Island.genesis.json" ],
+            "args": ["-repoAddr", "192.168.2.178:5191"],
             "showLog": true
         }
     ]
