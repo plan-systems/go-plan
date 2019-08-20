@@ -660,8 +660,12 @@ func (kr *KeyRef) DescStr() string {
 }
 
 // DescStr returns a human readable desc string for this KeyInfo
-func (ki *KeyInfo) DescStr() string {
-	return fmt.Sprint("pubkey ", BinDesc(ki.PubKey), " using ", ki.CryptoKit.String())
+func (ki *KeyInfo) DescStr(inVerbose bool) string {
+	if inVerbose {
+		return fmt.Sprint("pubkey ", plan.BinEncode(ki.PubKey), " using ", ki.CryptoKit.String())
+	} else {
+		return fmt.Sprint("pubkey ", BinDesc(ki.PubKey))
+	}
 }
 
 // Zero zeros out a given slice
