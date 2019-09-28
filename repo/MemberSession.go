@@ -101,10 +101,10 @@ TODO: check than a session w/ the same member ID + warksation isn't already open
         return nil, err
     }
 
-    ms.msgOutbox <- &Msg{
+    ms.queueMsg(&Msg{
         Op: MsgOp_MEMBER_SESSION_READY,
         BUF0: ms.SessionToken,
-    }
+    })
 
     return ms, nil
 }
@@ -224,8 +224,7 @@ func (ms *MemberSession) ctxStartup() error {
     ms.msgOutbox = make(chan *Msg, 8)
     ms.CtxGo(func() {
 
-        isRunning := true
-
+        isRunning := ms.CtxRunning()
         outletDone := ms.msgOutlet.Context().Done()
 
         for isRunning {
@@ -233,7 +232,7 @@ func (ms *MemberSession) ctxStartup() error {
                 msg *Msg
                 err error
             )
-
+             
             select {
                 case msg = <-ms.msgOutbox:
                     if msg != nil {
@@ -244,7 +243,9 @@ func (ms *MemberSession) ctxStartup() error {
                     } else {
                         isRunning = false
                     }
+
                 case <-outletDone:
+                    // On an error, this will cancel the ms Ctx, causing ms.msgOutbox to close, causing the loop to exit
                     err = ms.msgOutlet.Context().Err()
                     ms.CtxStop("MemberSession: " + err.Error(), nil)
                     outletDone = nil
@@ -269,8 +270,16 @@ func (ms *MemberSession) ctxStopping() {
     ms.Info(2, "MemberSession ending")
 
     // With all the channel sessions stopped, we can safely close their outlet, causing a close-cascade.
-    if ms.msgOutbox != nil {
-        close(ms.msgOutbox)
+    if msgOutbox := ms.msgOutbox; msgOutbox != nil {
+        ms.msgOutbox = nil
+        close(msgOutbox)
+    }
+}
+
+// queueMsg places the given Msg into the outbox to be sent to the connected client.
+func (ms *MemberSession) queueMsg(outgoingMsg *Msg) {
+    if ms.CtxRunning() && outgoingMsg != nil {
+        ms.msgOutbox <- outgoingMsg
     }
 }
 
@@ -365,20 +374,20 @@ func (ms *MemberSession) handleSess0(msg *Msg) bool {
                 msg.ChSessID = uint32(cs.ChSessID)
             }
 
-            ms.msgOutbox <- msg
+            ms.queueMsg(msg)
         }
 
-            case MsgOp_LATEST_CH_EPOCH:
-                fallthrough
-            case MsgOp_LATEST_CH_INFO:
-                chSt, err := ms.CR.chMgr.FetchChannel(plan.ChID(msg.BUF0))
-                if err != nil {
-                    msg.Error = err.Error()
-                } else if msg.Op == MsgOp_LATEST_CH_EPOCH {
-                    msg.BUF0 = chSt.ExportLatestChEpoch(msg.BUF0)
-                } else {
-                    msg.BUF0 = chSt.ExportLatestChInfo(msg.BUF0)
-                }
+        case MsgOp_LATEST_CH_EPOCH:
+            fallthrough
+        case MsgOp_LATEST_CH_INFO:
+            chSt, err := ms.CR.chMgr.FetchChannel(plan.ChID(msg.BUF0))
+            if err != nil {
+                msg.Error = err.Error()
+            } else if msg.Op == MsgOp_LATEST_CH_EPOCH {
+                msg.BUF0 = chSt.ExportLatestChEpoch(msg.BUF0)
+            } else {
+                msg.BUF0 = chSt.ExportLatestChInfo(msg.BUF0)
+            }
 
 
         case MsgOp_RETAIN_COMMUNITY_KEYS:
@@ -444,7 +453,7 @@ func (ms *MemberSession) handleCommonMsgs(msg *Msg) bool {
                 if inErr != nil {
                     msg.Error = inErr.Error()
                 }
-                ms.msgOutbox <- msg
+                ms.queueMsg(msg)
             }
 
             if err == nil {
