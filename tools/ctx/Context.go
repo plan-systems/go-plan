@@ -220,8 +220,7 @@ func (C *Context) CtxGo(
 	}(C)
 }
 
-// CtxAddChild adds the given Context to this Context as a "child", meaning that
-// the parent context will wait for all children's CtxStop() to complete before
+// CtxAddChild adds the given Context as a "child", where C will initiate CtxStop() on each child before C carries out its own stop.
 func (C *Context) CtxAddChild(
 	inChild Ctx,
 	inID []byte,
@@ -353,7 +352,7 @@ func (C *Context) childStopping(
 	N := len(C.children)
 	for i := 0; i < N; i++ {
 
-		// A downside of Go is that a struct that embeds ptools.Context can show up as two interfaces:
+		// A downside of Go is that a struct that embeds ctx.Context can show up as two interfaces:
 		//    Ctx(&item.Context) and Ctx(&item)
 		// Since all the callbacks need to be the latter "native" Ctx (so that it can be upcast to a client type),
 		//    we must ensure that we search for ptr matches using the "base" Context but callback with the native.
