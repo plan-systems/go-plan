@@ -2,6 +2,7 @@ package ctx
 
 import (
 	"fmt"
+
 	"github.com/plan-systems/klog"
 )
 
@@ -10,7 +11,7 @@ func init() {
 	klog.InitFlags(nil)
 	klog.SetFormatter(&klog.FmtConstWidth{
 		FileNameCharWidth: 20,
-		UseColor: true,
+		UseColor:          true,
 	})
 
 }
@@ -35,7 +36,7 @@ func (l *Logger) SetLogLabel(inLabel string) {
 	l.logLabel = inLabel
 	l.hasPrefix = len(inLabel) > 0
 	if l.hasPrefix {
-		l.logPrefix = fmt.Sprintf("%s>> ", inLabel)
+		l.logPrefix = fmt.Sprintf("[%s] ", inLabel)
 	}
 }
 
