@@ -90,7 +90,7 @@ func (C *Context) CtxStart(
 		// some can make sense of a function passed as an "onStopping" proc more easily than some generic call that
 		// is less discernable.
 		select {
-			case <-inCtx.BaseContext().CtxStopping():
+		case <-inCtx.BaseContext().CtxStopping():
 		}
 
 		if onStopping != nil {
@@ -272,9 +272,7 @@ func (C *Context) CtxStatus() error {
 }
 
 // CtxRunning returns true has been started and has not stopped. See also CtxStopped().
-//
-// Warning: since this can change from true to false at any time, this is typically
-// used to detect if/when a workflow should cease.
+// This is typically used to detect if/when a dependent workflow should cease.
 //
 //
 // THREADSAFE
@@ -292,11 +290,11 @@ func (C *Context) CtxRunning() bool {
 	return true
 }
 
-// CtxStopped returns true if CtxStop() is currently being executed or has completed.
+// CtxStopped returns true if CtxStop() is currently in flight (or has completed).
 //
-// Warning: this is NOT the opposite of CtxRunning.  C.CtxStopped() will return true
-// when C.CtxStop() is called while C.CtxRunning() won't return false until C's children have
-// all been stopped.
+// Warning: this is NOT the opposite of CtxRunning().  C.CtxStopped() will return true
+// when C.CtxStop() is called vs C.CtxRunning() will return true until all of C's children have
+// stopped.
 //
 // THREADSAFE
 func (C *Context) CtxStopped() bool {
