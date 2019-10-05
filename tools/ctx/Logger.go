@@ -40,9 +40,14 @@ func (l *Logger) SetLogLabel(inLabel string) {
 	}
 }
 
-// GetLogLabel gets the label last set via SetLogLabel()
+// GetLogLabel returns the label last set via SetLogLabel()
 func (l *Logger) GetLogLabel() string {
 	return l.logLabel
+}
+
+// GetLogPrefix returns the the text that prefixes all log messages for this context.
+func (l *Logger) GetLogPrefix() string {
+	return l.logPrefix
 }
 
 // LogV returns true if logging is currently enabled for log verbose level.

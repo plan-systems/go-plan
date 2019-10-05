@@ -196,7 +196,7 @@ func (C *Context) CtxStopChildren(inReason string) {
 			child := C.children[i].Ctx
 			childC := child.BaseContext()
 			if logInfo {
-				C.Infof(2, "stopping child <%s> (%s)", childC.GetLogLabel(), reflect.TypeOf(child).Elem().Name())
+				C.Infof(2, "stopping child %s(%s)", childC.GetLogPrefix(), reflect.TypeOf(child).Elem().Name())
 			}
 			go childC.CtxStop(inReason, childrenRunning)
 		}
