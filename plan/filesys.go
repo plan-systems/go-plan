@@ -5,9 +5,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/mitchellh/go-homedir"
-
+	"github.com/pkg/errors"
 )
 
 var (
@@ -40,7 +39,7 @@ func SetupBaseDir(
 		} else if err == nil {
 			if inCreate {
 				err = errors.Errorf("for safety, path '%s' must not already exist", pathname)
-			} 
+			}
 		}
 	}
 
@@ -85,7 +84,7 @@ var remapCharset = map[rune]rune{
 }
 
 // MakeFSFriendly makes a given string safe to use for a file system.
-// If inSuffix is given, the hex encoding of those bytes are appended after "-"
+// If inSuffix is given, the hex encoding of those bytes are appended after a space.
 func MakeFSFriendly(inName string, inSuffix []byte) string {
 
 	var b strings.Builder
@@ -99,11 +98,12 @@ func MakeFSFriendly(inName string, inSuffix []byte) string {
 		}
 	}
 
-	name := b.String()
 	if len(inSuffix) > 0 {
-        b.WriteString(" ")
-        b.WriteString(BinEncode(inSuffix))
+		b.WriteString(" ")
+		b.WriteString(BinEncode(inSuffix))
 	}
+
+	name := b.String()
 
 	return name
 }
