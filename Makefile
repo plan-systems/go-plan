@@ -2,6 +2,8 @@ MAKEFLAGS += --warn-undefined-variables
 SHELL = /bin/bash -o nounset -o errexit -o pipefail
 .DEFAULT_GOAL = build
 
+GOPATH ?= "${HOME}/go"
+
 .PHONY: *
 
 # ----------------------------------------
@@ -9,6 +11,12 @@ SHELL = /bin/bash -o nounset -o errexit -o pipefail
 
 protobufs:
 	./build-protobufs.sh --protos ../plan-protobufs/pkg --dest .
+
+GRPC_VERS = 1.22.0
+
+workspace:
+	git clone https://github.com/plan-systems/plan-pdi-local.git \
+		../plan-pdi-local
 
 check: fmt lint test
 
