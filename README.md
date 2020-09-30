@@ -7,13 +7,11 @@
 P  L  A  N etwork
 ```
 
-[![ci.machinistlabs.com](https://ci.machinistlabs.com/api/v1/teams/plan/pipelines/plan/jobs/plan-core/badge)](https://ci.machinistlabs.com/teams/plan/pipelines/plan)
-
 [PLAN](http://plan-systems.org) is a free and open platform for groups to securely communicate, collaborate, and coordinate projects and activities.
 
 ## About
 
-This repo contains PLAN's backend infrastrcuture that ultimately hosts [plan-client-unity](https://github.com/plan-systems/plan-client-unity) clients.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `plan-core` is regarded as the official reference implementation.
+This repo contains PLAN's backend infrastrcuture that ultimately hosts [plan-client-unity](https://github.com/plan-systems/plan-client-unity) clients.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `plan-go` is regarded as the official reference implementation.
 
 The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
 
@@ -47,11 +45,11 @@ The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs
 This library uses protobuf definitions found in the [plan-protobufs](https://github.com/plan-systems/plan-protobufs) repo. The `*.pb.go` source code files generated from those protobuf definitions has been vendored into this repository at the appropriate subpackage location. This means that if you are consuming this library for use in another application, you can simply:
 
 ```
-go get github.com/plan-systems/plan-core
+go get github.com/plan-systems/plan-go
 ```
 
 
-If you are contributing new features to `plan-core`, you may end up needing to update the generated `*.pb.go` source. To do that, you'll need to do the following:
+If you are contributing new features to `plan-go`, you may end up needing to update the generated `*.pb.go` source. To do that, you'll need to do the following:
 
 1. Set up **Gprc.Tools**:
     1. Download the [latest Grpc.Tools nuget package](https://www.nuget.org/packages/Grpc.Tools/)

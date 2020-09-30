@@ -5,7 +5,7 @@ help() {
     cat <<EOF
 build-protobufs [--protos \$PROTO_INCLUDE] [--dest \$DEST_DIR]
 
-Builds the protobuf outputs for plan-core using this operating system's
+Builds the protobuf outputs for plan-go using this operating system's
 protoc toolchain and the gofast plugin, both of which should be installed
 in your \$PATH.
 
@@ -14,7 +14,7 @@ in your \$PATH.
          source's 'pkg/' directory if it's installed in the \$GOPATH.
 
 --dest   (or \$DEST_DIR) path to directory where '.pb.go' files will be
-         written. Defaults to top-level source directory of the plan-core
+         written. Defaults to top-level source directory of the plan-go
          source if it's installed in the \$GOPATH.
 EOF
     exit 0
@@ -27,7 +27,7 @@ err_exit() {
 
 src="${GOPATH}/src/github.com/plan-systems"
 PROTO_INCLUDE="${PROTO_INCLUDE:-${src}/plan-protobufs/pkg}"
-DEST_DIR="${DEST_DIR:-${src}/plan-core}"
+DEST_DIR="${DEST_DIR:-${src}/plan-go}"
 
 check() {
     command -v "protoc" > /dev/null || err_exit "protoc not on \$PATH ($PATH)"
@@ -52,7 +52,7 @@ compile() {
     # we can't use the go_package option in our .proto file because
     # we want to potentially reuse them across packages. so we end
     # up having to edit the generated file to match our package here.
-    replace='s~#PKG# "#PKG#"~#PKG# "github.com/plan-systems/plan-core/#PKG#" /// Redirected by build-go-protobufs :)~'
+    replace='s~#PKG# "#PKG#"~#PKG# "github.com/plan-systems/plan-go/#PKG#" /// Redirected by build-go-protobufs :)~'
     output_file="$DEST_DIR/$pkg/$pkg.pb.go"
     sed \
         -e "${replace//#PKG#/plan}" 	\

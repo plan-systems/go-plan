@@ -1,4 +1,4 @@
-Thanks for reporting an issue with plan-core!
+Thanks for reporting an issue with plan-go!
 
 If you're reporting a problem or think you've found a bug, please be sure to include the following information:
 
