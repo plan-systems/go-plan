@@ -7,7 +7,7 @@
 P  L  A  N etwork
 ```
 
-[![ci.machinistlabs.com](https://ci.machinistlabs.com/api/v1/teams/plan/pipelines/plan/jobs/plan-core/badge)](https://ci.machinistlabs.com/teams/plan/pipelines/plan)
+![](https://github.com/plan-systems/plan-core/workflows/Build%20and%20test/badge.svg)
 
 [PLAN](http://plan-systems.org) is a free and open platform for groups to securely communicate, collaborate, and coordinate projects and activities.
 
@@ -74,7 +74,7 @@ If you are contributing new features to `plan-core`, you may end up needing to u
         cp ./Grpc.Tools/tools/macosx_x64/protoc  /usr/local/bin
         cp ./Grpc.Tools/tools/linux_x64/protoc   /usr/local/bin
         cp ./Grpc.Tools/tools/windows_x64/protoc /usr/local/bin
-        
+
         chmod +x /usr/local/bin/protoc
         ```
 
