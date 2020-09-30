@@ -1,15 +1,6 @@
 {
     "folders": [
         {
-            "path": "../plan-client-phost"
-        },
-        {
-            "path": "../plan-pnode"
-        },
-        {
-            "path": "../plan-pdi-local"
-        },
-        {
             "path": "."
         },
         {
