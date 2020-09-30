@@ -64,6 +64,11 @@ func (l *logger) LogV(verboseLevel int32) bool {
 	return klog.V(klog.Level(verboseLevel)).Enabled()
 }
 
+// Debugf is a convenience function that maps to Infof(2, ...)
+func (l *logger) Debugf(format string, args ...interface{}) {
+	l.Infof(2, format, args...)
+}
+
 // Info logs to the INFO log.
 // Arguments are handled like fmt.Print(); a newline is appended if missing.
 //
@@ -71,6 +76,8 @@ func (l *logger) LogV(verboseLevel int32) bool {
 //   0. Enabled during production and field deployment.  Use this for important high-level events.
 //   1. Enabled during testing and development. Use for high-level changes in state, mode, or connection.
 //   2. Enabled during low-level debugging and troubleshooting.
+//
+// By convention, level 0 is the default verbose level when software is deployed.
 func (l *logger) Info(verboseLevel int32, args ...interface{}) {
 	if verboseLevel == 0 || klog.V(klog.Level(verboseLevel)).Enabled() {
 		if l.hasPrefix {
