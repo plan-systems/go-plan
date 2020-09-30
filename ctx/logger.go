@@ -6,69 +6,73 @@ import (
 	"github.com/plan-systems/klog"
 )
 
-func init() {
-
-	klog.InitFlags(nil)
-	klog.SetFormatter(&klog.FmtConstWidth{
-		FileNameCharWidth: 20,
-		UseColor:          true,
-	})
-
+// Logger anstracts basic logging functions.
+type Logger interface {
+	SetLogLabel(label string)
+	GetLogLabel() string
+	GetLogPrefix() string
+	LogV(verboseLevel int32) bool
+	Info(verboseLevel int32, args ...interface{})
+	Infof(verboseLevel int32, format string, args ...interface{})
+	Warn(args ...interface{})
+	Warnf(format string, args ...interface{})
+	Error(args ...interface{})
+	Errorf(format string, args ...interface{})
+	Fatalf(format string, args ...interface{})
 }
 
 //
-// Logger is an aid to logging and provides convenience functions
-type Logger struct {
+// logger is an aid to logging and provides convenience functions
+type logger struct {
 	hasPrefix bool
 	logPrefix string
 	logLabel  string
 }
 
-// Fatalf -- see Fatalf (above)
-func Fatalf(inFormat string, args ...interface{}) {
-	gLogger.Fatalf(inFormat, args...)
+// NewLogger creates and inits a new Logger with the given label.
+func NewLogger(label string) Logger {
+	l := &logger{}
+	if label != "" {
+		l.SetLogLabel(label)
+	}
+	return l
 }
 
-var gLogger = Logger{}
-
 // SetLogLabel sets the label prefix for all entries logged.
-func (l *Logger) SetLogLabel(inLabel string) {
-	l.logLabel = inLabel
-	l.hasPrefix = len(inLabel) > 0
+func (l *logger) SetLogLabel(label string) {
+	l.logLabel = label
+	l.hasPrefix = len(label) > 0
 	if l.hasPrefix {
-		l.logPrefix = fmt.Sprintf("[%s] ", inLabel)
-	}
+		l.logPrefix = fmt.Sprintf("[%s] ", label)
+	} else {
+        l.logPrefix = ""
+    }
 }
 
 // GetLogLabel returns the label last set via SetLogLabel()
-func (l *Logger) GetLogLabel() string {
+func (l *logger) GetLogLabel() string {
 	return l.logLabel
 }
 
 // GetLogPrefix returns the the text that prefixes all log messages for this context.
-func (l *Logger) GetLogPrefix() string {
+func (l *logger) GetLogPrefix() string {
 	return l.logPrefix
 }
 
 // LogV returns true if logging is currently enabled for log verbose level.
-func (l *Logger) LogV(inVerboseLevel int32) bool {
-	return bool(klog.V(klog.Level(inVerboseLevel)))
+func (l *logger) LogV(verboseLevel int32) bool {
+	return klog.V(klog.Level(verboseLevel)).Enabled()
 }
 
 // Info logs to the INFO log.
 // Arguments are handled like fmt.Print(); a newline is appended if missing.
 //
 // Verbose level conventions:
-//   0. Enabled during production and field deployment.  Use this for important high-level info.
+//   0. Enabled during production and field deployment.  Use this for important high-level events.
 //   1. Enabled during testing and development. Use for high-level changes in state, mode, or connection.
 //   2. Enabled during low-level debugging and troubleshooting.
-func (l *Logger) Info(inVerboseLevel int32, args ...interface{}) {
-	logIt := true
-	if inVerboseLevel > 0 {
-		logIt = bool(klog.V(klog.Level(inVerboseLevel)))
-	}
-
-	if logIt {
+func (l *logger) Info(verboseLevel int32, args ...interface{}) {
+	if verboseLevel == 0 || klog.V(klog.Level(verboseLevel)).Enabled() {
 		if l.hasPrefix {
 			klog.InfoDepth(1, l.logPrefix, fmt.Sprint(args...))
 		} else {
@@ -80,18 +84,13 @@ func (l *Logger) Info(inVerboseLevel int32, args ...interface{}) {
 // Infof logs to the INFO log.
 // Arguments are handled like fmt.Printf(); a newline is appended if missing.
 //
-// See comments above for Info() for guidelines for inVerboseLevel.
-func (l *Logger) Infof(inVerboseLevel int32, inFormat string, args ...interface{}) {
-	logIt := true
-	if inVerboseLevel > 0 {
-		logIt = bool(klog.V(klog.Level(inVerboseLevel)))
-	}
-
-	if logIt {
+// See comments above for Info() for guidelines for verboseLevel.
+func (l *logger) Infof(verboseLevel int32, format string, args ...interface{}) {
+	if verboseLevel == 0 || klog.V(klog.Level(verboseLevel)).Enabled() {
 		if l.hasPrefix {
-			klog.InfoDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+			klog.InfoDepth(1, l.logPrefix, fmt.Sprintf(format, args...))
 		} else {
-			klog.InfoDepth(1, fmt.Sprintf(inFormat, args...))
+			klog.InfoDepth(1, fmt.Sprintf(format, args...))
 		}
 	}
 }
@@ -101,7 +100,7 @@ func (l *Logger) Infof(inVerboseLevel int32, inFormat string, args ...interface{
 //
 // Warnings are reserved for situations that indicate an inconsistency or an error that
 // won't result in a departure of specifications, correctness, or expected behavior.
-func (l *Logger) Warn(args ...interface{}) {
+func (l *logger) Warn(args ...interface{}) {
 	{
 		if l.hasPrefix {
 			klog.WarningDepth(1, l.logPrefix, fmt.Sprint(args...))
@@ -115,12 +114,12 @@ func (l *Logger) Warn(args ...interface{}) {
 // Arguments are handled like fmt.Printf(); a newline is appended if missing.
 //
 // See comments above for Warn() for guidelines on errors vs warnings.
-func (l *Logger) Warnf(inFormat string, args ...interface{}) {
+func (l *logger) Warnf(format string, args ...interface{}) {
 	{
 		if l.hasPrefix {
-			klog.WarningDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+			klog.WarningDepth(1, l.logPrefix, fmt.Sprintf(format, args...))
 		} else {
-			klog.WarningDepth(1, fmt.Sprintf(inFormat, args...))
+			klog.WarningDepth(1, fmt.Sprintf(format, args...))
 		}
 	}
 }
@@ -131,7 +130,7 @@ func (l *Logger) Warnf(inFormat string, args ...interface{}) {
 // Errors are reserved for situations that indicate an implementation deficiency, a
 // corruption of data or resources, or an issue that if not addressed could spiral into deeper issues.
 // Logging an error reflects that correctness or expected behavior is either broken or under threat.
-func (l *Logger) Error(args ...interface{}) {
+func (l *logger) Error(args ...interface{}) {
 	{
 		if l.hasPrefix {
 			klog.ErrorDepth(1, l.logPrefix, fmt.Sprint(args...))
@@ -145,24 +144,24 @@ func (l *Logger) Error(args ...interface{}) {
 // Arguments are handled like fmt.Print; a newline is appended if missing.
 //
 // See comments above for Error() for guidelines on errors vs warnings.
-func (l *Logger) Errorf(inFormat string, args ...interface{}) {
+func (l *logger) Errorf(format string, args ...interface{}) {
 	{
 		if l.hasPrefix {
-			klog.ErrorDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+			klog.ErrorDepth(1, l.logPrefix, fmt.Sprintf(format, args...))
 		} else {
-			klog.ErrorDepth(1, fmt.Sprintf(inFormat, args...))
+			klog.ErrorDepth(1, fmt.Sprintf(format, args...))
 		}
 	}
 }
 
 // Fatalf logs to the FATAL, ERROR, WARNING, and INFO logs,
 // Arguments are handled like fmt.Printf(); a newline is appended if missing.
-func (l *Logger) Fatalf(inFormat string, args ...interface{}) {
+func (l *logger) Fatalf(format string, args ...interface{}) {
 	{
 		if l.hasPrefix {
-			klog.FatalDepth(1, l.logPrefix, fmt.Sprintf(inFormat, args...))
+			klog.FatalDepth(1, l.logPrefix, fmt.Sprintf(format, args...))
 		} else {
-			klog.FatalDepth(1, fmt.Sprintf(inFormat, args...))
+			klog.FatalDepth(1, fmt.Sprintf(format, args...))
 		}
 	}
 }

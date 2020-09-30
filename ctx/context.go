@@ -5,16 +5,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"reflect"
 	"sync"
 	"syscall"
 	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 )
 
 // Ctx is an abstraction for a context that can stopped/aborted.
@@ -32,9 +28,9 @@ type childCtx struct {
 
 // Context is a service helper.
 type Context struct {
-	Logger
+	context.Context
+	logger
 
-	Ctx        context.Context
 	FaultLog   []error
 	FaultLimit int
 
@@ -53,38 +49,45 @@ type Context struct {
 	onStopping         func()
 }
 
+// Ctx is an abstraction for a context that can be stopped and waited on.
+//
+// Ctx is a bridge between a Context expressed directly as *struct or as an interface offering abstraction.
+func (c *Context) Ctx() *Context {
+	return c
+}
+
 // CtxStopping allows callers to wait until this context is stopping.
-func (C *Context) CtxStopping() <-chan struct{} {
-	return C.Ctx.Done()
+func (c *Context) CtxStopping() <-chan struct{} {
+	return c.Context.Done()
 }
 
 // CtxStart blocks until the given onStartup proc is complete  started up or stopped (if an err is returned).
 //
 // See notes for CtxInitiateStop()
-func (C *Context) CtxStart(
+func (c *Context) CtxStart(
 	onStartup func() error,
 	onAboutToStop func(),
 	onChildAboutToStop func(inChild Ctx),
 	onStopping func(),
 ) error {
 
-	if C.CtxRunning() {
+	if c.CtxRunning() {
 		panic("plan.Context already running")
 	}
 
-	C.onAboutToStop = onAboutToStop
-	C.onChildAboutToStop = onChildAboutToStop
-	C.FaultLimit = 1
-	C.Ctx, C.ctxCancel = context.WithCancel(context.Background())
+	c.onAboutToStop = onAboutToStop
+	c.onChildAboutToStop = onChildAboutToStop
+	c.FaultLimit = 1
+	c.Context, c.ctxCancel = context.WithCancel(context.Background())
 
 	var err error
 	if onStartup != nil {
 		err = onStartup()
 	}
 
-	// Even if onStopping == nil, we still need this call since the resulting C.stopComplete.Add(1) ensures
+	// Even if onStopping == nil, we still need this call since the resulting c.stopComplete.Add(1) ensures
 	// that this context's CtxStop() has actually somethong to wait on.
-	Go(C, func(inCtx Ctx) {
+	c.CtxGo(func(inCtx Ctx) {
 
 		// This whole onStopping is a convenience as well as a self-documenting thing,  When looking at code,
 		// some can make sense of a function passed as an "onStopping" proc more easily than some generic call that
@@ -99,9 +102,9 @@ func (C *Context) CtxStart(
 	})
 
 	if err != nil {
-		C.Errorf("CtxStart failed: %v", err)
-		C.CtxStop("CtxStart failed", nil)
-		C.CtxWait()
+		c.Errorf("CtxStart failed: %v", err)
+		c.CtxStop("CtxStart failed", nil)
+		c.CtxWait()
 	}
 
 	return err
@@ -109,62 +112,62 @@ func (C *Context) CtxStart(
 
 // CtxStop initiates a stop of this Context, calling inReleaseOnComplete.Done() when this context is fully stopped (if provided).
 //
-// If C.CtxStop() is being called for the first time, true is returned.
+// If c.CtxStop() is being called for the first time, true is returned.
 // If it has already been called (or is in-flight), then false is returned and this call effectively is a no-op (but still honors in inReleaseOnComplete).
 //
-//	The following are equivalent:
+//  The following are equivalent:
 //
-//			initiated := c.CtxStop(reason, waitGroup)
+//          initiated := c.CtxStop(reason, waitGroup)
 //
-//			initiated := c.CtxStop(reason, nil)
-//			c.CtxWait()
-//			if waitGroup != nil {
-//				waitGroup.Done()
-//			}
+//          initiated := c.CtxStop(reason, nil)
+//          c.CtxWait()
+//          if waitGroup != nil {
+//              waitGroup.Done()
+//          }
 //
-// When C.CtxStop() is called (for the first time):
-//  1. C.onAboutToStop() is called (if provided to C.CtxStart)
-//  2. if C has a parent, C is detached and the parent's onChildAboutToStop(C) is called (if provided to C.CtxStart).
-//  3. C.CtxStopChildren() is called, blocking until all children are stopped (recursive)
-//  4. C.Ctx is cancelled, causing onStopping() to be called (if provided) and any <-CtxStopping() calls to be unblocked.
-//  5. C's onStopping() is called (if provided to C.CtxStart)
-//  6. After the last call to C.CtxGo() has completed, C.CtxWait() is released.
+// When c.CtxStop() is called (for the first time):
+//  1. c.onAboutToStop() is called (if provided to c.CtxStart)
+//  2. if c has a parent, c is detached and the parent's onChildAboutToStop(c) is called (if provided to c.CtxStart).
+//  3. c.CtxStopChildren() is called, blocking until all children are stopped (recursive)
+//  4. c.Context is cancelled, causing onStopping() to be called (if provided) and any <-CtxStopping() calls to be unblocked.
+//  5. c's onStopping() is called (if provided to c.CtxStart)
+//  6. After the last call to c.CtxGo() has completed, c.CtxWait() is released.
 //
-func (C *Context) CtxStop(
+func (c *Context) CtxStop(
 	inReason string,
 	inReleaseOnComplete *sync.WaitGroup,
 ) bool {
 
 	initiated := false
 
-	C.stopMutex.Lock()
-	if ctxCancel := C.ctxCancel; C.CtxRunning() && ctxCancel != nil {
-		C.ctxCancel = nil
-		C.stopReason = inReason
-		C.Infof(2, "CtxStop (%s)", C.stopReason)
+	c.stopMutex.Lock()
+	if ctxCancel := c.ctxCancel; c.CtxRunning() && ctxCancel != nil {
+		c.ctxCancel = nil
+		c.stopReason = inReason
+		c.Infof(2, "CtxStop (%s)", c.stopReason)
 
 		// Hand it over to client-level execution to finish stopping/cleanup.
-		if onAboutToStop := C.onAboutToStop; onAboutToStop != nil {
-			C.onAboutToStop = nil
+		if onAboutToStop := c.onAboutToStop; onAboutToStop != nil {
+			c.onAboutToStop = nil
 			onAboutToStop()
 		}
 
-		if C.parent != nil {
-			C.parent.childStopping(C)
+		if c.parent != nil {
+			c.parent.childStopping(c)
 		}
 
 		// Stop the all children so that leaf children are stopped first.
-		C.CtxStopChildren("parent is stopping")
+		c.CtxStopChildren("parent is stopping")
 
 		// Calling this *after* stopping children causes the entire hierarchy to be closed/cancelled leaf-first.
 		ctxCancel()
 
 		initiated = true
 	}
-	C.stopMutex.Unlock()
+	c.stopMutex.Unlock()
 
 	if inReleaseOnComplete != nil {
-		C.CtxWait()
+		c.CtxWait()
 		inReleaseOnComplete.Done()
 	}
 
@@ -174,100 +177,103 @@ func (C *Context) CtxStop(
 // CtxWait blocks until this Context has completed stopping (following a CtxInitiateStop). Returns true if this call initiated the shutdown (vs another cause)
 //
 // THREADSAFE
-func (C *Context) CtxWait() {
-	C.stopComplete.Wait()
+func (c *Context) CtxWait() {
+	c.stopComplete.Wait()
 }
 
 // CtxStopChildren initiates a stop on each child and blocks until complete.
-func (C *Context) CtxStopChildren(inReason string) {
+func (c *Context) CtxStopChildren(inReason string) {
 
 	childrenRunning := &sync.WaitGroup{}
 
-	logInfo := C.LogV(2)
+	logInfo := c.LogV(2)
 
-	C.childrenMutex.RLock()
-	N := len(C.children)
+	c.childrenMutex.RLock()
+	N := len(c.children)
 	if logInfo {
-		C.Infof(2, "%d children to stop", N)
+		c.Infof(2, "%d children to stop", N)
 	}
 	if N > 0 {
 		childrenRunning.Add(N)
 		for i := N - 1; i >= 0; i-- {
-			child := C.children[i].Ctx
+			child := c.children[i].Ctx
 			childC := child.BaseContext()
 			if logInfo {
-				C.Infof(2, "stopping child %s(%s)", childC.GetLogPrefix(), reflect.TypeOf(child).Elem().Name())
+				c.Infof(2, "stopping child %s(%s)", childC.GetLogPrefix(), reflect.TypeOf(child).Elem().Name())
 			}
 			go childC.CtxStop(inReason, childrenRunning)
 		}
 	}
-	C.childrenMutex.RUnlock()
+	c.childrenMutex.RUnlock()
 
 	childrenRunning.Wait()
 	if N > 0 && logInfo {
-		C.Infof(2, "children stopped")
+		c.Infof(2, "children stopped")
 	}
 }
 
-// CtxGo is lesser more convenient variant of Go().
-func (C *Context) CtxGo(
-	inProcess func(),
+// CtxGo runs task() in its own goroutine while preventing c from stopping until task() has exited.
+//
+// The purpose of this is to remove code you would historically maintain to wait on a task.
+// The presumption here is that task will exit via some trigger *other* than c.CtxWait()
+func (c *Context) CtxGo(
+	task func(parent Ctx),
 ) {
-	C.stopComplete.Add(1)
-	go func(C *Context) {
-		inProcess()
-		C.stopComplete.Done()
-	}(C)
+	c.stopComplete.Add(1)
+	go func(parent *Context) {
+		task(parent)
+		parent.stopComplete.Done()
+	}(c)
 }
 
-// CtxAddChild adds the given Context as a "child", where C will initiate CtxStop() on each child before C carries out its own stop.
-func (C *Context) CtxAddChild(
+// CtxAddChild adds the given Context as a "child", where c will initiate CtxStop() on each child before c carries out its own stop.
+func (c *Context) CtxAddChild(
 	inChild Ctx,
 	inID []byte,
 ) {
 
-	C.childrenMutex.Lock()
-	C.children = append(C.children, childCtx{
+	c.childrenMutex.Lock()
+	c.children = append(c.children, childCtx{
 		CtxID: inID,
 		Ctx:   inChild,
 	})
-	inChild.BaseContext().setParent(C)
-	C.childrenMutex.Unlock()
+	inChild.BaseContext().setParent(c)
+	c.childrenMutex.Unlock()
 }
 
 // CtxGetChildByID returns the child Context with the match ID (or nil if not found).
-func (C *Context) CtxGetChildByID(
+func (c *Context) CtxGetChildByID(
 	inChildID []byte,
 ) Ctx {
 	var ctx Ctx
 
-	C.childrenMutex.RLock()
-	N := len(C.children)
+	c.childrenMutex.RLock()
+	N := len(c.children)
 	for i := 0; i < N; i++ {
-		if bytes.Equal(C.children[i].CtxID, inChildID) {
-			ctx = C.children[i].Ctx
+		if bytes.Equal(c.children[i].CtxID, inChildID) {
+			ctx = c.children[i].Ctx
 		}
 	}
-	C.childrenMutex.RUnlock()
+	c.childrenMutex.RUnlock()
 
 	return ctx
 }
 
 // CtxStopReason returns the reason provided by the stop initiator.
-func (C *Context) CtxStopReason() string {
-	return C.stopReason
+func (c *Context) CtxStopReason() string {
+	return c.stopReason
 }
 
 // CtxStatus returns an error if this Context has not yet started, is stopping, or has stopped.
 //
 // THREADSAFE
-func (C *Context) CtxStatus() error {
+func (c *Context) CtxStatus() error {
 
-	if C.Ctx == nil {
+	if c.Context == nil {
 		return ErrCtxNotRunning
 	}
 
-	return C.Ctx.Err()
+	return c.Context.Err()
 }
 
 // CtxRunning returns true has been started and has not stopped. See also CtxStopped().
@@ -275,13 +281,13 @@ func (C *Context) CtxStatus() error {
 //
 //
 // THREADSAFE
-func (C *Context) CtxRunning() bool {
-	if C.Ctx == nil {
+func (c *Context) CtxRunning() bool {
+	if c.Context == nil {
 		return false
 	}
 
 	select {
-	case <-C.Ctx.Done():
+	case <-c.Context.Done():
 		return false
 	default:
 	}
@@ -291,13 +297,13 @@ func (C *Context) CtxRunning() bool {
 
 // CtxStopped returns true if CtxStop() is currently in flight (or has completed).
 //
-// Warning: this is NOT the opposite of CtxRunning().  C.CtxStopped() will return true
-// when C.CtxStop() is called vs C.CtxRunning() will return true until all of C's children have
+// Warning: this is NOT the opposite of CtxRunning().  c.CtxStopped() will return true
+// when c.CtxStop() is called vs c.CtxRunning() will return true until all of c's children have
 // stopped.
 //
 // THREADSAFE
-func (C *Context) CtxStopped() bool {
-	return C.Ctx == nil
+func (c *Context) CtxStopped() bool {
+	return c.Context == nil
 }
 
 // CtxOnFault is called when the given error has occurred an represents an unexpected fault that alone doesn't
@@ -306,75 +312,75 @@ func (C *Context) CtxStopped() bool {
 // If inErr == nil, this call has no effect.
 //
 // THREADSAFE
-func (C *Context) CtxOnFault(inErr error, inDesc string) {
+func (c *Context) CtxOnFault(inErr error, inDesc string) {
 
 	if inErr == nil {
 		return
 	}
 
-	C.Error(inDesc, ": ", inErr)
+	c.Error(inDesc, ": ", inErr)
 
-	C.stopMutex.Lock()
-	C.FaultLog = append(C.FaultLog, inErr)
-	faultCount := len(C.FaultLog)
-	C.stopMutex.Unlock()
+	c.stopMutex.Lock()
+	c.FaultLog = append(c.FaultLog, inErr)
+	faultCount := len(c.FaultLog)
+	c.stopMutex.Unlock()
 
-	if faultCount < C.FaultLimit {
+	if faultCount < c.FaultLimit {
 		return
 	}
 
-	C.CtxStop("fault limit reached", nil)
+	c.CtxStop("fault limit reached", nil)
 }
 
 // setParent is internally called wheen attaching/detaching a child.
-func (C *Context) setParent(inNewParent *Context) {
-	if inNewParent != nil && C.parent != nil {
+func (c *Context) setParent(inNewParent *Context) {
+	if inNewParent != nil && c.parent != nil {
 		panic("Context already has parent")
 	}
-	C.parent = inNewParent
+	c.parent = inNewParent
 }
 
 // BaseContext allows the holder of a Ctx to get the raw/underlying Context.
-func (C *Context) BaseContext() *Context {
-	return C
+func (c *Context) BaseContext() *Context {
+	return c
 }
 
-// childStopping is internally called once the given child has been stopped and its C.onAboutToStop() has completed.
-func (C *Context) childStopping(
+// childStopping is internally called once the given child has been stopped and its c.onAboutToStop() has completed.
+func (c *Context) childStopping(
 	inChild *Context,
 ) {
 
 	var native Ctx
 
 	// Detach the child
-	C.childrenMutex.Lock()
+	c.childrenMutex.Lock()
 	inChild.setParent(nil)
-	N := len(C.children)
+	N := len(c.children)
 	for i := 0; i < N; i++ {
 
 		// A downside of Go is that a struct that embeds ctx.Context can show up as two interfaces:
 		//    Ctx(&item.Context) and Ctx(&item)
 		// Since all the callbacks need to be the latter "native" Ctx (so that it can be upcast to a client type),
 		//    we must ensure that we search for ptr matches using the "base" Context but callback with the native.
-		native = C.children[i].Ctx
+		native = c.children[i].Ctx
 		if native.BaseContext() == inChild {
-			copy(C.children[i:], C.children[i+1:N])
+			copy(c.children[i:], c.children[i+1:N])
 			N--
-			C.children[N].Ctx = nil
-			C.children = C.children[:N]
+			c.children[N].Ctx = nil
+			c.children = c.children[:N]
 			break
 		}
 		native = nil
 	}
-	C.childrenMutex.Unlock()
+	c.childrenMutex.Unlock()
 
-	if C.onChildAboutToStop != nil {
-		C.onChildAboutToStop(native)
+	if c.onChildAboutToStop != nil {
+		c.onChildAboutToStop(native)
 	}
 }
 
 // AttachInterruptHandler creates a new interupt handler and fuses it w/ the given context
-func (C *Context) AttachInterruptHandler() {
+func (c *Context) AttachInterruptHandler() {
 	sigInbox := make(chan os.Signal, 1)
 
 	signal.Notify(sigInbox, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
@@ -389,14 +395,14 @@ func (C *Context) AttachInterruptHandler() {
 			count++
 			curTime := time.Now().Unix()
 
-			// Prevent un-terminated ^C character in terminal
+			// Prevent un-terminated ^c character in terminal
 			fmt.Println()
 
 			if count == 1 {
 				firstTime = curTime
 
 				reason := "received " + sig.String()
-				C.CtxStop(reason, nil)
+				c.CtxStop(reason, nil)
 			} else {
 				if curTime > firstTime+3 {
 					fmt.Println("\nReceived interrupt before graceful shutdown, terminating...")
@@ -407,74 +413,10 @@ func (C *Context) AttachInterruptHandler() {
 	}()
 
 	go func() {
-		C.CtxWait()
+		c.CtxWait()
 		signal.Stop(sigInbox)
 		close(sigInbox)
 	}()
 
-	C.Infof(0, "for graceful shutdown, \x1b[1m^C\x1b[0m or \x1b[1mkill -s SIGINT %d\x1b[0m", os.Getpid())
-}
-
-// AttachGrpcServer opens a new net.Listener for the given netwok params and then serves ioServer.
-//
-// Appropriate calls are set up so that:
-//  1. ioServer exiting will trigger CtxStop().
-//  2. When this Context is about to stop, ioServer.GracefulStop is called.
-func (C *Context) AttachGrpcServer(
-	inNetwork string,
-	inNetAddr string,
-	ioServer *grpc.Server,
-) error {
-
-	C.stopMutex.Lock()
-	defer C.stopMutex.Unlock()
-
-	C.Infof(0, "starting grpc service on \x1b[1;32m%v %v\x1b[0m", inNetwork, inNetAddr)
-	listener, err := net.Listen(inNetwork, inNetAddr)
-	if err != nil {
-		return err
-	}
-
-	// Register reflection service on gRPC server.
-	reflection.Register(ioServer)
-	Go(C, func(inCtx Ctx) {
-		C := inCtx.BaseContext()
-
-		if err := ioServer.Serve(listener); err != nil {
-			C.Error("grpc server error: ", err)
-		}
-		listener.Close()
-
-		C.CtxStop("grpc server stopped", nil)
-	})
-
-	origAboutToStop := C.onAboutToStop
-	C.onAboutToStop = func() {
-		C.Info(1, "stopping grpc service")
-		go ioServer.GracefulStop()
-
-		if origAboutToStop != nil {
-			origAboutToStop()
-		}
-	}
-
-	return err
-}
-
-// Go starts inProcess() in its own go routine while preventing inHostCtx from stopping until inProcess has completed.
-//
-// 	In effect, CtxGo(inHostCtx, inProcess) replaces:
-//
-//		go inProcess(inHostCtx)
-//
-// The presumption here is that inProcess will exit from some trigger *other* than inHost.CtxWait()
-func Go(
-	inHost Ctx,
-	inProcess func(inHost Ctx),
-) {
-	inHost.BaseContext().stopComplete.Add(1)
-	go func(inHost Ctx) {
-		inProcess(inHost)
-		inHost.BaseContext().stopComplete.Done()
-	}(inHost)
+	c.Infof(0, "for graceful shutdown, \x1b[1m^c\x1b[0m, \x1b[1mkill -s SIGINT %d\x1b[0m, or \x1b[1mkill -9 %d\x1b[0m", os.Getpid(), os.Getpid())
 }
