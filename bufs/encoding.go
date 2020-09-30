@@ -1,11 +1,19 @@
 package bufs
 
 import (
-	//"bytes"
+	"encoding/base64"
 	"encoding/hex"
-    "encoding/json"
-	//"fmt"
-    "reflect"
+	"encoding/json"
+
+	"reflect"
+)
+
+var (
+	// Base64Encoding is used to encode/decode binary buffer to/from base 64
+	Base64Encoding = base64.RawURLEncoding
+
+	// GenesisMemberID is the genesis member ID
+	GenesisMemberID = uint32(1)
 )
 
 // Zero zeros out a given slice
@@ -16,63 +24,107 @@ func Zero(buf []byte) {
 	}
 }
 
-// Marshaller used to generalize serialization
-type Marshaller interface {
+// Marshalable generalizes efficient serialization
+type Marshalable interface {
 	Marshal() ([]byte, error)
-	MarshalTo([]byte) (int, error)
+	MarshalToSizedBuffer([]byte) (int, error)
 	Size() int
 }
 
-// Unmarshaller used to generalize deserialization
-type Unmarshaller interface {
+// Unmarshalable used to generalize deserialization
+type Unmarshalable interface {
 	Unmarshal([]byte) error
 }
 
-// SmartMarshal marshals the given item to the given buffer.  If there is not enough space
-func SmartMarshal(inItem Marshaller, ioBuf []byte) []byte {
+// SmartMarshal marshals the given item to the given buffer.  If there is not enough space a new one is allocated.  The purpose of this is to reuse a scrap buffer.
+func SmartMarshal(item Marshalable, tryBuf []byte) []byte {
 	var err error
 
-	bufSz := cap(ioBuf)
-	sz := inItem.Size()
-	if sz > bufSz {
-		sz = (sz+7) &^ 7
-		ioBuf = make([]byte, sz)
-		bufSz = sz
+	bufSz := cap(tryBuf)
+	neededSz := item.Size()
+	if neededSz > bufSz {
+		neededSz = (neededSz + 7) &^ 7
+		tryBuf = make([]byte, neededSz)
+		bufSz = neededSz
 	}
 
-	sz, err = inItem.MarshalTo(ioBuf[:bufSz])
+	neededSz, err = item.MarshalToSizedBuffer(tryBuf[:bufSz])
 	if err != nil {
 		panic(err)
 	}
 
-	return ioBuf[:sz]
+	return tryBuf[:neededSz]
 }
 
+// SmartMarshalToBase64 marshals the given item and then encodes it into a base64 (ASCII) byte string.
+//
+// If tryDst is not large enough, a new buffer is allocated and returned in its place.
+func SmartMarshalToBase64(src Marshalable, tryDst []byte) []byte {
+	bufSz := cap(tryDst)
+	binSz := src.Size()
+	neededSz := 4 + 4*((binSz+2)/3)
+	if neededSz > bufSz {
+		neededSz = (neededSz + 7) &^ 7
+		tryDst = make([]byte, neededSz)
+		bufSz = neededSz
+	}
+
+	// First, marshal the item to the right-side of the scrap buffer
+	binBuf := tryDst[bufSz-binSz : bufSz]
+	var err error
+	binSz, err = src.MarshalToSizedBuffer(binBuf)
+	if err != nil {
+		panic(err)
+	}
+
+	// Now encode the marshaled to the left side of the scrap buffer.
+	// There is overlap, but encoding consumes from left to right, so it's safe.
+	encSz := Base64Encoding.EncodedLen(binSz)
+	tryDst = tryDst[:encSz]
+	Base64Encoding.Encode(tryDst, binBuf[:binSz])
+
+	return tryDst
+}
+
+// SmartDecodeFromBase64 decodes the base64 (ASCII) string into the given scrap buffer, returning the scrap buffer set to proper size.
+//
+// If tryDst is not large enough, a new buffer is allocated and returned in its place.
+func SmartDecodeFromBase64(srcBase64 []byte, tryDst []byte) ([]byte, error) {
+	binSz := Base64Encoding.DecodedLen(len(srcBase64))
+
+	bufSz := cap(tryDst)
+	if binSz > bufSz {
+		bufSz = (binSz + 7) &^ 7
+		tryDst = make([]byte, bufSz)
+	}
+	var err error
+	binSz, err = Base64Encoding.Decode(tryDst[:binSz], srcBase64)
+	return tryDst[:binSz], err
+}
 
 // Buf is a flexible buffer designed for reuse.
 type Buf struct {
-	Unmarshaller
+	Unmarshalable
 
 	Bytes []byte
 }
 
 // Unmarshal effectively copies the src buffer.
-func (buf *Buf) Unmarshal(inSrc []byte) error {
-	N := len(inSrc)
+func (buf *Buf) Unmarshal(srcBuf []byte) error {
+	N := len(srcBuf)
 	if cap(buf.Bytes) < N {
 		allocSz := ((N + 127) >> 7) << 7
 		buf.Bytes = make([]byte, N, allocSz)
 	} else {
 		buf.Bytes = buf.Bytes[:N]
 	}
-	copy(buf.Bytes, inSrc)
+	copy(buf.Bytes, srcBuf)
 
 	return nil
 }
 
-
 var (
-	bytesT  = reflect.TypeOf(Bytes(nil))
+	bytesType = reflect.TypeOf(Bytes(nil))
 )
 
 // Bytes marshal/unmarshal as a JSON string with 0x prefix.
@@ -82,18 +134,18 @@ type Bytes []byte
 // MarshalText implements encoding.TextMarshaler
 func (b Bytes) MarshalText() ([]byte, error) {
 	out := make([]byte, len(b)*2+2)
-    out[0] = '0'
-    out[1] = 'x'
+	out[0] = '0'
+	out[1] = 'x'
 	hex.Encode(out[2:], b)
 	return out, nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *Bytes) UnmarshalJSON(in []byte) error {
-	if ! isString(in) {
-		return errNonString(bytesT)
+	if !isString(in) {
+		return errNonString(bytesType)
 	}
-	return wrapTypeError(b.UnmarshalText(in[1:len(in)-1]), bytesT)
+	return wrapTypeError(b.UnmarshalText(in[1:len(in)-1]), bytesType)
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
@@ -112,8 +164,8 @@ func (b *Bytes) UnmarshalText(input []byte) error {
 // String returns the hex encoding of b.
 func (b Bytes) String() string {
 	out := make([]byte, len(b)*2+2)
-    out[0] = '0'
-    out[1] = 'x'
+	out[0] = '0'
+	out[1] = 'x'
 	hex.Encode(out[2:], b)
 	return string(out)
 }
@@ -123,7 +175,7 @@ func isString(input []byte) bool {
 }
 
 func wrapTypeError(err error, typ reflect.Type) error {
-	if _, ok := err.(*toolsErr); ok {
+	if _, ok := err.(*encodingErr); ok {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	}
 	return err
@@ -134,19 +186,13 @@ func errNonString(typ reflect.Type) error {
 }
 
 func checkText(in []byte) ([]byte, error) {
-    N := len(in)
+	N := len(in)
 	if N == 0 {
 		return nil, nil // empty strings are allowed
 	}
 	if N >= 2 && in[0] == '0' && (in[1] == 'x' || in[1] == 'X') {
 		in = in[2:]
-        N -= 2
-	} else {
-		return nil, ErrMissingPrefix
-	}
-	if (N & 1) != 0 {
-		return nil, ErrOddLength
+		N -= 2
 	}
 	return in, nil
 }
-
