@@ -87,13 +87,13 @@ func (c *Context) CtxStart(
 
 	// Even if onStopping == nil, we still need this call since the resulting c.stopComplete.Add(1) ensures
 	// that this context's CtxStop() has actually somethong to wait on.
-	c.CtxGo(func(inCtx Ctx) {
+	c.CtxGo(func() {
 
 		// This whole onStopping is a convenience as well as a self-documenting thing,  When looking at code,
 		// some can make sense of a function passed as an "onStopping" proc more easily than some generic call that
 		// is less discernable.
 		select {
-		case <-inCtx.BaseContext().CtxStopping():
+		case <-c.CtxStopping():
 		}
 
 		if onStopping != nil {
@@ -129,7 +129,7 @@ func (c *Context) CtxStart(
 //  1. c.onAboutToStop() is called (if provided to c.CtxStart)
 //  2. if c has a parent, c is detached and the parent's onChildAboutToStop(c) is called (if provided to c.CtxStart).
 //  3. c.CtxStopChildren() is called, blocking until all children are stopped (recursive)
-//  4. c.Context is cancelled, causing onStopping() to be called (if provided) and any <-CtxStopping() calls to be unblocked.
+//  4. c.Context is canceled, causing onStopping() to be called (if provided) and any <-CtxStopping() calls to be unblocked.
 //  5. c's onStopping() is called (if provided to c.CtxStart)
 //  6. After the last call to c.CtxGo() has completed, c.CtxWait() is released.
 //
@@ -159,7 +159,7 @@ func (c *Context) CtxStop(
 		// Stop the all children so that leaf children are stopped first.
 		c.CtxStopChildren("parent is stopping")
 
-		// Calling this *after* stopping children causes the entire hierarchy to be closed/cancelled leaf-first.
+		// Calling this *after* stopping children causes the entire hierarchy to be closed/canceled leaf-first.
 		ctxCancel()
 
 		initiated = true
@@ -212,16 +212,16 @@ func (c *Context) CtxStopChildren(inReason string) {
 	}
 }
 
-// CtxGo runs task() in its own goroutine while preventing c from stopping until task() has exited.
+// CtxGo runs the given task in a new goroutine such that c.CtxWait() will block until the child task exits.
 //
 // The purpose of this is to remove code you would historically maintain to wait on a task.
 // The presumption here is that task will exit via some trigger *other* than c.CtxWait()
 func (c *Context) CtxGo(
-	task func(parent Ctx),
+	childTask func(),
 ) {
 	c.stopComplete.Add(1)
 	go func(parent *Context) {
-		task(parent)
+		childTask()
 		parent.stopComplete.Done()
 	}(c)
 }

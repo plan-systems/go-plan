@@ -498,7 +498,7 @@ type pipeSess struct {
 func (sess *pipeSess) ctxStartup() error {
 
 	// Send outgoing msgs
-	sess.CtxGo(func(ctx.Ctx) {
+	sess.CtxGo(func() {
 		for running := true; running; {
 			select {
 			case msg := <-sess.msgOutlet:
@@ -521,7 +521,7 @@ func (sess *pipeSess) ctxStartup() error {
 	})
 
 	// Process incoming requests
-	sess.CtxGo(func(ctx.Ctx) {
+	sess.CtxGo(func() {
 		for sess.CtxRunning() {
 			reqIn, err := sess.rpc.Recv()
 			if err != nil {
