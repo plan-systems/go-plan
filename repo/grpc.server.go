@@ -20,6 +20,7 @@ import (
 	//proto "github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	grpc_codes "google.golang.org/grpc/codes"
 
 	"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
@@ -130,8 +131,8 @@ func (job *reqJob) Debugf(msgFormat string, msgArgs ...interface{}) {
 	job.sess.Infof(2, msgFormat, msgArgs...)
 }
 
-// cancelled returns true if this job should back out of all work.
-func (job *reqJob) isCancelled() bool {
+// canceled returns true if this job should back out of all work.
+func (job *reqJob) isCanceled() bool {
 	select {
 	case <-job.ctx.Done():
 		return true
@@ -140,7 +141,7 @@ func (job *reqJob) isCancelled() bool {
 	return false
 }
 
-func (job *reqJob) cancelled() <-chan struct{} {
+func (job *reqJob) canceled() <-chan struct{} {
 	return job.ctx.Done()
 }
 
@@ -149,17 +150,20 @@ func (job *reqJob) Ctx() context.Context {
 }
 
 func (job *reqJob) exeGet() error {
-	srv := job.sess.srv
-
-	var sub rw.StateSubscription
-	var err error
-
 	getOp := job.req.GetOp
 	scope := job.req.GetOp.Scope
 
+    opPath, err := ValidateKeypath(getOp.Keypath)
+    if err != nil {
+        return err
+    }
+
+	var sub rw.StateSubscription
+
+
 	// Subscribe *before* we start our get or we could miss a state while we're reading, son.
 	if job.req.GetOp.MaintainSync {
-		sub, err = srv.host.SubscribeStates(job.Ctx(), job.req.ChURI)
+		sub, err = job.sess.srv.host.SubscribeStates(job.Ctx(), job.req.ChURI)
 		if err != nil {
 			return ErrCode_FailedToOpenChURI.Wrap(err)
 		}
@@ -170,18 +174,17 @@ func (job *reqJob) exeGet() error {
         }
     }()
 
-    opPath := tree.MakeKeypath(getOp.Keypath, false)
-
     {
-        state, err := srv.host.Controllers().StateAtVersion(job.req.ChURI, nil)
+        state, err := job.sess.srv.host.Controllers().StateAtVersion(job.req.ChURI, nil)
         if err != nil {
             return ErrCode_FailedToOpenChURI.Wrap(err)
         }
         defer state.Close()
 
         if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
-            job.Debugf("Get: '%v'", string(opPath))
-            job.filterAndSendNode(state.NodeAt(opPath.Push(chMsgKey), nil))
+            nodePath := append(opPath, nodeEntryPath...)
+            job.Debugf("Get: '%v'", string(nodePath))
+            job.filterAndSendNode(state.NodeAt(nodePath, nil))
         }
 
         if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
@@ -195,7 +198,7 @@ func (job *reqJob) exeGet() error {
 
             // @@TODO: this can be accelerated by a special iterator that skips entries with keys shorter than one char.
             for iter.Rewind(); iter.Valid(); iter.Next() {
-                if job.isCancelled() {
+                if job.isCanceled() {
                     break
                 }
 
@@ -203,7 +206,7 @@ func (job *reqJob) exeGet() error {
                 nodePath := iter.Node().Keypath()
                 job.Debugf("Get: iter '%v'", string(nodePath))
                 _, leafKey := nodePath.Split()
-                if len(leafKey) == 1 && leafKey[0] == NodeChMsgKey {
+                if len(leafKey) == 1 && leafKey[0] == nodeEntryKey {
                     job.filterAndSendNode(state.NodeAt(nodePath, nil))
                 }
             }
@@ -244,7 +247,7 @@ func (job *reqJob) exeGet() error {
                         nodesSentThisTick = 0
                     }
 
-				case <-job.cancelled():
+				case <-job.canceled():
 					waiting = false
 
 				case rev := <-sub.States(): {
@@ -254,7 +257,7 @@ func (job *reqJob) exeGet() error {
                     job.Debugf(">>>  SUB %v/%v", job.req.ChURI, string(changePath))
                     if common.Equals(opPath) {
                         job.Debugf(">>>  COM %v/%v     common: %v", job.req.ChURI, string(changePath), common)
-                        if job.filterAndSendNode(rev.State.NodeAt(chMsgKey, nil)) {
+                        if  true { //job.filterAndSendNode(rev.State.NodeAt(kChMsgKey, nil)) {
                             nodesSentThisTick++
                         }
                     }
@@ -289,40 +292,6 @@ func (job *reqJob) exeGet() error {
 	return nil
 }
 
-// 	sub, err := srv.host.SubscribeStates(rpc.Context(), req.ChURI)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer sub.Close()
-
-// 	wg.Add(1)
-// 	go func() {
-// 		defer wg.Done()
-
-// 		scanning := true
-// 		for scanning {
-// 			srv.Debugf(">>> SUB STARTED   %v/%v:", req.ChURI, string(req.NodePathname))
-
-// 			select {
-// 			case <-srv.Ctx().Done():
-// 				scanning = false
-// 			case <-outlet.Context().Done():
-// 				srv.Debugf(">>> SUB CANCELLED %v/%v: ", req.ChURI, string(req.NodePathname))
-// 				scanning = false
-// 			case msg := <-sub.States():
-// 				srv.Debugf(">>>  SUB %v/%v: '%v'", req.ChURI, string(req.NodePathname), string(msg.State.Keypath()))
-// 				// State  tree.Node
-// 				// Leaves []types.ID
-// 				// msg.
-// 			}
-// 		}
-
-// 	}()
-
-// 	srv.Debugf(">>> SUB COMPLETE %v/%v:", req.ChURI, string(req.NodePathname))
-
-// }()
-
 func (job *reqJob) exeTxOp() (*ChMsg, error) {
 	putOp := job.req.PutOp
 
@@ -335,7 +304,7 @@ func (job *reqJob) exeTxOp() (*ChMsg, error) {
 		Patches: make([]rw.Patch, 0, len(putOp.Entries)+1),
 	}
 
-	srv := job.sess.srv
+	host := job.sess.srv.host
 
 	if putOp.ChannelGenesis {
 
@@ -364,7 +333,7 @@ func (job *reqJob) exeTxOp() (*ChMsg, error) {
 				"Validator": strMap{
 					"Content-Type": "validator/permissions",
 					"value": strMap{
-						srv.host.Address().String(): strMap{
+						host.Address().String(): strMap{
 							"^.*$": strMap{
 								"write": true,
 							},
@@ -388,10 +357,12 @@ func (job *reqJob) exeTxOp() (*ChMsg, error) {
 
 		for _, entry := range putOp.Entries {
 
-			// TODO -- check that keypath does not contain any single length key comps
+            keypath, err := ValidateKeypath(entry.Keypath)
+            if err != nil {
+                return nil, err
+            }
 
-			keypath := tree.Keypath(entry.Keypath + NodeChMsgPathKey)
-			job.Debugf("Put: '%v'", string(keypath))
+			job.Debugf("Put: '%v'", entry.Keypath)
 
 			entry.Op = 0
 			entry.ReqID = 0
@@ -401,13 +372,13 @@ func (job *reqJob) exeTxOp() (*ChMsg, error) {
 			job.scrap = bufs.SmartMarshalToBase64(entry, job.scrap)
 
 			tx.Patches = append(tx.Patches, rw.Patch{
-				Keypath: keypath,
+				Keypath: append(keypath, nodeEntryPath...),
 				Val:     string(job.scrap),
 			})
 		}
 	}
 
-	err := srv.host.SendTx(job.Ctx(), tx)
+	err := host.SendTx(job.Ctx(), tx)
 	if err != nil {
 		return nil, ErrCode_CommitFailed.Wrap(err)
 	}
@@ -423,9 +394,9 @@ func (job *reqJob) exeJob() {
 	var err error
 	var msg *ChMsg
 
-	// Check to see if this req is cancelled before beginning
-	if job.isCancelled() {
-		err = ErrCode_ReqCancelled.Err()
+	// Check to see if this req is canceled before beginning
+	if job.isCanceled() {
+		err = ErrCode_ReqCanceled.Err()
 	} else {
 
 		switch job.req.ReqOp {
@@ -438,16 +409,13 @@ func (job *reqJob) exeJob() {
 				msg, err = job.exeTxOp()
 			}
 
-		case ChReqOp_CancelReq:
-			err = ErrCode_ReqCancelled.Err()
-
 		default:
 			err = ErrCode_UnsupporteReqOp.Err()
 		}
 
 		if err == nil && msg == nil {
-			if job.isCancelled() {
-				err = ErrCode_ReqCancelled.Err()
+			if job.isCanceled() {
+				err = ErrCode_ReqCanceled.Err()
 			}
 		}
 	}
@@ -466,16 +434,53 @@ func (job *reqJob) sendCompletion(err error) {
 	if err == nil {
 		msg = job.newResponse(ChMsgOp_ReqComplete)
 	} else {
-		msg = job.newResponse(ChMsgOp_ReqDiscarded)
-		var reqErr *ReqErr
-		if reqErr, _ = err.(*ReqErr); reqErr == nil {
-			err = ErrCode_UnnamedErr.Wrap(err)
-			reqErr = err.(*ReqErr)
-		}
-		msg.Attachment = bufs.SmartMarshal(reqErr, msg.Attachment)
+		msg = job.req.newResponse(ChMsgOp_ReqDiscarded, err)
 	}
 
 	job.sess.msgOutlet <- msg
+}
+
+
+// ValidateKeypath checks that there are no problems with the given keypath string and returns a standardized Keypath.
+func ValidateKeypath(keypathStr string) (tree.Keypath, error) {
+    pathLen := len(keypathStr)
+
+    // Remove leading path sep char
+    if pathLen > 0 && keypathStr[0] == tree.PathSepChar {
+        keypathStr = keypathStr[1:]
+    }
+
+    path := make(tree.Keypath, 0, 128)
+    path = append(path, tree.Keypath(keypathStr)...)
+    pathLen = len(path)
+
+    if pathLen == 0 {
+        return nil, ErrCode_InvalidKeypath.ErrWithMsg("keypath not set")
+    }
+
+    sepIdx := -1
+    for i := 0; i <= pathLen; i++ {
+        if i == pathLen || path[i] == tree.PathSepChar {
+            compLen := i - sepIdx - 1
+            if compLen == 1 {
+                return nil, ErrCode_InvalidKeypath.ErrWithMsg("keypath components cannot be a single character")
+            } else if compLen == 0 {
+                if i < pathLen {
+                    return nil, ErrCode_InvalidKeypath.ErrWithMsg("keypath contains '//'")
+                }
+            }
+            if i < pathLen {
+                sepIdx = i
+            }
+        }
+    }
+
+    // Remove trailing path sep char
+    if sepIdx == pathLen-1 && pathLen > 0 {
+        path = path[:sepIdx]
+    }
+
+    return path, nil
 }
 
 
@@ -520,21 +525,22 @@ func (sess *pipeSess) ctxStartup() error {
 		for sess.CtxRunning() {
 			reqIn, err := sess.rpc.Recv()
 			if err != nil {
-				sess.Warnf("rpc.Recv() err: %v", err)
-				err = sess.rpc.Context().Err()
-				if err != nil {
-					sess.Warnf("rpc.Context().Err(): %v", err)
-				}
+                if grpc.Code(err) == grpc_codes.Canceled {
+                    sess.CtxStop("session pipe canceled", nil)
+                } else {
+                    sess.Errorf("sess.rpc.Recv() err: %v", err)
+                }
 			}
-			if err != nil {
-				break
-			}
-
 			sess.dispatchReq(reqIn)
 		}
 	})
 
 	return nil
+}
+
+
+func (sess *pipeSess) ctxStopping() {
+    sess.cancelAll()
 }
 
 
@@ -579,18 +585,22 @@ func (sess *pipeSess) addNewJob(reqIn *ChReq) *reqJob {
 }
 
 func (sess *pipeSess) dispatchReq(reqIn *ChReq) {
-    var reqErr ReqErr
-    
+    if reqIn == nil {
+        return
+    }
+
+    var err error
+
 	job := sess.lookupJob(reqIn.ReqID)
 	if reqIn.ReqOp == ChReqOp_CancelReq {
 		if job != nil {
 			job.ctxCancel()
 		} else {
-			reqErr.Code = ErrCode_ReqIDNotFound
+			err = ErrCode_ReqIDNotFound.Err()
 		}
 	} else {
 		if job != nil {
-			sess.Warnf("client sent an ReqID that was already in use (ReqID=%v)", reqIn.ReqID)
+			sess.Warnf("client sent ReqID already in use (ReqID=%v)", reqIn.ReqID)
 		} else {
 			job := sess.addNewJob(reqIn)
 			go job.exeJob()
@@ -598,28 +608,24 @@ func (sess *pipeSess) dispatchReq(reqIn *ChReq) {
 	}
 
 	// Sends an error if reqErr.Code was set
-	if reqErr.Code != ErrCode_NoErr {
-		sz, _ := reqErr.MarshalTo(sess.scrap[:])
-		sess.msgOutlet <- &ChMsg{
-			Op:         ChMsgOp_ReqDiscarded,
-			ReqID:      reqIn.ReqID,
-			Attachment: sess.scrap[:sz],
-		}
+	if err != nil {
+		sess.msgOutlet <- reqIn.newResponse(ChMsgOp_ReqDiscarded, err)
 	}
 }
 
 func (sess *pipeSess) cancelAll() {
-	jobsCancelled := 0
+    sess.Info(2, "canceling all jobs")
+	jobsCanceled := 0
 	sess.openReqsMu.Lock()
 	for _, job := range sess.openReqs {
-		if job.isCancelled() == false {
-			jobsCancelled++
+		if job.isCanceled() == false {
+			jobsCanceled++
 			job.ctxCancel()
 		}
 	}
 	sess.openReqsMu.Unlock()
-	if jobsCancelled > 0 {
-		sess.Infof(1, "cancelled %v jobs", jobsCancelled)
+	if jobsCanceled > 0 {
+		sess.Infof(1, "canceled %v jobs", jobsCanceled)
 	}
 }
 
@@ -640,7 +646,7 @@ func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error
 		sess.ctxStartup,
 		nil,
 		nil,
-		nil,
+		sess.ctxStopping,
 	)
 	if err != nil {
 		return err
@@ -649,12 +655,10 @@ func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error
 	select {
 	case <-srv.Ctx().Done():
 		sess.Info(2, "srv.Ctx().Done()")
-		sess.cancelAll()
 		sess.CtxStop(srv.CtxStopReason(), nil)
 	case <-rpc.Context().Done():
 		sess.Info(2, "rpc.Context().Done()")
-		sess.cancelAll()
-		sess.CtxStop("rpc context done", nil)
+		//sess.CtxStop("rpc context done", nil)   we should need to stop anything sincce 
 	}
 
 	sess.CtxWait()
@@ -663,145 +667,6 @@ func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error
 }
 
 
-
-	// 	sub, err := srv.host.SubscribeStates(rpc.Context(), req.ChURI)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	defer sub.Close()
-
-	// 	wg.Add(1)
-	// 	go func() {
-	// 		defer wg.Done()
-
-	// 		scanning := true
-	// 		for scanning {
-	// 			srv.Debugf(">>> SUB STARTED   %v/%v:", req.ChURI, string(req.NodePathname))
-
-	// 			select {
-	// 			case <-srv.Ctx().Done():
-	// 				scanning = false
-	// 			case <-outlet.Context().Done():
-	// 				srv.Debugf(">>> SUB CANCELLED %v/%v: ", req.ChURI, string(req.NodePathname))
-	// 				scanning = false
-	// 			case msg := <-sub.States():
-	// 				srv.Debugf(">>>  SUB %v/%v: '%v'", req.ChURI, string(req.NodePathname), string(msg.State.Keypath()))
-	// 				// State  tree.Node
-	// 				// Leaves []types.ID
-	// 				// msg.
-	// 			}
-	// 		}
-
-	// 	}()
-
-	// 	srv.Debugf(">>> SUB COMPLETE %v/%v:", req.ChURI, string(req.NodePathname))
-
-	// }()
-
-    // Close service session when the server is stopping or when the client side closes the connection/
-    
-
-// func (srv *GrpcServer) ChannelGenesis(ctx context.Context, req *ChannelGenesisReq) (*TxInfo, error) {
-
-// func (srv *GrpcServer) ChangeUserPerms(ctx context.Context, req *ChangeUserPermsReq) (*TxInfo, error) {
-// 	if req.Address == "" {
-// 		return nil, errors.New("no address specified")
-// 	}
-
-// 	var writeKeypathsRegex string
-// 	if req.GetWriteKeypathsRegex() != "" {
-// 		writeKeypathsRegex = req.GetWriteKeypathsRegex()
-// 	} else {
-// 		writeKeypathsRegex = "^.*$"
-// 	}
-
-// 	tx := rw.Tx{
-// 		StateURI: req.ChURI,
-// 		ID:       rw.GenesisTxID,
-// 		Patches: []rw.Patch{{
-// 			Keypath: tree.Keypath("Validator/value").Pushs(req.GetAddress()),
-// 			Val: strMap{
-// 				writeKeypathsRegex: strMap{
-// 					"write": req.GetCanWrite(),
-// 				},
-// 			},
-// 		}},
-// 	}
-
-// 	return srv.SendTx(ctx, &tx)
-// }
-
-// func (srv *GrpcServer) openState(chURI string) (tree.Node, error) {
-// 	if chURI == "" {
-// 		return nil, errors.New("missing channel/state URI")
-// 	}
-
-// 	state, err := srv.host.Controllers().StateAtVersion(chURI, nil)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// if exists, err := state.Exists(tree.Keypath(nodesFork)); err != nil {
-// 	// 	srv.Warnf("error fetching fork %v: %v", nodesFork, err)
-// 	// 	return nil, err
-// 	// } else if exists == false {
-// 	// 	return nil, errors.Errorf("fork %v not found", nodesFork)
-// 	// }
-
-// 	return state, nil
-// }
-
-// // func (srv *GrpcServer) NodeGet(ctx context.Context, req *NodeGetReq) (*Node, error) {
-// // 	if len(req.ParentID) <= 1 && req.ParentID != rootNodeID {
-// // 		return nil, errors.New("invalid/missing ParentID")
-// // 	}
-
-// // 	if len(req.NodeID) <= 1 {
-// // 		return nil, errors.New("invalid/missing NodeID")
-// // 	}
-
-// // 	state, err := srv.openState(req.ChURI)
-// // 	if err != nil {
-// // 		return nil, err
-// // 	}
-// // 	defer state.Close()
-
-// // 	subPath := formNodePath(req.ParentID, req.NodeID)
-
-// // 	// TODO: why isn't Exists() a call variant of NodeAt()??
-// // 	exists, err := state.Exists(subPath)
-// // 	if err != nil {
-// // 		return nil, err
-// // 	} else if exists == false {
-// // 		return nil, errors.Errorf("node not found #NnF (%v)", subPath)
-// // 	}
-// // 	node := state.NodeAt(subPath, nil)
-// // 	outNode := srv.filterAndExportNode(node, &exportFilters{
-// // 		NodeFetchFlags:  req.NodeFetchFlags,
-// // 		LinksFetchFlags: req.LinksFetchFlags,
-// // 	})
-// // 	if outNode == nil {
-// // 		return nil, errors.New("error exporting node")
-// // 	}
-
-// // 	return outNode, nil
-// // }
-
-// var emptyNode = &Node{}
-
-// func (srv *GrpcServer) NodeGett(req *NodeGetReq, outlet RPC_NodeGetServer) error {
-
-// 	if req.LoadFields == NodeFields_ALL_FIELDS {
-// 		req.LoadFields = 0xFF
-// 	}
-
-// 	filters := nodeFilters{
-// 		req:        req,
-// 		timeSearch: req.TMax >= req.TMin && (req.TMax != 0 || req.TMin != 0),
-// 		// NodeFetchFlags:  req.NodeFetchFlags,
-// 		// LinksFetchFlags: req.LinksFetchFlags,
-// 		// FilterFlags:     req.FilterFlags,
-// 	}
 
 // 	var err error
 // 	{
@@ -831,53 +696,6 @@ func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error
 // 		}
 // 	}
 
-//     //srv.Debugf(">>> NodeGet %v/%v", req.ChURI, string(req.NodePathname))
-
-//     // TODO Move to start and put into gofunc so we don't miss any during the above scan
-//     if req.Subscribe {
-
-//         // Spec says that node ID's that is empty signals an end to a run of nodes.
-//         outlet.Send(emptyNode)
-
-//         var wg sync.WaitGroup
-
-//         sub, err := srv.host.SubscribeStates(outlet.Context(), req.ChURI)
-//         if err != nil {
-//             return err
-//         }
-//         defer sub.Close()
-
-//         wg.Add(1)
-//         go func() {
-//             defer wg.Done()
-
-//             scanning := true
-//             for scanning {
-//                 srv.Debugf(">>> SUB STARTED   %v/%v:", req.ChURI, string(req.NodePathname))
-
-//                 select {
-//                 case <-srv.Ctx().Done():
-//                     scanning = false
-//                 case <-outlet.Context().Done():
-//                     srv.Debugf(">>> SUB CANCELLED %v/%v: ", req.ChURI, string(req.NodePathname))
-//                     scanning = false
-//                 case msg := <-sub.States():
-//                     srv.Debugf(">>>  SUB %v/%v: '%v'", req.ChURI, string(req.NodePathname), string(msg.State.Keypath()))
-//                     // State  tree.Node
-//                     // Leaves []types.ID
-//                     // msg.
-//                 }
-//             }
-
-//         }()
-
-// 		wg.Wait()
-
-//         srv.Debugf(">>> SUB COMPLETE %v/%v:", req.ChURI, string(req.NodePathname))
-
-//     }
-
-// 	//     DepthFirstIterator
 
 // 	// // If only doing layers, don't search through EVERY node and be dum, step through the layer list and step through each layer, son!
 // 	// if (req.FilterFlags & FilterFlags_LAYERS_ONLY) != 0 {
@@ -940,57 +758,43 @@ func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error
 // 	// }
 
 // 	return nil
-// }
 
-// Key values used to map plan.Node fields to redwood node fields
-const (
-	NodeModifiedKey   = "t"
-	NodeTypeIDKey     = "w"
-	NodeLabelKey      = "n"
-	NodeValueStrKey   = "s"
-	NodeValueIntKey   = "i"
-	NodeX1Key         = "1"
-	NodeX2Key         = "2"
-	NodeX3Key         = "3"
-	NodeAttachmentKey = "a"
 
-	NodeChMsgKey     = byte('\x10')
-	NodeChMsgPathKey = "/\x10"
+var (
+    nodeEntryKey    = byte('\x10')
+    nodeEntryPath = tree.Keypath([]byte{tree.PathSepChar, nodeEntryKey})
 )
 
-var chMsgKey = tree.Keypath([]byte{NodeChMsgKey})
-
-// var nodesStartKey = []byte{0x01, 0x01}
-
-// // Key values used to map plan.Node layer-related fields to redwood node fields
-// // const (
-// // 	SpaceTypeKey      = "spaceType"
-// // 	SpaceT0AsUTCKey   = "t0utc"
-// // 	SpaceX1UnitType   = "x1UnitType"
-// // 	SpaceX2UnitType   = "x2UnitType"
-// // 	SpaceX3UnitType   = "x3UnitType"
-// // )
 
 type nodeFilters struct {
 	regexKeypath *regexp.Regexp
 	regexTypeID  *regexp.Regexp
 }
 
-// acquireMsg is equivalent to:
-//
-// msg := &ChMsg{}
-//
-// msg.Unmarshal(buf)
-func (job *reqJob) newResponse(op ChMsgOp) *ChMsg {
 
-	// TODO: use sync.pool
+func (req *ChReq) newResponse(op ChMsgOp, err error) *ChMsg {
+
+    // TODO: use sync.pool
 	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
 	msg := &ChMsg{}
 
 	msg.Op = op
-	msg.ReqID = job.req.ReqID
+    msg.ReqID = req.ReqID
 
-	return msg
+    if err != nil {
+        var reqErr *ReqErr
+        if reqErr, _ = err.(*ReqErr); reqErr == nil {
+            err = ErrCode_UnnamedErr.Wrap(err)
+            reqErr = err.(*ReqErr)
+        }
+        msg.Attachment = bufs.SmartMarshal(reqErr, msg.Attachment)
+    }
+
+    return msg
+}
+
+func (job *reqJob) newResponse(op ChMsgOp) *ChMsg {
+    return job.req.newResponse(op, nil)
 }
 
 func (job *reqJob) newEntry(op ChMsgOp, unmarshalFromBase64 string) (*ChMsg, error) {
@@ -1250,93 +1054,6 @@ func (job *reqJob) filterAndSendNode(node tree.Node) bool {
 // 	return outNode
 // }
 
-// func constructValMapForEntry(entry *ChMsg, vmap strMap) {
-
-// 	// if numLinks := len(node.Links); numLinks > 0 {
-// 	//     // nodeURIs := make([]interface{}, 0, numLinks)
-// 	// 	// for _, nodeURI := range node.Links {
-// 	//     //     nodeURIs = append(nodeURIs, strMap{
-// 	// 	// 		"Content-Type": "link",
-// 	// 	// 		"value":        nodeURI,
-// 	// 	// 	})
-// 	//     // }
-// 	//     vmap[NodeURIsKey] = append([]interface{}{}, node.Links[:])
-// 	// }
-
-// 	if entry.Attachment != nil {
-// 		vmap[NodeAttachmentKey] = entry.Attachment
-// 	}
-// 	if entry.TypeID != "" {
-// 		vmap[NodeTypeIDKey] = entry.TypeID
-// 	}
-// 	if entry.Label != "" {
-// 		vmap[NodeLabelKey] = entry.Label
-// 	}
-// 	if entry.ValueStr != "" {
-// 		vmap[NodeValueStrKey] = entry.ValueStr
-// 	}
-// 	if entry.ValueInt != 0 {
-// 		vmap[NodeValueIntKey] = entry.ValueInt
-// 	}
-// 	if entry.X3 != 0 {
-// 		vmap[NodeX1Key] = entry.X1
-// 		vmap[NodeX2Key] = entry.X2
-// 		vmap[NodeX3Key] = entry.X3
-// 	} else if entry.X2 != 0 {
-// 		vmap[NodeX1Key] = entry.X1
-// 		vmap[NodeX2Key] = entry.X2
-// 	} else if entry.X1 != 0 {
-// 		vmap[NodeX1Key] = entry.X1
-// 	}
-
-// 	// if entry.T != 0 {
-// 	// 	vmap[NodeTKey] = entry.T
-// 	// }
-// 	// if entry.TSpan != 0 {
-// 	// 	vmap[NodeTSpanKey] = entry.TSpan
-// 	// }
-
-// 	// if len(entry.Transform) > 0 {
-// 	// 	vmap[NodeTransform] = append([]interface{}{}, entry.Transform[:])
-// 	// }
-
-// 	// // Encode layer/space info
-// 	// if layer := node.Layer; layer != nil && layer.SpaceType != "" {
-// 	// 	vmap[SpaceTypeKey] = layer.SpaceType
-// 	// 	vmap[SpaceT0AsUTCKey] = layer.T0AsUTC
-// 	// 	vmap[SpaceX1UnitType] = layer.X1UnitType
-// 	// 	vmap[SpaceX2UnitType] = layer.X2UnitType
-// 	// 	vmap[SpaceX3UnitType] = layer.X3UnitType
-// 	// }
-
-// }
-
-// // Keypath is a POSIX-style pathname of this ChEntry (for safety, "/" specifies the root path, not "").
-//             string              Keypath                     = 1;
-
-// // If RecvChEntry, then this is a serialized ChEntry.
-//             bytes               MsgData                     = 5;
-// func (srv *GrpcServer) NodePut(ctx context.Context, req *NodePutReq) (*TxInfo, error) {
-
-// 	tx := rw.Tx{
-// 		StateURI: req.ChURI,
-// 		ID:       rwtypes.RandomID(),
-// 		Patches:  make([]rw.Patch, 0, 1+len(req.Nodes)),
-// 	}
-
-// 	err := srv.AddNodesAsPatches(req.Nodes, &tx)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	err = srv.AddNodesAsPatches([]*Node{req.Node}, &tx)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	return srv.SendTx(ctx, &tx)
-
-// }
 
 // UnaryServerInterceptor is a debugging helper
 func (srv *GrpcServer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
