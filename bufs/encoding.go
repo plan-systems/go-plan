@@ -37,42 +37,41 @@ type Unmarshalable interface {
 }
 
 // SmartMarshal marshals the given item to the given buffer.  If there is not enough space a new one is allocated.  The purpose of this is to reuse a scrap buffer.
-func SmartMarshal(item Marshalable, tryBuf []byte) []byte {
-	var err error
-
-	bufSz := cap(tryBuf)
-	neededSz := item.Size()
-	if neededSz > bufSz {
-		neededSz = (neededSz + 7) &^ 7
-		tryBuf = make([]byte, neededSz)
-		bufSz = neededSz
+func SmartMarshal(item Marshalable, tryDst []byte) []byte {
+	bufSz := cap(tryDst)
+	encSz := item.Size()
+	if encSz > bufSz {
+		bufSz = (encSz + 7) &^ 7
+		tryDst = make([]byte, bufSz)
 	}
 
-	neededSz, err = item.MarshalToSizedBuffer(tryBuf[:bufSz])
+	var err error
+	encSz, err = item.MarshalToSizedBuffer(tryDst[:encSz])
 	if err != nil {
 		panic(err)
 	}
 
-	return tryBuf[:neededSz]
+	return tryDst[:encSz]
 }
 
 // SmartMarshalToBase64 marshals the given item and then encodes it into a base64 (ASCII) byte string.
 //
 // If tryDst is not large enough, a new buffer is allocated and returned in its place.
-func SmartMarshalToBase64(src Marshalable, tryDst []byte) []byte {
+func SmartMarshalToBase64(item Marshalable, tryDst []byte) []byte {
 	bufSz := cap(tryDst)
-	binSz := src.Size()
-	neededSz := 4 + 4*((binSz+2)/3)
-	if neededSz > bufSz {
-		neededSz = (neededSz + 7) &^ 7
-		tryDst = make([]byte, neededSz)
-		bufSz = neededSz
-	}
+    binSz := item.Size()
+    {
+        safeSz := 4 + 4*((binSz+2)/3)
+        if safeSz > bufSz {
+            bufSz = (safeSz + 7) &^ 7
+            tryDst = make([]byte, bufSz)
+        }
+    }
 
 	// First, marshal the item to the right-side of the scrap buffer
 	binBuf := tryDst[bufSz-binSz : bufSz]
 	var err error
-	binSz, err = src.MarshalToSizedBuffer(binBuf)
+	binSz, err = item.MarshalToSizedBuffer(binBuf)
 	if err != nil {
 		panic(err)
 	}
