@@ -17,7 +17,7 @@ import (
 //
 // Ctx serves as a vehicle between a Content expressed as *struct or as an interface (which can be upcast).
 type Ctx interface {
-	BaseContext() *Context
+	Ctx() *Context
 }
 
 type childCtx struct {
@@ -197,7 +197,7 @@ func (c *Context) CtxStopChildren(inReason string) {
 		childrenRunning.Add(N)
 		for i := N - 1; i >= 0; i-- {
 			child := c.children[i].Ctx
-			childC := child.BaseContext()
+			childC := child.Ctx()
 			if logInfo {
 				c.Infof(2, "stopping child %s(%s)", childC.GetLogPrefix(), reflect.TypeOf(child).Elem().Name())
 			}
@@ -237,7 +237,7 @@ func (c *Context) CtxAddChild(
 		CtxID: inID,
 		Ctx:   inChild,
 	})
-	inChild.BaseContext().setParent(c)
+	inChild.Ctx().setParent(c)
 	c.childrenMutex.Unlock()
 }
 
@@ -349,7 +349,6 @@ func (c *Context) BaseContext() *Context {
 func (c *Context) childStopping(
 	inChild *Context,
 ) {
-
 	var native Ctx
 
 	// Detach the child
@@ -363,7 +362,7 @@ func (c *Context) childStopping(
 		// Since all the callbacks need to be the latter "native" Ctx (so that it can be upcast to a client type),
 		//    we must ensure that we search for ptr matches using the "base" Context but callback with the native.
 		native = c.children[i].Ctx
-		if native.BaseContext() == inChild {
+		if native.Ctx() == inChild {
 			copy(c.children[i:], c.children[i+1:N])
 			N--
 			c.children[N].Ctx = nil
