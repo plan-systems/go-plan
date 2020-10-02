@@ -110,10 +110,10 @@ func (c *Context) CtxStart(
 	return err
 }
 
-// CtxStop initiates a stop of this Context, calling inReleaseOnComplete.Done() when this context is fully stopped (if provided).
+// CtxStop initiates a stop of this Context, calling releaseOnComplete.Done() when this context is fully stopped (if provided).
 //
 // If c.CtxStop() is being called for the first time, true is returned.
-// If it has already been called (or is in-flight), then false is returned and this call effectively is a no-op (but still honors in inReleaseOnComplete).
+// If it has already been called (or is in-flight), then false is returned and this call effectively is a no-op (but still honors in releaseOnComplete).
 //
 //  The following are equivalent:
 //
@@ -134,8 +134,8 @@ func (c *Context) CtxStart(
 //  6. After the last call to c.CtxGo() has completed, c.CtxWait() is released.
 //
 func (c *Context) CtxStop(
-	inReason string,
-	inReleaseOnComplete *sync.WaitGroup,
+	stopReason string,
+	releaseOnComplete *sync.WaitGroup,
 ) bool {
 
 	initiated := false
@@ -143,7 +143,7 @@ func (c *Context) CtxStop(
 	c.stopMutex.Lock()
 	if ctxCancel := c.ctxCancel; c.CtxRunning() && ctxCancel != nil {
 		c.ctxCancel = nil
-		c.stopReason = inReason
+		c.stopReason = stopReason
 		c.Infof(2, "CtxStop (%s)", c.stopReason)
 
 		// Hand it over to client-level execution to finish stopping/cleanup.
@@ -166,9 +166,9 @@ func (c *Context) CtxStop(
 	}
 	c.stopMutex.Unlock()
 
-	if inReleaseOnComplete != nil {
+	if releaseOnComplete != nil {
 		c.CtxWait()
-		inReleaseOnComplete.Done()
+		releaseOnComplete.Done()
 	}
 
 	return initiated
@@ -182,7 +182,7 @@ func (c *Context) CtxWait() {
 }
 
 // CtxStopChildren initiates a stop on each child and blocks until complete.
-func (c *Context) CtxStopChildren(inReason string) {
+func (c *Context) CtxStopChildren(stopReason string) {
 
 	childrenRunning := &sync.WaitGroup{}
 
@@ -201,7 +201,7 @@ func (c *Context) CtxStopChildren(inReason string) {
 			if logInfo {
 				c.Infof(2, "stopping child %s(%s)", childC.GetLogPrefix(), reflect.TypeOf(child).Elem().Name())
 			}
-			go childC.CtxStop(inReason, childrenRunning)
+			go childC.CtxStop(stopReason, childrenRunning)
 		}
 	}
 	c.childrenMutex.RUnlock()
@@ -241,16 +241,16 @@ func (c *Context) CtxAddChild(
 	c.childrenMutex.Unlock()
 }
 
-// CtxGetChildByID returns the child Context with the match ID (or nil if not found).
+// CtxGetChildByID returns the child Context with a matching ID (or nil if not found).
 func (c *Context) CtxGetChildByID(
-	inChildID []byte,
+	childID []byte,
 ) Ctx {
 	var ctx Ctx
 
 	c.childrenMutex.RLock()
 	N := len(c.children)
 	for i := 0; i < N; i++ {
-		if bytes.Equal(c.children[i].CtxID, inChildID) {
+		if bytes.Equal(c.children[i].CtxID, childID) {
 			ctx = c.children[i].Ctx
 		}
 	}
@@ -333,11 +333,11 @@ func (c *Context) CtxOnFault(inErr error, inDesc string) {
 }
 
 // setParent is internally called wheen attaching/detaching a child.
-func (c *Context) setParent(inNewParent *Context) {
-	if inNewParent != nil && c.parent != nil {
+func (c *Context) setParent(newParent *Context) {
+	if newParent != nil && c.parent != nil {
 		panic("Context already has parent")
 	}
-	c.parent = inNewParent
+	c.parent = newParent
 }
 
 // BaseContext allows the holder of a Ctx to get the raw/underlying Context.
@@ -347,13 +347,13 @@ func (c *Context) BaseContext() *Context {
 
 // childStopping is internally called once the given child has been stopped and its c.onAboutToStop() has completed.
 func (c *Context) childStopping(
-	inChild *Context,
+    child *Context,
 ) {
 	var native Ctx
 
 	// Detach the child
 	c.childrenMutex.Lock()
-	inChild.setParent(nil)
+	child.setParent(nil)
 	N := len(c.children)
 	for i := 0; i < N; i++ {
 
@@ -362,7 +362,7 @@ func (c *Context) childStopping(
 		// Since all the callbacks need to be the latter "native" Ctx (so that it can be upcast to a client type),
 		//    we must ensure that we search for ptr matches using the "base" Context but callback with the native.
 		native = c.children[i].Ctx
-		if native.Ctx() == inChild {
+		if native.Ctx() == child {
 			copy(c.children[i:], c.children[i+1:N])
 			N--
 			c.children[N].Ctx = nil
