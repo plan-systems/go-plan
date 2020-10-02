@@ -1,16 +1,20 @@
 package bufs
 
 import (
-	"encoding/base64"
+	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
+    //"github.com/mmcloughlin/geohash"
 
-	"reflect"
+    "reflect"
 )
 
+// GeohashBase32Alphabet is the alphabet used for Base32Encoding
+const GeohashBase32Alphabet = "0123456789bcdefghjkmnpqrstuvwxyz"
+
 var (
-	// Base64Encoding is used to encode/decode binary buffer to/from base 64
-	Base64Encoding = base64.RawURLEncoding
+	// Base32Encoding is used to encode/decode binary buffer to/from base 32
+	Base32Encoding = base32.NewEncoding(GeohashBase32Alphabet).WithPadding(base32.NoPadding)
 
 	// GenesisMemberID is the genesis member ID
 	GenesisMemberID = uint32(1)
@@ -54,10 +58,10 @@ func SmartMarshal(item Marshalable, tryDst []byte) []byte {
 	return tryDst[:encSz]
 }
 
-// SmartMarshalToBase64 marshals the given item and then encodes it into a base64 (ASCII) byte string.
+// SmartMarshalToBase32 marshals the given item and then encodes it into a base32 (ASCII) byte string.
 //
 // If tryDst is not large enough, a new buffer is allocated and returned in its place.
-func SmartMarshalToBase64(item Marshalable, tryDst []byte) []byte {
+func SmartMarshalToBase32(item Marshalable, tryDst []byte) []byte {
 	bufSz := cap(tryDst)
     binSz := item.Size()
     {
@@ -78,18 +82,18 @@ func SmartMarshalToBase64(item Marshalable, tryDst []byte) []byte {
 
 	// Now encode the marshaled to the left side of the scrap buffer.
 	// There is overlap, but encoding consumes from left to right, so it's safe.
-	encSz := Base64Encoding.EncodedLen(binSz)
+	encSz := Base32Encoding.EncodedLen(binSz)
 	tryDst = tryDst[:encSz]
-	Base64Encoding.Encode(tryDst, binBuf[:binSz])
+	Base32Encoding.Encode(tryDst, binBuf[:binSz])
 
 	return tryDst
 }
 
-// SmartDecodeFromBase64 decodes the base64 (ASCII) string into the given scrap buffer, returning the scrap buffer set to proper size.
+// SmartDecodeFromBase32 decodes the base32 (ASCII) string into the given scrap buffer, returning the scrap buffer set to proper size.
 //
 // If tryDst is not large enough, a new buffer is allocated and returned in its place.
-func SmartDecodeFromBase64(srcBase64 []byte, tryDst []byte) ([]byte, error) {
-	binSz := Base64Encoding.DecodedLen(len(srcBase64))
+func SmartDecodeFromBase32(srcBase32 []byte, tryDst []byte) ([]byte, error) {
+	binSz := Base32Encoding.DecodedLen(len(srcBase32))
 
 	bufSz := cap(tryDst)
 	if binSz > bufSz {
@@ -97,7 +101,7 @@ func SmartDecodeFromBase64(srcBase64 []byte, tryDst []byte) ([]byte, error) {
 		tryDst = make([]byte, bufSz)
 	}
 	var err error
-	binSz, err = Base64Encoding.Decode(tryDst[:binSz], srcBase64)
+	binSz, err = Base32Encoding.Decode(tryDst[:binSz], srcBase32)
 	return tryDst[:binSz], err
 }
 
