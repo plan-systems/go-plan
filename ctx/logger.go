@@ -49,6 +49,11 @@ func (l *logger) SetLogLabel(label string) {
     }
 }
 
+// SetLogLabelf is the formatted version of SetLogLabel
+func (l *logger) SetLogLabelf(format string, args ...interface{}) {
+    l.SetLogLabel(fmt.Sprintf(format, args...))
+}
+
 // GetLogLabel returns the label last set via SetLogLabel()
 func (l *logger) GetLogLabel() string {
 	return l.logLabel
