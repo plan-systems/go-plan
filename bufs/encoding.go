@@ -45,7 +45,7 @@ func SmartMarshal(item Marshalable, tryDst []byte) []byte {
 	bufSz := cap(tryDst)
 	encSz := item.Size()
 	if encSz > bufSz {
-		bufSz = (encSz + 7) &^ 7
+		bufSz = (encSz + 15) &^ 15
 		tryDst = make([]byte, bufSz)
 	}
 
