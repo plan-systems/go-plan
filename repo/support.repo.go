@@ -9,6 +9,13 @@ import (
 	"github.com/plan-systems/plan-go/bufs"
 )
 
+// TIDSz is the byte size of a TID, a hash with a leading embedded big endian binary time index.
+const TIDSz = int(Const_TIDSz)
+
+// TIDEncodedLen is the ASCII-compatible string length of a (binary) TID encoded into its base32 form.
+const TIDEncodedLen = int(Const_TIDEncodedLen)
+
+
 func (err *ReqErr) Error() string {
 	codeStr, exists := ErrCode_name[int32(err.Code)]
 	if exists == false {
@@ -80,35 +87,96 @@ func (uri *ChStateURI) AssignFromURI(uriStr string) error {
 
 	sep := strings.IndexRune(uriStr, '/')
 	if sep >= 0 {
-		uri.DomainName, uri.ChID = uriStr[:sep+1], uriStr[sep+1:]
+		uri.DomainName, uri.ChID = uriStr[:sep], uriStr[sep+1:]
 
 		sep = strings.IndexRune(uri.ChID, '/')
 		if sep >= 0 {
-			uri.ChID, uri.StateURI = uri.ChID[:sep+1], uri.ChID[sep+1:]
+			uri.ChID, uri.StateURI = uri.ChID[:sep], uri.ChID[sep+1:]
 		}
 	} else {
-		uri.DomainName = uriStr[sep+1:]
+		uri.DomainName = uriStr[:]
 		uri.ChID = ""
 	}
 
 	var err error
 
 	n := 0
-	if len(uri.ChID) == EncodedTIDLen {
-		if cap(uri.ChID_TID) < int(Const_TIDSz) {
-			uri.ChID_TID = make([]byte, Const_TIDSz)
+	if len(uri.ChID) == TIDEncodedLen {
+		if cap(uri.ChID_TID) < TIDSz {
+			uri.ChID_TID = make([]byte, TIDSz)
 		}
-		n, err = bufs.Base32Encoding.Decode(uri.ChID_TID[:Const_TIDSz], []byte(uri.ChID))
+		n, err = bufs.Base32Encoding.Decode(uri.ChID_TID[:TIDSz], []byte(uri.ChID))
 	}
-	if err != nil || n != EncodedTIDLen {
+	if err != nil || n != TIDSz {
 		uri.ChID_TID = uri.ChID_TID[:0]
 	}
 
 	return nil
 }
 
-// EncodedTIDLen is the string length of a (binary) TID encoded to base32.
-var EncodedTIDLen = bufs.Base32Encoding.DecodedLen(int(Const_TIDSz))
+// FormChURI is the inverse of AssignFromURI()
+func (uri *ChStateURI) FormChURI() (string, error) {
+    
+    var b strings.Builder
+
+    var err error
+    if len(uri.DomainName) == 0 {
+        err = ErrCode_InvalidURI.ErrWithMsg("missing domain name")
+    }
+
+    b.Grow(127)
+    b.WriteString(uri.DomainName)
+    b.WriteByte('/')
+
+    switch {
+
+    case len(uri.ChID) > 0:
+        b.WriteString(uri.ChID)
+
+    case len(uri.ChID_TID) == TIDEncodedLen: {
+        var chID [TIDEncodedLen]byte
+        bufs.Base32Encoding.Encode(chID[:], uri.ChID_TID)
+        b.Write(chID[:]) }
+ 
+    case len(uri.ChID_TID) > 0:
+        uri.ChID = bufs.Base32Encoding.EncodeToString(uri.ChID_TID)
+        b.WriteString(uri.ChID)
+
+    case err == nil:
+        err = ErrCode_InvalidURI.ErrWithMsg("missing channel ID")
+
+    }
+
+    return b.String(), err
+}
+
+
+// ChKey is a keypath used in a repo db
+type ChKey []byte
+
+
+// // FormChURI forms "ChURI" string expresses the domain and channel ID of a channel state URI, expressed in human-readable form.
+// //
+// // "<DomainName>/<ChID>/"
+// func (uri *ChStateURI) FormChURI() (ChKey, error) {
+
+//     if len(uri.DomainName) == 0 {
+//         return nil, ErrCode_InvalidURI.ErrWithMsg("no domain name given")
+//     }
+    
+//     if len(uri.ChID_TID) == 0 {
+//         return nil, ErrCode_InvalidURI.ErrWithMsg("no channel TID given")
+//     }
+    
+//     chKey := make(ChKey, 0, 128)
+//     chKey = append(chKey, ChKey(uri.DomainName)...)
+//     chKey = append(chKey, '/')
+//     chKey = append(chKey, uri.ChID_TID...)
+//     chKey = append(chKey, '/')
+
+//     return chKey, nil
+// }
+
 
 // TID is a convenience function that returns the TID contained within this TIDBuf.
 func (tid *TIDBuf) TID() TID {
