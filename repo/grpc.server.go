@@ -6,13 +6,10 @@ import (
 	"net"
 	"path"
 	"regexp"
-	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	//"path"
-	//mrand "math/rand"
 	//"strconv"
 	//"sync"
 	//"time"
@@ -24,10 +21,6 @@ import (
 
 	"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
-
-	        "github.com/plan-systems/redwood-go/tree"
-	rw      "github.com/plan-systems/redwood-go"
-	rwtypes "github.com/plan-systems/redwood-go/types"
 )
 
 
@@ -51,27 +44,27 @@ import (
 //     nodeBlock     = []byte{5}
 // )
 
-func formNodePath(parentPath string, nodeID string) tree.Keypath {
-	k := make(tree.Keypath, 0, 192)
-	k = append(k, tree.Keypath(parentPath)...)
-	k = append(k, tree.Keypath(nodeID)...)
-	return k
-}
+// func formNodePath(parentPath string, nodeID string) tree.Keypath {
+// 	k := make(tree.Keypath, 0, 192)
+// 	k = append(k, tree.Keypath(parentPath)...)
+// 	k = append(k, tree.Keypath(nodeID)...)
+// 	return k
+// }
 
 // GrpcServer is the GRPC implementation of repo.proto
 type GrpcServer struct {
 	ctx.Context
 
-	pipeCount int32
-	//pipeSess      []*pipeSess
-	host          rw.Host
+	sessCount int32
+	//repoSess      []*repoSess
+	host          Host
 	server        *grpc.Server
 	listenNetwork string
 	listenAddr    string
 }
 
 // NewGrpcServer creates a new GrpcServer
-func NewGrpcServer(host rw.Host, listenNetwork string, listenAddr string) *GrpcServer {
+func NewGrpcServer(host Host, listenNetwork string, listenAddr string) *GrpcServer {
 	return &GrpcServer{
 		host:          host,
 		listenNetwork: listenNetwork,
@@ -101,7 +94,7 @@ func (srv *GrpcServer) Start() error {
 			return nil
 		},
 		func() {
-			srv.Info(0, "initiating graceful stop")
+			srv.Info(1, "initiating graceful stop")
 
 			// This closes the net.Listener as well.
 			go srv.server.GracefulStop()
@@ -110,7 +103,7 @@ func (srv *GrpcServer) Start() error {
 		func() {
 			// on shutdown -- block until complete
 			srv.server.GracefulStop()
-			srv.Info(0, "graceful stop complete")
+			srv.Info(1, "graceful stop complete")
 		},
 	)
 }
@@ -119,11 +112,13 @@ type strMap = map[string]interface{}
 
 type reqJob struct {
 	req       *ChReq
-	sess      *pipeSess
+	sess      *repoSess
 	filters   nodeFilters
-	scrap     []byte
-	ctx       context.Context
-	ctxCancel context.CancelFunc
+    scrap     []byte
+    canceled bool
+    chSub    ChSub
+	// ctx       context.Context
+	// ctxCancel context.CancelFunc
 }
 
 // Debugf prints output to the output log
@@ -133,259 +128,66 @@ func (job *reqJob) Debugf(msgFormat string, msgArgs ...interface{}) {
 
 // canceled returns true if this job should back out of all work.
 func (job *reqJob) isCanceled() bool {
-	select {
-	case <-job.ctx.Done():
-		return true
-	default:
-	}
-	return false
+	return job.canceled
 }
 
-func (job *reqJob) canceled() <-chan struct{} {
-	return job.ctx.Done()
+func (job *reqJob) cancelJob() {
+    job.canceled = true
+    if job.chSub != nil {
+        job.chSub.Close()
+    }
 }
 
-func (job *reqJob) Ctx() context.Context {
-	return job.ctx
-}
 
-func (job *reqJob) exeGet() error {
-	getOp := job.req.GetOp
-	scope := job.req.GetOp.Scope
+// func (job *reqJob) canceled() <-chan struct{} {
+// 	return job.ctx.Done()
+// }
 
-    opPath, err := ValidateKeypath(getOp.Keypath)
+// func (job *reqJob) Ctx() context.Context {
+// 	return job.ctx
+// }
+
+
+
+func (job *reqJob) exeGetOp() error {
+    var err error
+    job.chSub, err = job.sess.srv.host.OpenChSub(job.req)
     if err != nil {
         return err
     }
+    defer job.chSub.Close()
 
-	var sub rw.StateSubscription
-
-
-	// Subscribe *before* we start our get or we could miss a state while we're reading, son.
-	if job.req.GetOp.MaintainSync {
-		sub, err = job.sess.srv.host.SubscribeStates(job.Ctx(), job.req.ChURI)
-		if err != nil {
-			return ErrCode_FailedToOpenChURI.Wrap(err)
-		}
-    }
-    defer func(){
-        if sub != nil {
-            sub.Close()
-        }
-    }()
-
+    // Block while the chSess works and outputs ch entries to send from the ch session.
+    // If/when the chSess see the job ctx stopping, it will unwind and close the outbox
     {
-        state, err := job.sess.srv.host.Controllers().StateAtVersion(job.req.ChURI, nil)
-        if err != nil {
-            return ErrCode_FailedToOpenChURI.Wrap(err)
+        for msg := range job.chSub.Outbox() {
+            job.sess.msgOutbox <- msg
         }
-        defer state.Close()
-
-        if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
-            nodePath := append(opPath, nodeEntryPath...)
-            job.Debugf("Get: '%v'", string(nodePath))
-            job.filterAndSendNode(state.NodeAt(nodePath, nil))
-        }
-
-        if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
-            var iter tree.Iterator
-            if (scope & KeypathScope_AllSubEntries) == KeypathScope_AllSubEntries {
-                iter = state.DepthFirstIterator(opPath, false, 0)
-            } else {
-                iter = state.ChildIterator(opPath, false, 0)
-            }
-            defer iter.Close()
-
-            // @@TODO: this can be accelerated by a special iterator that skips entries with keys shorter than one char.
-            for iter.Rewind(); iter.Valid(); iter.Next() {
-                if job.isCanceled() {
-                    break
-                }
-
-                // If the item has a length of 1, it means it's a node field, not a node.
-                nodePath := iter.Node().Keypath()
-                job.Debugf("Get: iter '%v'", string(nodePath))
-                _, leafKey := nodePath.Split()
-                if len(leafKey) == 1 && leafKey[0] == nodeEntryKey {
-                    job.filterAndSendNode(state.NodeAt(nodePath, nil))
-                }
-            }
-        }
-    }
-
-	if sub != nil {
-		var subWait sync.WaitGroup
-		subWait.Add(1)
-
-        // Send an initial SyncStep to tell the client to start processing entries
-        job.sess.msgOutlet <- job.newResponse(ChMsgOp_SyncStep)
-
-		go func() {
-            var syncTicker *time.Ticker
-            var syncTickerChan <-chan time.Time
-
-            // Send a SyncStep soon after we start to tell the client
-            nodesSentThisTick := 1
-            idleTicks := 0
-
-			for waiting := true; waiting; {
-				job.Debugf(">>> SUB STARTED   %v/%v:", job.req.ChURI, getOp.Keypath)
-
-				select {
-
-                // Only send a sync msg after we've sent one or updates.
-                case <-syncTickerChan:
-                    if nodesSentThisTick == 0 {
-                        idleTicks++
-                        if idleTicks > 10 {
-                            syncTicker.Stop()
-                            syncTickerChan = nil
-                        }
-                    } else {
-                        job.sess.msgOutlet <- job.newResponse(ChMsgOp_SyncStep)
-                        idleTicks = 0
-                        nodesSentThisTick = 0
-                    }
-
-				case <-job.canceled():
-					waiting = false
-
-				case rev := <-sub.States(): {
-                    changePath := rev.State.Keypath()
-                    common := opPath.CommonAncestor(changePath)
-
-                    job.Debugf(">>>  SUB %v/%v", job.req.ChURI, string(changePath))
-                    if common.Equals(opPath) {
-                        job.Debugf(">>>  COM %v/%v     common: %v", job.req.ChURI, string(changePath), common)
-                        if  true { //job.filterAndSendNode(rev.State.NodeAt(kChMsgKey, nil)) {
-                            nodesSentThisTick++
-                        }
-                    }
-
-                    // Make sure the ticker is going once we start sending nodes
-                    if nodesSentThisTick == 1 {
-                        if syncTickerChan == nil {
-                            syncTicker = time.NewTicker(time.Millisecond * 200)
-                            syncTickerChan = syncTicker.C
-                        } else {
-                            for len(syncTickerChan) > 0 {
-                                <-syncTickerChan
-                            }
-                        }
-                    }
-                } }
-			}
-
-            if syncTickerChan != nil {
-                syncTicker.Stop()
-            }
-
-			subWait.Done()
-        }()
-        
-		// Wait for subscriptions to complete
-		subWait.Wait()
-
-        job.Debugf(">>> SUB COMPLETE %v/%v:", job.req.ChURI, getOp.Keypath)
     }
 
 	return nil
 }
 
 func (job *reqJob) exeTxOp() (*ChMsg, error) {
-	putOp := job.req.PutOp
 
-	if len(putOp.Entries) == 0 {
-		return nil, ErrCode_NothingToCommit.ErrWithMsg("no entries to commit")
-	}
+    if job.req.TxOp.ChStateURI == nil {
+        job.req.TxOp.ChStateURI = job.req.ChStateURI
+    }
 
-	tx := rw.Tx{
-		ID:      rwtypes.RandomID(),
-		Patches: make([]rw.Patch, 0, len(putOp.Entries)+1),
-	}
+    tx, err := job.sess.hostSess.EncodeToTxAndSign(job.req.TxOp)
+    if err != nil {
+        return nil, err
+    }
 
-	host := job.sess.srv.host
+    // TODO: don't release this op until its merged or rejected (required tx broadcast)
+    err = job.sess.srv.host.SubmitTx(tx)
+    if err != nil {
+        return nil, err
+    }
 
-	if putOp.ChannelGenesis {
-
-		if strings.ContainsRune(job.req.ChURI, '/') {
-			return nil, ErrCode_InvalidURI.ErrWithMsg("URI must be a domain name and not be a path")
-		}
-
-		if len(job.req.ChURI) <= 3 {
-			return nil, ErrCode_InvalidURI.ErrWithMsgf("URI domain name '%v' is too short", job.req.ChURI)
-		}
-
-		// This will all change after redwood (where a txID derives from the hash of the signed tx)
-		chIDStr := bufs.Base64Encoding.EncodeToString(tx.ID[len(tx.ID)-int(Const_ChIDSz):])
-		job.req.ChURI = path.Join(job.req.ChURI, chIDStr)
-		tx.ID = rw.GenesisTxID
-
-		tx.Patches = append(tx.Patches, rw.Patch{
-			Keypath: nil,
-			Range:   nil,
-			Val: strMap{
-				"Schema": "plan-systems.org/pnode",
-				"Merge-Type": strMap{
-					"Content-Type": "resolver/dumb",
-					"value":        strMap{},
-				},
-				"Validator": strMap{
-					"Content-Type": "validator/permissions",
-					"value": strMap{
-						host.Address().String(): strMap{
-							"^.*$": strMap{
-								"write": true,
-							},
-						},
-					},
-				},
-			},
-		})
-	}
-
-	tx.StateURI = job.req.ChURI
-
-	// tx.StateURI = chGenesis.ChURI
-	// srv.SendTx(ctx, &tx)
-	// tx.ID = rwtypes.RandomID()
-	// time.Sleep(10 * time.Second)
-
-	{
-		// Use the same time value each node we're commiting
-		timeModified := time.Now().Unix()
-
-		for _, entry := range putOp.Entries {
-
-            keypath, err := ValidateKeypath(entry.Keypath)
-            if err != nil {
-                return nil, err
-            }
-
-			job.Debugf("Put: '%v'", entry.Keypath)
-
-			entry.Op = 0
-			entry.ReqID = 0
-			entry.Keypath = ""
-			entry.LastModified = timeModified
-
-			job.scrap = bufs.SmartMarshalToBase64(entry, job.scrap)
-
-			tx.Patches = append(tx.Patches, rw.Patch{
-				Keypath: append(keypath, nodeEntryPath...),
-				Val:     string(job.scrap),
-			})
-		}
-	}
-
-	err := host.SendTx(job.Ctx(), tx)
-	if err != nil {
-		return nil, ErrCode_CommitFailed.Wrap(err)
-	}
-
-	msg := job.newResponse(ChMsgOp_ReqComplete)
-	msg.Attachment = append(msg.Attachment[:0], tx.ID[:]...)
-	msg.ValueStr = tx.StateURI
+    msg := job.newResponse(ChMsgOp_ReqComplete)
+	msg.Attachment = append(msg.Attachment[:0], tx.TID...)
+    msg.Str = path.Join(job.req.ChStateURI.DomainName, TID(tx.TID).Base32())
 
 	return msg, nil
 }
@@ -394,114 +196,78 @@ func (job *reqJob) exeJob() {
 	var err error
 	var msg *ChMsg
 
-	// Check to see if this req is canceled before beginning
-	if job.isCanceled() {
-		err = ErrCode_ReqCanceled.Err()
-	} else {
 
+    // Check to see if this req is canceled before beginning
+    if err == nil {
+        if job.isCanceled() {
+            err = ErrCode_ReqCanceled.Err()
+        }
+    }
+
+    if err == nil {
+        if job.req.ChStateURI == nil && len(job.req.ChURI) > 0 {
+            job.req.ChStateURI = &ChStateURI{}
+            err = job.req.ChStateURI.AssignFromURI(job.req.ChURI)
+        }
+    }
+
+	if err == nil {
 		switch job.req.ReqOp {
 
 		case ChReqOp_Auto:
 			switch {
 			case job.req.GetOp != nil:
-				err = job.exeGet()
-			case job.req.PutOp != nil:
+				err = job.exeGetOp()
+			case job.req.TxOp != nil:
 				msg, err = job.exeTxOp()
 			}
 
 		default:
 			err = ErrCode_UnsupporteReqOp.Err()
 		}
-
-		if err == nil && msg == nil {
-			if job.isCanceled() {
-				err = ErrCode_ReqCanceled.Err()
-			}
-		}
 	}
 
-	if err == nil && msg != nil {
-		job.sess.msgOutlet <- msg
-	} else {
-		job.sendCompletion(err)
-	}
+
+    // Send completion msg
+    {
+        if err == nil && job.isCanceled() {
+            err = ErrCode_ReqCanceled.Err()
+        }
+
+        if err != nil {
+            msg = job.req.newResponse(ChMsgOp_ReqDiscarded, err)
+        } else if msg == nil {
+            msg = job.newResponse(ChMsgOp_ReqComplete)
+        } else if msg.Op != ChMsgOp_ReqComplete && msg.Op != ChMsgOp_ReqDiscarded {
+            panic("this should be msg completion")
+        }
+    
+        job.sess.msgOutbox <- msg
+    }
 
 	job.sess.removeJob(job.req.ReqID)
 }
 
-func (job *reqJob) sendCompletion(err error) {
-	var msg *ChMsg
-	if err == nil {
-		msg = job.newResponse(ChMsgOp_ReqComplete)
-	} else {
-		msg = job.req.newResponse(ChMsgOp_ReqDiscarded, err)
-	}
 
-	job.sess.msgOutlet <- msg
-}
-
-
-// ValidateKeypath checks that there are no problems with the given keypath string and returns a standardized Keypath.
-func ValidateKeypath(keypathStr string) (tree.Keypath, error) {
-    pathLen := len(keypathStr)
-
-    // Remove leading path sep char
-    if pathLen > 0 && keypathStr[0] == tree.PathSepChar {
-        keypathStr = keypathStr[1:]
-    }
-
-    path := make(tree.Keypath, 0, 128)
-    path = append(path, tree.Keypath(keypathStr)...)
-    pathLen = len(path)
-
-    if pathLen == 0 {
-        return nil, ErrCode_InvalidKeypath.ErrWithMsg("keypath not set")
-    }
-
-    sepIdx := -1
-    for i := 0; i <= pathLen; i++ {
-        if i == pathLen || path[i] == tree.PathSepChar {
-            compLen := i - sepIdx - 1
-            if compLen == 1 {
-                return nil, ErrCode_InvalidKeypath.ErrWithMsg("keypath components cannot be a single character")
-            } else if compLen == 0 {
-                if i < pathLen {
-                    return nil, ErrCode_InvalidKeypath.ErrWithMsg("keypath contains '//'")
-                }
-            }
-            if i < pathLen {
-                sepIdx = i
-            }
-        }
-    }
-
-    // Remove trailing path sep char
-    if sepIdx == pathLen-1 && pathLen > 0 {
-        path = path[:sepIdx]
-    }
-
-    return path, nil
-}
-
-
-type pipeSess struct {
+type repoSess struct {
 	ctx.Context
 
 	srv        *GrpcServer
 	openReqs   map[int32]*reqJob
 	openReqsMu sync.Mutex
-	msgOutlet  chan *ChMsg
+    msgOutbox  chan *ChMsg
+    hostSess   HostSession
 	scrap      [512]byte
-	rpc        RepoGrpc_RepoServicePipeServer
+	rpc        RepoGrpc_RepoServiceSessionServer
 }
 
-func (sess *pipeSess) ctxStartup() error {
+func (sess *repoSess) ctxStartup() error {
 
 	// Send outgoing msgs
 	sess.CtxGo(func() {
 		for running := true; running; {
 			select {
-			case msg := <-sess.msgOutlet:
+			case msg := <-sess.msgOutbox:
 				if msg != nil {
                     sess.rpc.Send(msg)
                     releaseMsg(msg)
@@ -516,7 +282,7 @@ func (sess *pipeSess) ctxStartup() error {
 		// Keep dropping outgoing msgs until all the jobs are done.
 		// The session sends an empty msg each time a job is removed to keep this loop going.
 		for sess.numJobsOpen() > 0 {
-			<-sess.msgOutlet
+			<-sess.msgOutbox
 		}
 	})
 
@@ -532,50 +298,52 @@ func (sess *pipeSess) ctxStartup() error {
                 }
 			}
 			sess.dispatchReq(reqIn)
-		}
+        }
+        
+        sess.Info(2, "sess rpc reader exited")
 	})
 
 	return nil
 }
 
 
-func (sess *pipeSess) ctxStopping() {
+func (sess *repoSess) ctxStopping() {
     sess.cancelAll()
 }
 
 
-func (sess *pipeSess) lookupJob(reqID int32) *reqJob {
+func (sess *repoSess) lookupJob(reqID int32) *reqJob {
 	sess.openReqsMu.Lock()
 	job := sess.openReqs[reqID]
 	sess.openReqsMu.Unlock()
 	return job
 }
 
-func (sess *pipeSess) removeJob(reqID int32) {
+func (sess *repoSess) removeJob(reqID int32) {
 	sess.openReqsMu.Lock()
 	{
 		delete(sess.openReqs, reqID)
 
 		// Send an empty msg to wake up pipe shutdown
-		sess.msgOutlet <- nil
+		sess.msgOutbox <- nil
 	}
 	sess.openReqsMu.Unlock()
 }
 
-func (sess *pipeSess) numJobsOpen() int {
+func (sess *repoSess) numJobsOpen() int {
 	sess.openReqsMu.Lock()
 	N := len(sess.openReqs)
 	sess.openReqsMu.Unlock()
 	return N
 }
 
-func (sess *pipeSess) addNewJob(reqIn *ChReq) *reqJob {
+func (sess *repoSess) addNewJob(reqIn *ChReq) *reqJob {
 	job := &reqJob{
 		req:  reqIn,
 		sess: sess,
 	}
 
-	job.ctx, job.ctxCancel = context.WithCancel(sess.Ctx())
+	//job.ctx, job.ctxCancel = context.WithCancel(sess.Ctx())
 
 	sess.openReqsMu.Lock()
 	sess.openReqs[reqIn.ReqID] = job
@@ -584,7 +352,7 @@ func (sess *pipeSess) addNewJob(reqIn *ChReq) *reqJob {
 	return job
 }
 
-func (sess *pipeSess) dispatchReq(reqIn *ChReq) {
+func (sess *repoSess) dispatchReq(reqIn *ChReq) {
     if reqIn == nil {
         return
     }
@@ -594,7 +362,7 @@ func (sess *pipeSess) dispatchReq(reqIn *ChReq) {
 	job := sess.lookupJob(reqIn.ReqID)
 	if reqIn.ReqOp == ChReqOp_CancelReq {
 		if job != nil {
-			job.ctxCancel()
+			job.cancelJob()
 		} else {
 			err = ErrCode_ReqIDNotFound.Err()
 		}
@@ -609,18 +377,18 @@ func (sess *pipeSess) dispatchReq(reqIn *ChReq) {
 
 	// Sends an error if reqErr.Code was set
 	if err != nil {
-		sess.msgOutlet <- reqIn.newResponse(ChMsgOp_ReqDiscarded, err)
+		sess.msgOutbox <- reqIn.newResponse(ChMsgOp_ReqDiscarded, err)
 	}
 }
 
-func (sess *pipeSess) cancelAll() {
+func (sess *repoSess) cancelAll() {
     sess.Info(2, "canceling all jobs")
 	jobsCanceled := 0
 	sess.openReqsMu.Lock()
 	for _, job := range sess.openReqs {
 		if job.isCanceled() == false {
 			jobsCanceled++
-			job.ctxCancel()
+			job.cancelJob()
 		}
 	}
 	sess.openReqsMu.Unlock()
@@ -629,18 +397,24 @@ func (sess *pipeSess) cancelAll() {
 	}
 }
 
-// RepoServicePipe is the Grpc session a client opens and keeps open.
+// RepoServiceSession is the Grpc session a client opens and keeps open.
 // Multiple pipes can be open at any time by the same client or multiple clients.
-func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error {
+func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer) error {
 
-	sess := &pipeSess{
+    //
+    // TODO: this will need to be moved inside of host.go.
+    // THEN NewHost() is what's in pnode's main.go (and GrpcServer just makes new sessions into Host)
+    //
+	sess := &repoSess{
 		srv:       srv,
 		openReqs:  make(map[int32]*reqJob),
-		msgOutlet: make(chan *ChMsg, 4),
+        msgOutbox: make(chan *ChMsg, 4),
+        hostSess:  srv.host.NewSession(),
 		rpc:       rpc,
 	}
 
-	sess.SetLogLabel(fmt.Sprintf("sess%02d", atomic.AddInt32(&srv.pipeCount, 1)))
+	sess.SetLogLabelf("sess%2d", atomic.AddInt32(&srv.sessCount, 1))
+    //sess.hostSess.SetLogLabel("host " + sess.GetLogLabel())
 
 	err := sess.CtxStart(
 		sess.ctxStartup,
@@ -762,7 +536,7 @@ func (srv *GrpcServer) RepoServicePipe(rpc RepoGrpc_RepoServicePipeServer) error
 
 var (
     nodeEntryKey    = byte('\x10')
-    nodeEntryPath = tree.Keypath([]byte{tree.PathSepChar, nodeEntryKey})
+    //nodeEntryPath = tree.Keypath([]byte{tree.PathSepChar, nodeEntryKey})
 )
 
 
@@ -797,25 +571,19 @@ func (job *reqJob) newResponse(op ChMsgOp) *ChMsg {
     return job.req.newResponse(op, nil)
 }
 
-func (job *reqJob) newEntry(op ChMsgOp, unmarshalFromBase64 string) (*ChMsg, error) {
-
-	var err error
-	job.scrap, err = bufs.SmartDecodeFromBase64([]byte(unmarshalFromBase64), job.scrap)
-	if err != nil {
-		return nil, err
-	}
+func (req *ChReq) newChEntry(chMsgBuf []byte) (*ChMsg, error) {
 
 	// TODO: use sync.pool
 	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
 	msg := &ChMsg{}
 
-	err = msg.Unmarshal(job.scrap)
+	err := msg.Unmarshal(chMsgBuf)
 	if err != nil {
 		return nil, err
 	}
 
-	msg.Op = op
-	msg.ReqID = job.req.ReqID
+	msg.Op = ChMsgOp_ChEntry
+	msg.ReqID = req.ReqID
 
 	return msg, nil
 }
@@ -829,38 +597,6 @@ func releaseMsg(msg *ChMsg) {
 	// }
 }
 
-// filterAndSendNode takes a node given to be a rw key-value serialization of a ch entry and sends it to the job session outlet
-func (job *reqJob) filterAndSendNode(node tree.Node) bool {
-    sentNode := false
-
-    {
-		buf64, exists, err := node.StringValue(nil) //chMsgKey)
-		if err != nil {
-			job.sess.Warnf("error fetching ChMsg from node: %v, %v", string(node.Keypath()), err)
-		} else if !exists {
-			// no-op
-		} else {
-
-			// TODO: use sync.pool
-			// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
-			var msg *ChMsg
-			msg, err = job.newEntry(ChMsgOp_ChEntry, buf64)
-			if err != nil {
-                job.sess.Warnf("error unmarshalling node: %v", err)
-                return false
-			}
-
-			kp, _ := node.Keypath().Pop()
-			msg.Keypath = string(kp)
-
-            job.sess.msgOutlet <- msg
-
-            sentNode = true
-		}
-	}
-
-    return sentNode
-}
 
 // 	// Internal nodes (storing ChMsg fields
 // 	leafName := node.Keypath().Pop()
