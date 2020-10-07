@@ -9,16 +9,9 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "remotePath": "",
-            "port": 2345,
-            "host": "127.0.0.1",
             "program": "${fileDirname}",
             "env": {},
-            //"args": [ "-v", "1" ],
-            //"args": [ "-init" ],
-            //"args": ["-init", "-seed", "/Users/aomeara/go/src/github.com/plan-systems/plan-core/cmd/pdi-local/Shrug Island.seed.plan"],
-            "args": ["-repoAddr", "192.168.2.178:5191"],
-            "showLog": true
+            //"showLog": true
         }
     ]
 }
