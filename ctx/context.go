@@ -9,7 +9,8 @@ import (
 	"os/signal"
 	"reflect"
 	"sync"
-	"syscall"
+    "syscall"
+    "strings"
 	"time"
 )
 
@@ -23,7 +24,6 @@ type Ctx interface {
 type childCtx struct {
 	CtxID   []byte
 	Ctx     Ctx
-	Context *Context
 }
 
 // Context is a service helper.
@@ -190,7 +190,7 @@ func (c *Context) CtxStopChildren(stopReason string) {
 
 	c.childrenMutex.RLock()
 	N := len(c.children)
-	if logInfo {
+	if N > 0 && logInfo {
 		c.Infof(2, "%d children to stop", N)
 	}
 	if N > 0 {
@@ -418,4 +418,33 @@ func (c *Context) AttachInterruptHandler() {
 	}()
 
 	c.Infof(0, "for graceful shutdown, \x1b[1m^c\x1b[0m, \x1b[1mkill -s SIGINT %d\x1b[0m, or \x1b[1mkill -9 %d\x1b[0m", os.Getpid(), os.Getpid())
+}
+
+// CtxPrintDebug prints a listing of all child contexts in an indented format. 
+func (c *Context) CtxPrintDebug()  {
+    var str strings.Builder
+    str.Grow(255)
+
+    str.WriteString("CtxPrint:\n")
+    c.ctxPrintDebug(1, &str)
+
+    c.Info(0, str.String())
+}
+
+const indent = "                                                                                               "
+
+func (c *Context) ctxPrintDebug(indentLevel int, str *strings.Builder)  {
+    str.WriteString(indent[:4*indentLevel])
+    str.WriteString(c.GetLogPrefix())
+    numChildren := len(c.children)
+    if numChildren == 1 {
+        str.WriteString("(1 child)")
+    } else if numChildren > 0 {
+        fmt.Fprintf(str, "(%d children)", numChildren)
+    }
+    str.WriteByte('\n')
+
+    for _, child := range c.children {
+        child.Ctx.Ctx().ctxPrintDebug(indentLevel+1, str)
+    }
 }
