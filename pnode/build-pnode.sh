@@ -1,9 +1,9 @@
 #!/bin/bash
 
 
-# if [[ -d "../redwood-go" ]]; then
-#     echo "=====  updating redwood-go  ====="
-#     git -C ../redwood-go pull
+# if [[ -d "../../plan-protobufs" ]]; then
+#     echo "=====  updating plan-protobufs  ====="
+#     git -C ../../plan-protobufs pull
 #     $cmd
 # fi
 
@@ -17,7 +17,6 @@ DST_DIR="$SELF_DIR/.."
 
 $BUILD_GO_PROTO repo  gofast "$DST_DIR"
 $BUILD_GO_PROTO vault gofast "$DST_DIR"
-
 
 # echo "=====  generating protobufs  ====="
 # go get -u github.com/golang/protobuf/protoc-gen-go
