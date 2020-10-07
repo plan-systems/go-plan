@@ -67,7 +67,8 @@ type host struct {
 	params          HostParams
 	txScrap         []byte
 	domains         map[string]Domain
-	domainsMu       sync.RWMutex
+    domainsMu       sync.RWMutex
+	vaultMgr        *vaultMgr
 }
 
 type txUpdate struct {
@@ -103,7 +104,16 @@ func (host *host) ctxStartup() error {
 	host.stateDB, err = badger.Open(opts)
 	if err != nil {
 		return err
+    }
+    
+	host.vaultMgr = newVaultMgr(host)
+	err = host.vaultMgr.Start()
+	if err != nil {
+		return err
 	}
+
+	// Making the vault ctx a child ctx of this domain means that it must Stop before the domain ctx will even start stopping
+	host.CtxAddChild(host.vaultMgr, nil)
 
 	host.grpcServer = NewGrpcServer(host, "tcp", fmt.Sprintf("127.0.0.1:%v", host.params.HostGrpcPort))
 	err = host.grpcServer.Start()
@@ -240,11 +250,11 @@ func (host *host) mountDomain(domainName string) (Domain, error) {
 	domain = newDomain(domainName, host)
 	host.domains[domainName] = domain
 
-	// We add the domain as child ctxs because the other child ctxs of this host could still be accessing them until they are fully stopped.
 	err := domain.Start()
 	if err != nil {
 		return nil, err
-	}
+    }
+    host.CtxAddChild(domain, nil)
 
 	return domain, nil
 }

@@ -27,7 +27,6 @@ type domain struct {
 	chSess      map[string]*chSess
 	txsToMerge  chan *Tx
 	txsToDecode chan *RawTx
-	vaultMgr    *vaultMgr
 	writeScrap  []byte
 }
 
@@ -96,7 +95,6 @@ func (d *domain) Start() error {
 }
 
 func (d *domain) ctxStartup() error {
-	var err error
 
 	d.Infof(1, "starting")
 
@@ -158,15 +156,6 @@ func (d *domain) ctxStartup() error {
 
 		close(d.txsToMerge)
 	})
-
-	d.vaultMgr = newVaultMgr(d)
-	err = d.vaultMgr.Start()
-	if err != nil {
-		return err
-	}
-
-	// Making the vault ctx a child ctx of this domain means that it must Stop before the domain ctx will even start stopping
-	d.CtxAddChild(d.vaultMgr, nil)
 
 	return nil
 }
@@ -378,9 +367,9 @@ func (ch *chSess) ctxStartup() error {
 	// }
 	keypath := fmt.Sprintf("%s/%s/", ch.domain.domainName, ch.ChID)
 	ch.keyPrefix = append(ch.keyPrefixBuf[:0], keypath...)
-	ch.SetLogLabelf("ch %v", string(ch.keyPrefix))
+	ch.SetLogLabelf("chSess …%v", ch.ChID[len(ch.ChID)-5:])
 
-	ch.Info(2, "starting")
+	ch.Info(2, "starting ", keypath)
 
 	return nil
 }
@@ -456,9 +445,9 @@ func (sub *chSub) ctxStartup() error {
 		return err
 	}
 
-	sub.SetLogLabelf("%v sub %02x %v", sub.chSess.GetLogLabel(), sub.chReq.ReqID, sub.chReq.GetOp.Keypath)
-
-	//sub.Infof(2, "chSub starting: %v", string(sub.opKeypath))
+    chDesc := sub.chSess.GetLogLabel()
+	//sub.SetLogLabelf("%s/%s sub%03x", sub.chSess.GetLogLabel(), sub.chReq.GetOp.Keypath, sub.chReq.ReqID)
+	sub.SetLogLabelf("sub%03d …%s/%s", sub.chReq.ReqID, chDesc[len(chDesc)-5:], sub.chReq.GetOp.Keypath)
 
 	sub.CtxGo(func() {
 
