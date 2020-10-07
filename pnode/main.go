@@ -52,6 +52,7 @@ func main() {
                     debugAbort = 1
                 }
             }
+            hostCtx.CtxPrintDebug()
             hostCtx.CtxStop("debug stop", nil)
         }()
 
