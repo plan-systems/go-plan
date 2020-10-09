@@ -15,6 +15,8 @@ const TIDSz = int(Const_TIDSz)
 // TIDEncodedLen is the ASCII-compatible string length of a (binary) TID encoded into its base32 form.
 const TIDEncodedLen = int(Const_TIDEncodedLen)
 
+// nilTID is a zeroed TID that denotes a void/nil/zero value of a TID
+var nilTID = TIDBuf{}
 
 func (err *ReqErr) Error() string {
 	codeStr, exists := ErrCode_name[int32(err.Code)]
@@ -194,7 +196,7 @@ func (tid TID) IsNil() bool {
 		return true
 	}
 
-	if bytes.Equal(tid, NilTID[:]) {
+	if bytes.Equal(tid, nilTID[:]) {
 		return true
 	}
 
