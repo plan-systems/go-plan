@@ -1,17 +1,17 @@
 # PLAN
 
 ```
-         P urposeful
-         L ogistics
-         A rchitecture
-P  L  A  N etwork
+         P.rivacy
+         L.ogistics
+         A.ccessibility
+P  L  A  N.etworks
 ```
 
 [PLAN](http://plan-systems.org) is a free and open platform for groups to securely communicate, collaborate, and coordinate projects and activities.
 
 ## About
 
-This repo contains PLAN's backend infrastrcuture that ultimately hosts [plan-client-unity](https://github.com/plan-systems/plan-client-unity) clients.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `plan-go` is regarded as the official reference implementation.
+This repo contains PLAN's backend infrastructure that ultimately hosts [plan-client-unity](https://github.com/plan-systems/plan-client-unity) instances on client-facing devices.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `plan-go` is offered as the reference implementation.
 
 The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
 
@@ -20,8 +20,10 @@ The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs
 
 |    Date     | Status                                                                  |
 |:-----------:|-------------------------------------------------------------------------|
+| Sep 2020 | Pilot implementation of v3, marring keypath+state semantics, binary integration, and the requisite [security model](https://github.com/plan-systems/design-docs/blob/master/PLAN-Proof-of-Correctness.md)  
+| Jan 2020 | Experimentatal integration with [redwood](https://github.com/brynbellomy/redwood) on a v2 implementation  |
 | Jul 2019 | pre-alpha prototype demonstrates `ch/talk` and `ch/space` at [DWeb 2019](https://www.plan-systems.org/2019/05/13/decentralized-web-camp-and-beyond/)               |
-| May 2019 | pnode community genesis and basic channel ops implmented               |
+| May 2019 | pnode community genesis and basic channel ops implemented               |
 | Feb 2019 | pdi-datastore now implements [StorageProvider](https://github.com/plan-systems/design-docs/blob/master/PLAN-API-Documentation.md#Persistent-Data-Interface) using a centralized db |
 | Dec 2018 | Architecture docs complete; resuming active development                 |
 | Sep 2018 | Pausing active development to work on PLAN PoC                          |
@@ -102,4 +104,4 @@ If you are contributing new features to `plan-go`, you may end up needing to upd
     git commit -m "updated protobufs from v1.2.3"
     ```
 
-6. Pick up your new lambo.
+6. Pick up your lambo.
