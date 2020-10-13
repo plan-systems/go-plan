@@ -13,7 +13,7 @@ P  L  A  N.etworks
 
 This repo contains PLAN's backend infrastructure that ultimately hosts [plan-client-unity](https://github.com/plan-systems/plan-client-unity) instances on client-facing devices.  Since PLAN uses open standards, protocols, and data structures, other implementations may someday also exist, so `plan-go` is offered as the reference implementation.
 
-The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
+The [PLAN Design Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
 
 ## Milestone Log
 
@@ -21,7 +21,7 @@ The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs
 |    Date     | Status                                                                  |
 |:-----------:|-------------------------------------------------------------------------|
 | Sep 2020 | Pilot implementation of v3, marring keypath+state semantics, binary integration, and the requisite [security model](https://github.com/plan-systems/design-docs/blob/master/PLAN-Proof-of-Correctness.md)  
-| Jan 2020 | Experimentatal integration with [redwood](https://github.com/brynbellomy/redwood) on a v2 implementation  |
+| Jan 2020 | Experimental integration with [redwood](https://github.com/brynbellomy/redwood) on a v2 implementation  |
 | Jul 2019 | pre-alpha prototype demonstrates `ch/talk` and `ch/space` at [DWeb 2019](https://www.plan-systems.org/2019/05/13/decentralized-web-camp-and-beyond/)               |
 | May 2019 | pnode community genesis and basic channel ops implemented               |
 | Feb 2019 | pdi-datastore now implements [StorageProvider](https://github.com/plan-systems/design-docs/blob/master/PLAN-API-Documentation.md#Persistent-Data-Interface) using a centralized db |
@@ -36,7 +36,7 @@ The [PLAN Design & Engineering Docs](https://github.com/plan-systems/design-docs
 
 |                           |                                                          |
 |--------------------------:|----------------------------------------------------------|
-|                 Team Lead | [Drew O'Meara](mailto:drew2019@plan-systems.org)         |
+|                 Team Lead | Drew O'Meara                                             |
 | Design & Engineering Docs | https://github.com/plan-systems/design-docs              |
 |              PLAN Website | http://plan-systems.org                                  |
 |                   License | [GPL-v3](https://www.gnu.org/licenses/gpl-3.0.en.htmlm)  |
