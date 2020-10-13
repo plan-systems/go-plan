@@ -23,8 +23,6 @@ import (
 	"github.com/plan-systems/plan-go/ctx"
 )
 
-
-
 /*
    For a given stateURI:
 
@@ -111,12 +109,12 @@ func (srv *GrpcServer) Start() error {
 type strMap = map[string]interface{}
 
 type reqJob struct {
-	req       *ChReq
-	sess      *repoSess
-	filters   nodeFilters
-    scrap     []byte
-    canceled bool
-    chSub    ChSub
+	req      *ChReq
+	sess     *repoSess
+	filters  nodeFilters
+	scrap    []byte
+	canceled bool
+	chSub    ChSub
 	// ctx       context.Context
 	// ctxCancel context.CancelFunc
 }
@@ -132,12 +130,11 @@ func (job *reqJob) isCanceled() bool {
 }
 
 func (job *reqJob) cancelJob() {
-    job.canceled = true
-    if job.chSub != nil {
-        job.chSub.Close()
-    }
+	job.canceled = true
+	if job.chSub != nil {
+		job.chSub.Close()
+	}
 }
-
 
 // func (job *reqJob) canceled() <-chan struct{} {
 // 	return job.ctx.Done()
@@ -147,69 +144,66 @@ func (job *reqJob) cancelJob() {
 // 	return job.ctx
 // }
 
-
-
 func (job *reqJob) exeGetOp() error {
-    var err error
-    job.chSub, err = job.sess.srv.host.OpenChSub(job.req)
-    if err != nil {
-        return err
-    }
-    defer job.chSub.Close()
+	var err error
+	job.chSub, err = job.sess.srv.host.OpenChSub(job.req)
+	if err != nil {
+		return err
+	}
+	defer job.chSub.Close()
 
-    // Block while the chSess works and outputs ch entries to send from the ch session.
-    // If/when the chSess see the job ctx stopping, it will unwind and close the outbox
-    {
-        for msg := range job.chSub.Outbox() {
-            job.sess.msgOutbox <- msg
-        }
-    }
+	// Block while the chSess works and outputs ch entries to send from the ch session.
+	// If/when the chSess see the job ctx stopping, it will unwind and close the outbox
+	{
+		for node := range job.chSub.Outbox() {
+			job.sess.nodeOutbox <- node
+		}
+	}
 
 	return nil
 }
 
-func (job *reqJob) exeTxOp() (*ChMsg, error) {
+func (job *reqJob) exeTxOp() (*Node, error) {
 
-    if job.req.TxOp.ChStateURI == nil {
-        job.req.TxOp.ChStateURI = job.req.ChStateURI
-    }
+	if job.req.TxOp.ChStateURI == nil {
+		job.req.TxOp.ChStateURI = job.req.ChStateURI
+	}
 
-    tx, err := job.sess.hostSess.EncodeToTxAndSign(job.req.TxOp)
-    if err != nil {
-        return nil, err
-    }
+	tx, err := job.sess.hostSess.EncodeToTxAndSign(job.req.TxOp)
+	if err != nil {
+		return nil, err
+	}
 
-    // TODO: don't release this op until its merged or rejected (required tx broadcast)
-    err = job.sess.srv.host.SubmitTx(tx)
-    if err != nil {
-        return nil, err
-    }
+	// TODO: don't release this op until its merged or rejected (required tx broadcast)
+	err = job.sess.srv.host.SubmitTx(tx)
+	if err != nil {
+		return nil, err
+	}
 
-    msg := job.newResponse(ChMsgOp_ReqComplete)
-	msg.Attachment = append(msg.Attachment[:0], tx.TID...)
-    msg.Str = path.Join(job.req.ChStateURI.DomainName, TID(tx.TID).Base32())
+	node := job.newResponse(NodeOp_ReqComplete)
+	node.Attachment = append(node.Attachment[:0], tx.TID...)
+	node.Str = path.Join(job.req.ChStateURI.DomainName, TID(tx.TID).Base32())
 
-	return msg, nil
+	return node, nil
 }
 
 func (job *reqJob) exeJob() {
 	var err error
-	var msg *ChMsg
+	var node *Node
 
+	// Check to see if this req is canceled before beginning
+	if err == nil {
+		if job.isCanceled() {
+			err = ErrCode_ReqCanceled.Err()
+		}
+	}
 
-    // Check to see if this req is canceled before beginning
-    if err == nil {
-        if job.isCanceled() {
-            err = ErrCode_ReqCanceled.Err()
-        }
-    }
-
-    if err == nil {
-        if job.req.ChStateURI == nil && len(job.req.ChURI) > 0 {
-            job.req.ChStateURI = &ChStateURI{}
-            err = job.req.ChStateURI.AssignFromURI(job.req.ChURI)
-        }
-    }
+	if err == nil {
+		if job.req.ChStateURI == nil && len(job.req.ChURI) > 0 {
+			job.req.ChStateURI = &ChStateURI{}
+			err = job.req.ChStateURI.AssignFromURI(job.req.ChURI)
+		}
+	}
 
 	if err == nil {
 		switch job.req.ReqOp {
@@ -219,7 +213,7 @@ func (job *reqJob) exeJob() {
 			case job.req.GetOp != nil:
 				err = job.exeGetOp()
 			case job.req.TxOp != nil:
-				msg, err = job.exeTxOp()
+				node, err = job.exeTxOp()
 			}
 
 		default:
@@ -227,27 +221,25 @@ func (job *reqJob) exeJob() {
 		}
 	}
 
+	// Send completion msg
+	{
+		if err == nil && job.isCanceled() {
+			err = ErrCode_ReqCanceled.Err()
+		}
 
-    // Send completion msg
-    {
-        if err == nil && job.isCanceled() {
-            err = ErrCode_ReqCanceled.Err()
-        }
+		if err != nil {
+			node = job.req.newResponse(NodeOp_ReqDiscarded, err)
+		} else if node == nil {
+			node = job.newResponse(NodeOp_ReqComplete)
+		} else if node.Op != NodeOp_ReqComplete && node.Op != NodeOp_ReqDiscarded {
+			panic("this should be msg completion")
+		}
 
-        if err != nil {
-            msg = job.req.newResponse(ChMsgOp_ReqDiscarded, err)
-        } else if msg == nil {
-            msg = job.newResponse(ChMsgOp_ReqComplete)
-        } else if msg.Op != ChMsgOp_ReqComplete && msg.Op != ChMsgOp_ReqDiscarded {
-            panic("this should be msg completion")
-        }
-    
-        job.sess.msgOutbox <- msg
-    }
+		job.sess.nodeOutbox <- node
+	}
 
 	job.sess.removeJob(job.req.ReqID)
 }
-
 
 type repoSess struct {
 	ctx.Context
@@ -255,8 +247,8 @@ type repoSess struct {
 	srv        *GrpcServer
 	openReqs   map[int32]*reqJob
 	openReqsMu sync.Mutex
-    msgOutbox  chan *ChMsg
-    hostSess   HostSession
+	nodeOutbox chan *Node
+	hostSess   HostSession
 	scrap      [512]byte
 	rpc        RepoGrpc_RepoServiceSessionServer
 }
@@ -267,10 +259,10 @@ func (sess *repoSess) ctxStartup() error {
 	sess.CtxGo(func() {
 		for running := true; running; {
 			select {
-			case msg := <-sess.msgOutbox:
+			case msg := <-sess.nodeOutbox:
 				if msg != nil {
-                    sess.rpc.Send(msg)
-                    releaseMsg(msg)
+					sess.rpc.Send(msg)
+					releaseMsg(msg)
 				}
 			case <-sess.Ctx().Done():
 				sess.Info(2, "sess.Ctx().Done()")
@@ -282,7 +274,7 @@ func (sess *repoSess) ctxStartup() error {
 		// Keep dropping outgoing msgs until all the jobs are done.
 		// The session sends an empty msg each time a job is removed to keep this loop going.
 		for sess.numJobsOpen() > 0 {
-			<-sess.msgOutbox
+			<-sess.nodeOutbox
 		}
 	})
 
@@ -291,26 +283,24 @@ func (sess *repoSess) ctxStartup() error {
 		for sess.CtxRunning() {
 			reqIn, err := sess.rpc.Recv()
 			if err != nil {
-                if grpc.Code(err) == grpc_codes.Canceled {
-                    sess.CtxStop("session pipe canceled", nil)
-                } else {
-                    sess.Errorf("sess.rpc.Recv() err: %v", err)
-                }
+				if grpc.Code(err) == grpc_codes.Canceled {
+					sess.CtxStop("session pipe canceled", nil)
+				} else {
+					sess.Errorf("sess.rpc.Recv() err: %v", err)
+				}
 			}
 			sess.dispatchReq(reqIn)
-        }
-        
-        sess.Info(2, "sess rpc reader exited")
+		}
+
+		sess.Info(2, "sess rpc reader exited")
 	})
 
 	return nil
 }
 
-
 func (sess *repoSess) ctxStopping() {
-    sess.cancelAll()
+	sess.cancelAll()
 }
-
 
 func (sess *repoSess) lookupJob(reqID int32) *reqJob {
 	sess.openReqsMu.Lock()
@@ -325,7 +315,7 @@ func (sess *repoSess) removeJob(reqID int32) {
 		delete(sess.openReqs, reqID)
 
 		// Send an empty msg to wake up pipe shutdown
-		sess.msgOutbox <- nil
+		sess.nodeOutbox <- nil
 	}
 	sess.openReqsMu.Unlock()
 }
@@ -353,11 +343,11 @@ func (sess *repoSess) addNewJob(reqIn *ChReq) *reqJob {
 }
 
 func (sess *repoSess) dispatchReq(reqIn *ChReq) {
-    if reqIn == nil {
-        return
-    }
+	if reqIn == nil {
+		return
+	}
 
-    var err error
+	var err error
 
 	job := sess.lookupJob(reqIn.ReqID)
 	if reqIn.ReqOp == ChReqOp_CancelReq {
@@ -377,12 +367,12 @@ func (sess *repoSess) dispatchReq(reqIn *ChReq) {
 
 	// Sends an error if reqErr.Code was set
 	if err != nil {
-		sess.msgOutbox <- reqIn.newResponse(ChMsgOp_ReqDiscarded, err)
+		sess.nodeOutbox <- reqIn.newResponse(NodeOp_ReqDiscarded, err)
 	}
 }
 
 func (sess *repoSess) cancelAll() {
-    sess.Info(2, "canceling all jobs")
+	sess.Info(2, "canceling all jobs")
 	jobsCanceled := 0
 	sess.openReqsMu.Lock()
 	for _, job := range sess.openReqs {
@@ -401,20 +391,20 @@ func (sess *repoSess) cancelAll() {
 // Multiple pipes can be open at any time by the same client or multiple clients.
 func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer) error {
 
-    //
-    // TODO: this will need to be moved inside of host.go.
-    // THEN NewHost() is what's in pnode's main.go (and GrpcServer just makes new sessions into Host)
-    //
+	//
+	// TODO: this will need to be moved inside of host.go.
+	// THEN NewHost() is what's in pnode's main.go (and GrpcServer just makes new sessions into Host)
+	//
 	sess := &repoSess{
-		srv:       srv,
-		openReqs:  make(map[int32]*reqJob),
-        msgOutbox: make(chan *ChMsg, 4),
-        hostSess:  srv.host.NewSession(),
-		rpc:       rpc,
+		srv:        srv,
+		openReqs:   make(map[int32]*reqJob),
+		nodeOutbox: make(chan *Node, 4),
+		hostSess:   srv.host.NewSession(),
+		rpc:        rpc,
 	}
 
 	sess.SetLogLabelf("sess%2d", atomic.AddInt32(&srv.sessCount, 1))
-    //sess.hostSess.SetLogLabel("host " + sess.GetLogLabel())
+	//sess.hostSess.SetLogLabel("host " + sess.GetLogLabel())
 
 	err := sess.CtxStart(
 		sess.ctxStartup,
@@ -432,15 +422,13 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 		sess.CtxStop(srv.CtxStopReason(), nil)
 	case <-rpc.Context().Done():
 		sess.Info(2, "rpc.Context().Done()")
-		//sess.CtxStop("rpc context done", nil)   we should need to stop anything sincce 
+		//sess.CtxStop("rpc context done", nil)   we should need to stop anything sincce
 	}
 
 	sess.CtxWait()
 
 	return nil
 }
-
-
 
 // 	var err error
 // 	{
@@ -469,7 +457,6 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 // 			}
 // 		}
 // 	}
-
 
 // 	// // If only doing layers, don't search through EVERY node and be dum, step through the layer list and step through each layer, son!
 // 	// if (req.FilterFlags & FilterFlags_LAYERS_ONLY) != 0 {
@@ -533,72 +520,68 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 
 // 	return nil
 
-
 var (
-    nodeEntryKey    = byte('\x10')
-    //nodeEntryPath = tree.Keypath([]byte{tree.PathSepChar, nodeEntryKey})
+	nodeEntryKey = byte('\x10')
+	//nodeEntryPath = tree.Keypath([]byte{tree.PathSepChar, nodeEntryKey})
 )
-
 
 type nodeFilters struct {
 	regexKeypath *regexp.Regexp
 	regexTypeID  *regexp.Regexp
 }
 
-
-func (req *ChReq) newResponse(op ChMsgOp, err error) *ChMsg {
-
-    // TODO: use sync.pool
-	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
-	msg := &ChMsg{}
-
-	msg.Op = op
-    msg.ReqID = req.ReqID
-
-    if err != nil {
-        var reqErr *ReqErr
-        if reqErr, _ = err.(*ReqErr); reqErr == nil {
-            err = ErrCode_UnnamedErr.Wrap(err)
-            reqErr = err.(*ReqErr)
-        }
-        msg.Attachment = bufs.SmartMarshal(reqErr, msg.Attachment)
-    }
-
-    return msg
-}
-
-func (job *reqJob) newResponse(op ChMsgOp) *ChMsg {
-    return job.req.newResponse(op, nil)
-}
-
-func (req *ChReq) newChEntry(chMsgBuf []byte) (*ChMsg, error) {
+func (req *ChReq) newResponse(op NodeOp, err error) *Node {
 
 	// TODO: use sync.pool
 	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
-	msg := &ChMsg{}
+	node := &Node{}
 
-	err := msg.Unmarshal(chMsgBuf)
+	node.Op = op
+	node.ReqID = req.ReqID
+
+	if err != nil {
+		var reqErr *ReqErr
+		if reqErr, _ = err.(*ReqErr); reqErr == nil {
+			err = ErrCode_UnnamedErr.Wrap(err)
+			reqErr = err.(*ReqErr)
+		}
+		node.Attachment = bufs.SmartMarshal(reqErr, node.Attachment)
+	}
+
+	return node
+}
+
+func (job *reqJob) newResponse(op NodeOp) *Node {
+	return job.req.newResponse(op, nil)
+}
+
+func (req *ChReq) newChEntry(NodeBuf []byte) (*Node, error) {
+
+	// TODO: use sync.pool
+	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
+	node := &Node{}
+
+	err := node.Unmarshal(NodeBuf)
 	if err != nil {
 		return nil, err
 	}
 
-	msg.Op = ChMsgOp_ChEntry
-	msg.ReqID = req.ReqID
+	node.Op = NodeOp_ChEntry
+	node.ReqID = req.ReqID
 
-	return msg, nil
+	return node, nil
 }
 
-// releaseMsg releases this ChMsg back over to the pool
-func releaseMsg(msg *ChMsg) {
+// releaseMsg releases this Node back over to the pool
+func releaseMsg(node *Node) {
 
 	// TODO: use sync.pool here
-	// if len(msg.Attachment) > 0 {
-	// 	msg.Attachment = msg.Attachment[:0]
+	// if len(node.Attachment) > 0 {
+	// 	node.Attachment = node.Attachment[:0]
 	// }
 }
 
-
-// 	// Internal nodes (storing ChMsg fields
+// 	// Internal nodes (storing Node fields
 // 	leafName := node.Keypath().Pop()
 // 	if len(leafName) <= 1 {
 // 		return nil
@@ -789,7 +772,6 @@ func releaseMsg(msg *ChMsg) {
 
 // 	return outNode
 // }
-
 
 // UnaryServerInterceptor is a debugging helper
 func (srv *GrpcServer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {

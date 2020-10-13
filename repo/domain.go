@@ -46,11 +46,10 @@ type chSess struct {
 type chSub struct {
 	ctx.Context
 
-	chSess    *chSess
-	chReq     *ChReq
-	msgOutbox chan *ChMsg
-	txInbox   chan *Tx
-	//scrap     []byte
+	chSess     *chSess
+	chReq      *ChReq
+	nodeOutbox chan *Node
+	txInbox    chan *Tx
 }
 
 func newDomain(
@@ -378,9 +377,9 @@ func (ch *chSess) ctxStartup() error {
 func (ch *chSess) OpenChSub(chReq *ChReq) (ChSub, error) {
 
 	sub := &chSub{
-		chSess:    ch,
-		chReq:     chReq,
-        msgOutbox: make(chan *ChMsg),
+		chSess:     ch,
+		chReq:      chReq,
+        nodeOutbox: make(chan *Node),
     }
     
 
@@ -429,8 +428,8 @@ func (ch *chSess) unregisterSub(remove *chSub) {
 
 
 
-func (sub *chSub) Outbox() <-chan *ChMsg {
-	return sub.msgOutbox
+func (sub *chSub) Outbox() <-chan *Node {
+	return sub.nodeOutbox
 }
 
 func (sub *chSub) Close() {
@@ -455,7 +454,7 @@ func (sub *chSub) ctxStartup() error {
 
 		if sub.txInbox != nil {
             for {
-                sub.msgOutbox <- sub.chReq.newResponse(ChMsgOp_ChSyncResume, nil)
+                sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
 
                 // This blocks until new txs appear or until the sub is stopping
                 tx, running := <- sub.txInbox
@@ -465,11 +464,11 @@ func (sub *chSub) ctxStartup() error {
                 for _, change := range tx.TxOp.Entries {
                     sub.processChange(change)
                 }
-                sub.msgOutbox <- sub.chReq.newResponse(ChMsgOp_ChSyncResume, nil)
+                sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
             }
 		}
 
-		close(sub.msgOutbox)
+		close(sub.nodeOutbox)
 
 		sub.CtxStop("sub complete", nil)
 	})
@@ -486,43 +485,43 @@ func (sub *chSub) ctxStopping() {
 	}
 }
 
-func (sub *chSub) processChange(change *ChMsg) {
+func (sub *chSub) processChange(change *Node) {
 	scope := sub.chReq.GetOp.Scope
 
     if strings.HasPrefix(change.Keypath, sub.chReq.GetOp.Keypath) {
         N := len(sub.chReq.GetOp.Keypath)
         subKey := change.Keypath[N:]
-        var msg *ChMsg
+        var node *Node
 
         if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
             if len(subKey) == 0 {
-                msg = sub.chReq.newResponse(ChMsgOp_ChEntry, nil) 
-                msg.Keypath = change.Keypath
+                node = sub.chReq.newResponse(NodeOp_ChEntry, nil) 
+                node.Keypath = change.Keypath
             }
         }
     
         if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
             if len(subKey) > 0 && subKey[0] == '/' {
-                msg = sub.chReq.newResponse(ChMsgOp_ChEntry, nil) 
-                msg.Keypath = subKey[1:]
+                node = sub.chReq.newResponse(NodeOp_ChEntry, nil) 
+                node.Keypath = subKey[1:]
             }
         }
 
-        if msg != nil {
-            sub.Infof(2, "SYNC: %v", msg.Keypath)
+        if node != nil {
+            sub.Infof(2, "SYNC: %v", node.Keypath)
 
-            msg.LastModified = change.LastModified
-            msg.TypeID = change.TypeID
-            msg.Label = change.Label
-            msg.Str = change.Str
-            msg.Int = change.Int
-            msg.X1 = change.X1
-            msg.X2 = change.X2
-            msg.X3 = change.X3
+            node.LastModified = change.LastModified
+            node.TypeID = change.TypeID
+            node.Label = change.Label
+            node.Str = change.Str
+            node.Int = change.Int
+            node.X1 = change.X1
+            node.X2 = change.X2
+            node.X3 = change.X3
 
-            msg.Attachment = change.Attachment
+            node.Attachment = change.Attachment
 
-            sub.msgOutbox <- msg
+            sub.nodeOutbox <- node
         }
     }
 
@@ -532,19 +531,19 @@ func (sub *chSub) processChange(change *ChMsg) {
 func (sub *chSub) unmarshalAndSend(itemPrefixSkip int, item *badger.Item) error {
 	return item.Value(func(entryBuf []byte) error {
 
-		msg, err := sub.chReq.newChEntry(entryBuf)
+		node, err := sub.chReq.newChEntry(entryBuf)
 		if err != nil {
 			return err
 		}
 
 		// TODO: use binary keypaths?
-		// msg.Keypath = append(msg.Keypath[:0], item.Key())
+		// node.Keypath = append(node.Keypath[:0], item.Key())
 		sub.Infof(2, "GET: %v", string(item.Key()))
 
-		msg.Keypath = string(item.Key()[itemPrefixSkip:])
-		sub.Infof(2, "GET: %v", msg.Keypath)
+		node.Keypath = string(item.Key()[itemPrefixSkip:])
+		sub.Infof(2, "GET: %v", node.Keypath)
 
-		sub.msgOutbox <- msg
+		sub.nodeOutbox <- node
 		return nil
 	})
 }
@@ -614,7 +613,7 @@ func (sub *chSub) sendStateToClient() {
 //                     syncTickerChan = nil
 //                 }
 //             } else {
-//                 job.sess.msgOutlet <- job.newResponse(ChMsgOp_SyncStep)
+//                 job.sess.msgOutlet <- job.newResponse(NodeOp_SyncStep)
 //                 idleTicks = 0
 //                 nodesSentThisTick = 0
 //             }
@@ -629,7 +628,7 @@ func (sub *chSub) sendStateToClient() {
 //             job.Debugf(">>>  SUB %v/%v", job.req.ChURI, string(changePath))
 //             if common.Equals(opPath) {
 //                 job.Debugf(">>>  COM %v/%v     common: %v", job.req.ChURI, string(changePath), common)
-//                 if  true { //job.filterAndSendNode(rev.State.NodeAt(kChMsgKey, nil)) {
+//                 if  true { //job.filterAndSendNode(rev.State.NodeAt(kNodeKey, nil)) {
 //                     nodesSentThisTick++
 //                 }
 //             }

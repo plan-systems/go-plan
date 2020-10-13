@@ -198,11 +198,11 @@ func (host *host) SubmitTx(tx *Tx) error {
 			}
 
 			switch entry.Op {
-			case ChMsgOp_ChEntry:
-			case ChMsgOp_ChEntryRemove:
-			case ChMsgOp_ChEntryRemoveAll:
+			case NodeOp_ChEntry:
+			case NodeOp_ChEntryRemove:
+			case NodeOp_ChEntryRemoveAll:
 			default:
-				err = ErrCode_CommitFailed.ErrWithMsg("unsupported ChMsgOp for entry")
+				err = ErrCode_CommitFailed.ErrWithMsg("unsupported NodeOp for entry")
 			}
 
 			entry.LastModified = int64(timestampFS)
@@ -260,6 +260,7 @@ func (host *host) mountDomain(domainName string) (Domain, error) {
 }
 
 type hostSess struct {
+    //ctx.Context
 
 }
 

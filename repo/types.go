@@ -22,7 +22,7 @@ type TimeFS int64
 type ChSub interface {
 	ctx.Ctx
 
-	Outbox() <-chan *ChMsg
+	Outbox() <-chan *Node
 	Close()
 }
 
@@ -57,7 +57,7 @@ type Domain interface {
 //     ctx.Context
 //     Host Host
 //     ReqInbox chan<- *ChReq
-//     MsgOutbox <-chan *ChMsg
+//     NodeOutbox <-chan *Node
 // }
 
 // Host is the highest level repo controller.  It accepts incoming txns, report status of their processing, and serves channel content.
