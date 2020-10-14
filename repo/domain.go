@@ -495,31 +495,20 @@ func (sub *chSub) processChange(change *Node) {
 
         if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
             if len(subKey) == 0 {
-                node = sub.chReq.newResponse(NodeOp_ChEntry, nil) 
+                node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change) 
                 node.Keypath = change.Keypath
             }
         }
     
         if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
             if len(subKey) > 0 && subKey[0] == '/' {
-                node = sub.chReq.newResponse(NodeOp_ChEntry, nil) 
+                node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change) 
                 node.Keypath = subKey[1:]
             }
         }
 
         if node != nil {
             sub.Infof(2, "SYNC: %v", node.Keypath)
-
-            node.LastModified = change.LastModified
-            node.TypeID = change.TypeID
-            node.Label = change.Label
-            node.Str = change.Str
-            node.Int = change.Int
-            node.X1 = change.X1
-            node.X2 = change.X2
-            node.X3 = change.X3
-
-            node.Attachment = change.Attachment
 
             sub.nodeOutbox <- node
         }

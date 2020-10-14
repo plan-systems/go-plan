@@ -530,6 +530,20 @@ type nodeFilters struct {
 	regexTypeID  *regexp.Regexp
 }
 
+func (req *ChReq) newResponseFromCopy(op NodeOp, src *Node) *Node {
+
+    // TODO: use sync.pool
+	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
+	node := &Node{}
+
+    *node = *src
+
+	node.Op = op
+    node.ReqID = req.ReqID
+    
+    return node
+}
+
 func (req *ChReq) newResponse(op NodeOp, err error) *Node {
 
 	// TODO: use sync.pool
