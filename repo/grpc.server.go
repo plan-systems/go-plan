@@ -8,11 +8,7 @@ import (
 	"regexp"
 	"sync"
 	"sync/atomic"
-
-	//"path"
-	//"strconv"
-	//"sync"
-	//"time"
+	"time"
 
 	//proto "github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -96,12 +92,18 @@ func (srv *GrpcServer) Start() error {
 
 			// This closes the net.Listener as well.
 			go srv.server.GracefulStop()
+
+			// Give the server a chance to send out cancels for all open jobs and existing jobs to finish.
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				srv.server.Stop()
+			}()
+
 		},
 		nil,
 		func() {
-			// on shutdown -- block until complete
-			srv.server.GracefulStop()
-			srv.Info(1, "graceful stop complete")
+			srv.server.Stop()
+			srv.Info(1, "grpc stop complete")
 		},
 	)
 }
@@ -135,14 +137,6 @@ func (job *reqJob) cancelJob() {
 		job.chSub.Close()
 	}
 }
-
-// func (job *reqJob) canceled() <-chan struct{} {
-// 	return job.ctx.Done()
-// }
-
-// func (job *reqJob) Ctx() context.Context {
-// 	return job.ctx
-// }
 
 func (job *reqJob) exeGetOp() error {
 	var err error
@@ -391,10 +385,6 @@ func (sess *repoSess) cancelAll() {
 // Multiple pipes can be open at any time by the same client or multiple clients.
 func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer) error {
 
-	//
-	// TODO: this will need to be moved inside of host.go.
-	// THEN NewHost() is what's in pnode's main.go (and GrpcServer just makes new sessions into Host)
-	//
 	sess := &repoSess{
 		srv:        srv,
 		openReqs:   make(map[int32]*reqJob),
@@ -403,8 +393,7 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 		rpc:        rpc,
 	}
 
-	sess.SetLogLabelf("sess%2d", atomic.AddInt32(&srv.sessCount, 1))
-	//sess.hostSess.SetLogLabel("host " + sess.GetLogLabel())
+	sess.SetLogLabelf("repoSess%2d", atomic.AddInt32(&srv.sessCount, 1))
 
 	err := sess.CtxStart(
 		sess.ctxStartup,
@@ -417,12 +406,11 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 	}
 
 	select {
-	case <-srv.Ctx().Done():
-		sess.Info(2, "srv.Ctx().Done()")
-		sess.CtxStop(srv.CtxStopReason(), nil)
+	// case <-srv.Ctx().Done():
+	// 	sess.Info(2, "stopping")
+	// 	sess.CtxStop(srv.CtxStopReason(), nil)
 	case <-rpc.Context().Done():
 		sess.Info(2, "rpc.Context().Done()")
-		//sess.CtxStop("rpc context done", nil)   we should need to stop anything sincce
 	}
 
 	sess.CtxWait()
@@ -532,16 +520,16 @@ type nodeFilters struct {
 
 func (req *ChReq) newResponseFromCopy(op NodeOp, src *Node) *Node {
 
-    // TODO: use sync.pool
+	// TODO: use sync.pool
 	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
 	node := &Node{}
 
-    *node = *src
+	*node = *src
 
 	node.Op = op
-    node.ReqID = req.ReqID
-    
-    return node
+	node.ReqID = req.ReqID
+
+	return node
 }
 
 func (req *ChReq) newResponse(op NodeOp, err error) *Node {
