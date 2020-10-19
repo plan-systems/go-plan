@@ -44,7 +44,7 @@ type Context struct {
 	childrenMutex sync.RWMutex
 
 	// externally provided callbacks
-	onAboutToStop      func()
+	onStopIssued       func()
 	onChildAboutToStop func(inChild Ctx)
 	onStopping         func()
 }
@@ -66,7 +66,7 @@ func (c *Context) CtxStopping() <-chan struct{} {
 // See notes for CtxInitiateStop()
 func (c *Context) CtxStart(
 	onStartup func() error,
-	onAboutToStop func(),
+	onStopIssued func(),
 	onChildAboutToStop func(inChild Ctx),
 	onStopping func(),
 ) error {
@@ -75,7 +75,7 @@ func (c *Context) CtxStart(
 		panic("plan.Context already running")
 	}
 
-	c.onAboutToStop = onAboutToStop
+	c.onStopIssued = onStopIssued
 	c.onChildAboutToStop = onChildAboutToStop
 	c.FaultLimit = 1
 	c.Context, c.ctxCancel = context.WithCancel(context.Background())
@@ -126,7 +126,7 @@ func (c *Context) CtxStart(
 //          }
 //
 // When c.CtxStop() is called (for the first time):
-//  1. c.onAboutToStop() is called (if provided to c.CtxStart)
+//  1. c.onStopIssued() is called (if it was provided to c.CtxStart)
 //  2. if c has a parent, c is detached and the parent's onChildAboutToStop(c) is called (if provided to c.CtxStart).
 //  3. c.CtxStopChildren() is called, blocking until all children are stopped (recursive)
 //  4. c.Context is canceled, causing onStopping() to be called (if provided) and any <-CtxStopping() calls to be unblocked.
@@ -147,9 +147,9 @@ func (c *Context) CtxStop(
 		c.Infof(2, "CtxStop (%s)", c.stopReason)
 
 		// Hand it over to client-level execution to finish stopping/cleanup.
-		if onAboutToStop := c.onAboutToStop; onAboutToStop != nil {
-			c.onAboutToStop = nil
-			onAboutToStop()
+		if onStopIssued := c.onStopIssued; onStopIssued != nil {
+			c.onStopIssued = nil
+			onStopIssued()
 		}
 
 		if c.parent != nil {
@@ -354,7 +354,7 @@ func (c *Context) BaseContext() *Context {
 	return c
 }
 
-// childStopping is internally called once the given child has been stopped and its c.onAboutToStop() has completed.
+// childStopping is internally called once the given child has been stopped and its c.onStopIssued() has completed.
 func (c *Context) childStopping(
 	child *Context,
 ) {
