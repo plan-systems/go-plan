@@ -3,9 +3,9 @@ package repo
 import (
 	//"path"
 	"fmt"
-    "strings"
-    "sync"
-    
+	"strings"
+	"sync"
+	"time"
 
 	//"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
@@ -20,14 +20,15 @@ type LID uint32
 type domain struct {
 	ctx.Context
 
-	domainName  string
-	host        *host
-	stateDB     *badger.DB
-	chSessMu    sync.RWMutex
-	chSess      map[string]*chSess
-	txsToMerge  chan *Tx
-	txsToDecode chan *RawTx
-	writeScrap  []byte
+	domainName      string
+	host            *host
+	stateDB         *badger.DB
+	chSessMu        sync.RWMutex
+	chSess          map[string]*chSess
+	txsToMerge      chan *Tx
+	txsToDecode     chan *RawTx
+	writeScrap      []byte
+	chAutoStopDelay time.Duration
 }
 
 type chSess struct {
@@ -39,8 +40,8 @@ type chSess struct {
 	ChID         string
 	keyPrefix    ChKey
 	keyPrefixBuf [255]byte
-    subs         []*chSub
-    subsMu       sync.RWMutex
+	subs         []*chSub
+	subsMu       sync.RWMutex
 }
 
 type chSub struct {
@@ -58,11 +59,12 @@ func newDomain(
 ) *domain {
 
 	d := &domain{
-		domainName: domainName,
-		stateDB:    host.stateDB,
-		host:       host,
-		chSess:     make(map[string]*chSess),
-		writeScrap: make([]byte, 32000),
+		domainName:      domainName,
+		stateDB:         host.stateDB,
+		host:            host,
+		chSess:          make(map[string]*chSess),
+		writeScrap:      make([]byte, 32000),
+		chAutoStopDelay: 60 * time.Second,
 	}
 
 	d.SetLogLabel(domainName)
@@ -75,11 +77,11 @@ func newDomain(
 // Ctx organization:
 // [host]
 //     [domain1]
-//         [chSess abc]
+//         [chSess ABC]
 //             [chSub003]
 //             [chSub019]
 //             [chSub020]
-//         [chSess abc]
+//         [chSess XYZ]
 //             ...
 //     [domain2]
 //         ...
@@ -87,7 +89,7 @@ func (d *domain) Start() error {
 	err := d.CtxStart(
 		d.ctxStartup,
 		nil,
-		nil,
+		d.onChSessStopping,
 		d.ctxStopping,
 	)
 	return err
@@ -109,14 +111,14 @@ func (d *domain) ctxStartup() error {
 		for tx := range d.txsToMerge {
 			chSess, err := d.getChSess(tx.TxOp.ChStateURI.ChID, true)
 			if chSess != nil {
-                err = chSess.mergeTx(tx)
+				err = chSess.mergeTx(tx)
 			}
 			if err != nil {
 				d.Warnf("merge error for Tx %v: %v", TID(tx.TID).SuffixStr(), err)
 				continue
-            }
-                        
-            chSess.broadcastToSubs(tx)
+			}
+
+			chSess.broadcastToSubs(tx)
 		}
 		d.Info(1, "shutdown complete")
 	})
@@ -157,6 +159,22 @@ func (d *domain) ctxStartup() error {
 	})
 
 	return nil
+}
+
+func (d *domain) onChSessStopping(child ctx.Ctx) {
+
+	if d.CtxChildCount() <= 1 {
+		d.CtxGo(func() {
+			ticker := time.NewTicker(d.host.domainAutoStopDelay)
+			select {
+			case <-ticker.C:
+				d.host.stopDomainIfIdle(d)
+			case <-d.CtxStopping():
+				break
+			}
+			ticker.Stop()
+		})
+	}
 }
 
 func (d *domain) ctxStopping() {
@@ -216,8 +234,8 @@ func (d *domain) mountChSess(chID string) (*chSess, error) {
 	err := ch.CtxStart(
 		ch.ctxStartup,
 		nil,
-		nil,
-		nil,
+		ch.onChSubStopping,
+		ch.ctxOnStopping,
 	)
 	if err != nil {
 		return nil, err
@@ -229,6 +247,24 @@ func (d *domain) mountChSess(chID string) (*chSess, error) {
 	d.CtxAddChild(ch, nil)
 
 	return ch, nil
+}
+
+func (d *domain) stopChSessIfIdle(ch *chSess) bool {
+	d.chSessMu.Lock()
+	defer d.chSessMu.Unlock()
+
+	didStop := false
+
+	if d.chSess[ch.ChID] == ch {
+
+		// With the domain's ch session mutex locked, we can reliably call CtxChildCount
+		if ch.CtxChildCount() == 0 {
+			didStop = ch.CtxStop("idle chSess auto stop", nil)
+			delete(d.chSess, ch.ChID)
+		}
+	}
+
+	return didStop
 }
 
 // // getRootKeyForChURI returns the root keypath for a given channel ID.
@@ -268,11 +304,10 @@ func (d *domain) OpenChSub(chReq *ChReq) (ChSub, error) {
 	ch, err := d.getChSess(chReq.ChStateURI.ChID, true)
 	if err != nil {
 		return nil, err
-    }
-    
-    return ch.OpenChSub(chReq)
-}
+	}
 
+	return ch.OpenChSub(chReq)
+}
 
 func (ch *chSess) mergeTx(tx *Tx) error {
 	var err error
@@ -337,13 +372,13 @@ func (ch *chSess) mergeTx(tx *Tx) error {
 }
 
 func (ch *chSess) broadcastToSubs(tx *Tx) {
-    ch.subsMu.RLock()
-    {
-        for _, sub := range ch.subs {
-            sub.txInbox <- tx
-        }
-    }
-    ch.subsMu.RUnlock()
+	ch.subsMu.RLock()
+	{
+		for _, sub := range ch.subs {
+			sub.txInbox <- tx
+		}
+	}
+	ch.subsMu.RUnlock()
 }
 
 func (ch *chSess) ctxStartup() error {
@@ -373,18 +408,39 @@ func (ch *chSess) ctxStartup() error {
 	return nil
 }
 
+func (ch *chSess) onChSubStopping(child ctx.Ctx) {
+
+	if ch.CtxChildCount() <= 1 {
+		ch.CtxGo(func() {
+			ticker := time.NewTicker(ch.domain.chAutoStopDelay)
+			select {
+			case <-ticker.C:
+				ch.domain.stopChSessIfIdle(ch)
+			case <-ch.CtxStopping():
+				break
+			}
+			ticker.Stop()
+		})
+	}
+}
+
+func (ch *chSess) ctxOnStopping() {
+
+	if N := len(ch.subs); N > 0 {
+		ch.Warnf("chSess being stopped with %d active subs", N)
+	}
+}
+
 // OpenChSub -- see interface Domain
 func (ch *chSess) OpenChSub(chReq *ChReq) (ChSub, error) {
 
 	sub := &chSub{
 		chSess:     ch,
 		chReq:      chReq,
-        nodeOutbox: make(chan *Node),
-    }
-    
+		nodeOutbox: make(chan *Node),
+	}
 
-
-    // Start the subscription as a child ctx of each ch session
+	// Start the subscription as a child ctx of each ch session
 	err := sub.CtxStart(
 		sub.ctxStartup,
 		nil,
@@ -396,37 +452,34 @@ func (ch *chSess) OpenChSub(chReq *ChReq) (ChSub, error) {
 	}
 	ch.CtxAddChild(sub, nil)
 
-    if sub.chReq.GetOp.MaintainSync {
-        sub.txInbox = make(chan *Tx, 4)
-        ch.registerSub(sub)
-    }
-    
+	if sub.chReq.GetOp.MaintainSync {
+		sub.txInbox = make(chan *Tx, 4)
+		ch.registerSub(sub)
+	}
+
 	return sub, nil
 }
 
 func (ch *chSess) registerSub(sub *chSub) {
-    ch.subsMu.Lock()
-    ch.subs = append(ch.subs, sub)
-    ch.subsMu.Unlock()
+	ch.subsMu.Lock()
+	ch.subs = append(ch.subs, sub)
+	ch.subsMu.Unlock()
 }
 
 func (ch *chSess) unregisterSub(remove *chSub) {
-    ch.subsMu.Lock()
-    N := len(ch.subs)
-    for i := 0; i < N; i++ {
-        if ch.subs[i] == remove {
-            N--
-            ch.subs[i] = ch.subs[N]
-            ch.subs[N] = nil
-            ch.subs =  ch.subs[:N]
-            break
-        }
-    }
-    ch.subsMu.Unlock()
+	ch.subsMu.Lock()
+	N := len(ch.subs)
+	for i := 0; i < N; i++ {
+		if ch.subs[i] == remove {
+			N--
+			ch.subs[i] = ch.subs[N]
+			ch.subs[N] = nil
+			ch.subs = ch.subs[:N]
+			break
+		}
+	}
+	ch.subsMu.Unlock()
 }
-
-
-
 
 func (sub *chSub) Outbox() <-chan *Node {
 	return sub.nodeOutbox
@@ -444,7 +497,7 @@ func (sub *chSub) ctxStartup() error {
 		return err
 	}
 
-    chDesc := sub.chSess.GetLogLabel()
+	chDesc := sub.chSess.GetLogLabel()
 	//sub.SetLogLabelf("%s/%s sub%03x", sub.chSess.GetLogLabel(), sub.chReq.GetOp.Keypath, sub.chReq.ReqID)
 	sub.SetLogLabelf("sub%03d …%s/%s", sub.chReq.ReqID, chDesc[len(chDesc)-5:], sub.chReq.GetOp.Keypath)
 
@@ -453,19 +506,19 @@ func (sub *chSub) ctxStartup() error {
 		sub.sendStateToClient()
 
 		if sub.txInbox != nil {
-            for {
-                sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
+			for {
+				sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
 
-                // This blocks until new txs appear or until the sub is stopping
-                tx, running := <- sub.txInbox
-                if running == false {
-                    break
-                }
-                for _, change := range tx.TxOp.Entries {
-                    sub.processChange(change)
-                }
-                sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
-            }
+				// This blocks until new txs appear or until the sub is stopping
+				tx, running := <-sub.txInbox
+				if running == false {
+					break
+				}
+				for _, change := range tx.TxOp.Entries {
+					sub.processChange(change)
+				}
+				sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
+			}
 		}
 
 		close(sub.nodeOutbox)
@@ -477,8 +530,8 @@ func (sub *chSub) ctxStartup() error {
 }
 
 func (sub *chSub) ctxStopping() {
-    sub.Info(2, "stopping")
-    
+	sub.Info(2, "stopping")
+
 	if sub.txInbox != nil {
 		sub.chSess.unregisterSub(sub)
 		close(sub.txInbox)
@@ -488,34 +541,31 @@ func (sub *chSub) ctxStopping() {
 func (sub *chSub) processChange(change *Node) {
 	scope := sub.chReq.GetOp.Scope
 
-    if strings.HasPrefix(change.Keypath, sub.chReq.GetOp.Keypath) {
-        N := len(sub.chReq.GetOp.Keypath)
-        subKey := change.Keypath[N:]
-        var node *Node
+	if strings.HasPrefix(change.Keypath, sub.chReq.GetOp.Keypath) {
+		N := len(sub.chReq.GetOp.Keypath)
+		subKey := change.Keypath[N:]
+		var node *Node
 
-        if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
-            if len(subKey) == 0 {
-                node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change) 
-                node.Keypath = change.Keypath
-            }
-        }
-    
-        if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
-            if len(subKey) > 0 && subKey[0] == '/' {
-                node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change) 
-                node.Keypath = subKey[1:]
-            }
-        }
+		if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
+			if len(subKey) == 0 {
+				node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change)
+			}
+		}
 
-        if node != nil {
-            sub.Infof(2, "SYNC: %v", node.Keypath)
+		if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
+			if len(subKey) > 0 && subKey[0] == '/' {
+				node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change)
+			}
+		}
 
-            sub.nodeOutbox <- node
-        }
-    }
+		if node != nil {
+			sub.Infof(2, "SYNC: %v", node.Keypath)
+
+			sub.nodeOutbox <- node
+		}
+	}
 
 }
-
 
 func (sub *chSub) unmarshalAndSend(itemPrefixSkip int, item *badger.Item) error {
 	return item.Value(func(entryBuf []byte) error {
@@ -540,6 +590,7 @@ func (sub *chSub) unmarshalAndSend(itemPrefixSkip int, item *badger.Item) error 
 func (sub *chSub) sendStateToClient() {
 	scope := sub.chReq.GetOp.Scope
 
+    chPrefixLen := len(sub.chSess.keyPrefix)
 	opKeypath := append(sub.chSess.keyPrefix, sub.chReq.GetOp.Keypath...)
 	readTxn := sub.chSess.stateDB.NewTransaction(false)
 	defer readTxn.Discard()
@@ -549,7 +600,7 @@ func (sub *chSub) sendStateToClient() {
 
 		item, err := readTxn.Get(opKeypath)
 		if err == nil {
-			err = sub.unmarshalAndSend(len(sub.chSess.keyPrefix), item)
+			err = sub.unmarshalAndSend(chPrefixLen, item)
 		}
 		if err != nil && err != badger.ErrKeyNotFound {
 			sub.Errorf("failed to read entry %v: %v", string(opKeypath), err)
@@ -561,9 +612,8 @@ func (sub *chSub) sendStateToClient() {
 		// Add a path sep char to ensure that we don't read items past the entry
 		opts := badger.DefaultIteratorOptions
 		opts.Prefix = append(opKeypath, '/')
-		prefixLen := len(opts.Prefix)
 		itr := readTxn.NewIterator(opts)
-        defer itr.Close()
+		defer itr.Close()
 
 		for itr.Rewind(); itr.Valid(); itr.Next() {
 
@@ -572,7 +622,7 @@ func (sub *chSub) sendStateToClient() {
 				break
 			}
 
-			err := sub.unmarshalAndSend(prefixLen, itr.Item())
+			err := sub.unmarshalAndSend(chPrefixLen, itr.Item())
 			if err != nil {
 				sub.Errorf("failed to itr item %v: %v", string(itr.Item().Key()), err)
 			}
@@ -642,7 +692,6 @@ func (sub *chSub) sendStateToClient() {
 
 // 	subWait.Done()
 // }()
-
 
 // NormalizeKeypath checks that there are no problems with the given keypath string and returns a standardized Keypath.
 func NormalizeKeypath(keypath string) (string, error) {
