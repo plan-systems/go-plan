@@ -1,7 +1,6 @@
 package repo
 
 import (
-	"fmt"
 	"path"
 	"sync"
 	"time"
@@ -47,15 +46,13 @@ func NewHost(
 
 // HostParams provide all the params a Host needs to run from start to end
 type HostParams struct {
-	DomainName   string
-	BasePath     string
-	HostGrpcPort int
+	DomainName string
+	BasePath   string
 }
 
 type host struct {
 	ctx.Context
 
-	grpcServer          *GrpcServer
 	stateDBPathname     string
 	stateDB             *badger.DB
 	params              HostParams
@@ -109,16 +106,6 @@ func (host *host) ctxStartup() error {
 
 	// Making the vault ctx a child ctx of this domain means that it must Stop before the domain ctx will even start stopping
 	host.CtxAddChild(host.vaultMgr, nil)
-
-	host.grpcServer = NewGrpcServer(host, "tcp", fmt.Sprintf("127.0.0.1:%v", host.params.HostGrpcPort))
-	err = host.grpcServer.Start()
-	if err != nil {
-		return err
-	}
-
-	// TODO: do we want to run the grpc as a child ctx or not?
-	// If we we don't run the grpc service as a child ctx of the host ctx since we only want to insert a graceful stop when we stop the host.
-	host.CtxAddChild(host.grpcServer, nil)
 
 	return err
 }
@@ -247,9 +234,9 @@ func (host *host) stopDomainIfIdle(d Domain) bool {
 
 	didStop := false
 
-    domainName := d.DomainName()
+	domainName := d.DomainName()
 	if host.domains[domainName] == d {
-        dctx := d.Ctx()
+		dctx := d.Ctx()
 
 		// With the domain's ch session mutex locked, we can reliably call CtxChildCount
 		if dctx.CtxChildCount() == 0 {
@@ -260,7 +247,6 @@ func (host *host) stopDomainIfIdle(d Domain) bool {
 
 	return didStop
 }
-
 
 type hostSess struct {
 	//ctx.Context
