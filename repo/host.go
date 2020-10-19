@@ -1,23 +1,16 @@
 package repo
 
 import (
-	// "io/ioutil"
-	// "os"
-	"path"
-
 	"fmt"
+	"path"
 	"sync"
+	"time"
 
 	//"strings"
-	//"sync"
-	//"time"
 	//"sort"
-	//"encoding/hex"
-	// "context"
 	// crand "crypto/rand"
-	// "encoding/json"
 	// "strings"
-    mrand "math/rand"
+	mrand "math/rand"
 
 	"github.com/plan-systems/plan-go/ctx"
 	"github.com/plan-systems/plan-go/localfs"
@@ -36,8 +29,9 @@ func NewHost(
 	pn := &host{
 		// activeSessions: ctx.NewSessionGroup(),
 		// servicePort:    inServicePort,
-		params:  params,
-		domains: make(map[string]Domain),
+		params:              params,
+		domains:             make(map[string]Domain),
+		domainAutoStopDelay: 60 * time.Second,
 	}
 	pn.SetLogLabel("host")
 
@@ -61,14 +55,15 @@ type HostParams struct {
 type host struct {
 	ctx.Context
 
-	grpcServer      *GrpcServer
-	stateDBPathname string
-	stateDB         *badger.DB
-	params          HostParams
-	txScrap         []byte
-	domains         map[string]Domain
-    domainsMu       sync.RWMutex
-	vaultMgr        *vaultMgr
+	grpcServer          *GrpcServer
+	stateDBPathname     string
+	stateDB             *badger.DB
+	params              HostParams
+	txScrap             []byte
+	domains             map[string]Domain
+	domainsMu           sync.RWMutex
+	domainAutoStopDelay time.Duration
+	vaultMgr            *vaultMgr
 }
 
 type txUpdate struct {
@@ -104,8 +99,8 @@ func (host *host) ctxStartup() error {
 	host.stateDB, err = badger.Open(opts)
 	if err != nil {
 		return err
-    }
-    
+	}
+
 	host.vaultMgr = newVaultMgr(host)
 	err = host.vaultMgr.Start()
 	if err != nil {
@@ -129,17 +124,6 @@ func (host *host) ctxStartup() error {
 }
 
 func (host *host) ctxStopping() {
-	//var domainsRunning sync.WaitGroup
-
-	// Since domain are child contexts of this host, by the time we're here, they have all finished stopping.
-	// We shutdown all public-facing services first and THEN we can shutdown the domains.
-	// host.domainsMu.Lock()
-	// defer host.domainsMu.Unlock()
-	// for _, d := range host.domains {
-	//     go d.Ctx().CtxStop("host stopping", &domainsRunning)
-	// }
-
-	//domainsRunning.Wait()
 
 	// Since domain are child contexts of this host, by the time we're here, they have all finished stopping.
 	// All that's left is to close the dbs
@@ -155,14 +139,12 @@ func (host *host) DomainName() string {
 
 // NewSession -- see interface Host
 func (host *host) NewSession() HostSession {
-    return &hostSess{
-
-    }
+	return &hostSess{}
 }
 
 // OpenChSub -- see interface Host
 func (host *host) OpenChSub(chReq *ChReq) (ChSub, error) {
-    uri := chReq.ChStateURI
+	uri := chReq.ChStateURI
 	if uri == nil || len(uri.DomainName) == 0 {
 		return nil, ErrCode_InvalidURI.ErrWithMsg("no domain name given")
 	}
@@ -253,48 +235,67 @@ func (host *host) mountDomain(domainName string) (Domain, error) {
 	err := domain.Start()
 	if err != nil {
 		return nil, err
-    }
-    host.CtxAddChild(domain, nil)
+	}
+	host.CtxAddChild(domain, nil)
 
 	return domain, nil
 }
 
+func (host *host) stopDomainIfIdle(d Domain) bool {
+	host.domainsMu.Lock()
+	defer host.domainsMu.Unlock()
+
+	didStop := false
+
+    domainName := d.DomainName()
+	if host.domains[domainName] == d {
+        dctx := d.Ctx()
+
+		// With the domain's ch session mutex locked, we can reliably call CtxChildCount
+		if dctx.CtxChildCount() == 0 {
+			didStop = dctx.CtxStop("idle domain auto stop", nil)
+			delete(host.domains, domainName)
+		}
+	}
+
+	return didStop
+}
+
+
 type hostSess struct {
-    //ctx.Context
+	//ctx.Context
 
 }
 
 func (ms *hostSess) EncodeToTxAndSign(txOp *TxOp) (*Tx, error) {
 
-    if txOp == nil {
+	if txOp == nil {
 		return nil, ErrCode_NothingToCommit.ErrWithMsg("missing txOp")
 	}
 
 	if len(txOp.Entries) == 0 {
 		return nil, ErrCode_NothingToCommit.ErrWithMsg("no entries to commit")
-    }
-    
+	}
 
-    //
-    // TODO
-    // 
-    // placeholder until tx encoding and signing is
-    var TID TIDBuf
-    mrand.Read(TID[:])
+	//
+	// TODO
+	//
+	// placeholder until tx encoding and signing is
+	var TID TIDBuf
+	mrand.Read(TID[:])
 
-    tx := &Tx{
-        TID:  TID[:],
-        TxOp: txOp,
-    }
+	tx := &Tx{
+		TID:  TID[:],
+		TxOp: txOp,
+	}
 
 	if txOp.ChannelGenesis {
 		// if len(uri.ChID) > 0 {
 		// 	return ErrCode_InvalidURI.ErrWithMsg("URI must be a domain name and not be a path")
-        // }
-        txOp.ChStateURI.ChID_TID = tx.TID
-        txOp.ChStateURI.ChID = TID.Base32()
-    }
-    
+		// }
+		txOp.ChStateURI.ChID_TID = tx.TID
+		txOp.ChStateURI.ChID = TID.Base32()
+	}
 
-    return tx, nil
+	return tx, nil
 }
