@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"strings"
 	"sync"
-    "syscall"
-    "strings"
+	"syscall"
 	"time"
 )
 
@@ -22,8 +22,8 @@ type Ctx interface {
 }
 
 type childCtx struct {
-	CtxID   []byte
-	Ctx     Ctx
+	CtxID []byte
+	Ctx   Ctx
 }
 
 // Context is a service helper.
@@ -226,6 +226,15 @@ func (c *Context) CtxGo(
 	}(c)
 }
 
+// CtxChildCount returns the number of child contexts that have been added to this context and have not yet stopped.
+//
+// Warning: the child count returned is backward-looking (since any number of children could theoretically have stopped or been
+// added in the time following this call executing).  Therefore, in order for this call to be useful,
+// the caller should take precautions to ensure that this possibility is removed.
+func (c *Context) CtxChildCount() int {
+	return len(c.children)
+}
+
 // CtxAddChild adds the given Context as a "child", where c will initiate CtxStop() on each child before c carries out its own stop.
 func (c *Context) CtxAddChild(
 	inChild Ctx,
@@ -347,7 +356,7 @@ func (c *Context) BaseContext() *Context {
 
 // childStopping is internally called once the given child has been stopped and its c.onAboutToStop() has completed.
 func (c *Context) childStopping(
-    child *Context,
+	child *Context,
 ) {
 	var native Ctx
 
@@ -420,31 +429,31 @@ func (c *Context) AttachInterruptHandler() {
 	c.Infof(0, "for graceful shutdown, \x1b[1m^c\x1b[0m, \x1b[1mkill -s SIGINT %d\x1b[0m, or \x1b[1mkill -9 %d\x1b[0m", os.Getpid(), os.Getpid())
 }
 
-// CtxPrintDebug prints a listing of all child contexts in an indented format. 
-func (c *Context) CtxPrintDebug()  {
-    var str strings.Builder
-    str.Grow(255)
+// CtxPrintDebug prints a listing of all child contexts in an indented format.
+func (c *Context) CtxPrintDebug() {
+	var str strings.Builder
+	str.Grow(255)
 
-    str.WriteString("CtxPrint:\n")
-    c.ctxPrintDebug(1, &str)
+	str.WriteString("CtxPrint:\n")
+	c.ctxPrintDebug(1, &str)
 
-    c.Info(0, str.String())
+	c.Info(0, str.String())
 }
 
 const indent = "                                                                                               "
 
-func (c *Context) ctxPrintDebug(indentLevel int, str *strings.Builder)  {
-    str.WriteString(indent[:4*indentLevel])
-    str.WriteString(c.GetLogPrefix())
-    numChildren := len(c.children)
-    if numChildren == 1 {
-        str.WriteString("(1 child)")
-    } else if numChildren > 0 {
-        fmt.Fprintf(str, "(%d children)", numChildren)
-    }
-    str.WriteByte('\n')
+func (c *Context) ctxPrintDebug(indentLevel int, str *strings.Builder) {
+	str.WriteString(indent[:4*indentLevel])
+	str.WriteString(c.GetLogPrefix())
+	numChildren := len(c.children)
+	if numChildren == 1 {
+		str.WriteString("(1 child)")
+	} else if numChildren > 0 {
+		fmt.Fprintf(str, "(%d children)", numChildren)
+	}
+	str.WriteByte('\n')
 
-    for _, child := range c.children {
-        child.Ctx.Ctx().ctxPrintDebug(indentLevel+1, str)
-    }
+	for _, child := range c.children {
+		child.Ctx.Ctx().ctxPrintDebug(indentLevel+1, str)
+	}
 }
