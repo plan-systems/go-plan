@@ -1,7 +1,7 @@
 package repo
 
 import (
-	//"path"
+	"bytes"
 	"fmt"
 	"strings"
 	"sync"
@@ -425,7 +425,6 @@ func (ch *chSess) onChSubStopping(child ctx.Ctx) {
 }
 
 func (ch *chSess) ctxOnStopping() {
-
 	if N := len(ch.subs); N > 0 {
 		ch.Warnf("chSess being stopped with %d active subs", N)
 	}
@@ -544,23 +543,25 @@ func (sub *chSub) processChange(change *Node) {
 	if strings.HasPrefix(change.Keypath, sub.chReq.GetOp.Keypath) {
 		N := len(sub.chReq.GetOp.Keypath)
 		subKey := change.Keypath[N:]
-		var node *Node
+		isMatch := false
 
 		if (scope & KeypathScope_EntryAtKeypath) == KeypathScope_EntryAtKeypath {
-			if len(subKey) == 0 {
-				node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change)
+			isMatch = len(subKey) == 0
+		}
+		if (scope & (KeypathScope_Shallow | KeypathScope_ShallowAndDeep)) != 0 {
+			if len(subKey) > 1 && subKey[0] == '/' {
+				if (scope & KeypathScope_Shallow) == KeypathScope_Shallow {
+					isMatch = strings.IndexByte(subKey[1:], '/') < 0
+				} else {
+					isMatch = true
+				}
 			}
 		}
 
-		if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
-			if len(subKey) > 0 && subKey[0] == '/' {
-				node = sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change)
-			}
-		}
+		if isMatch {
+			node := sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change)
 
-		if node != nil {
 			sub.Infof(2, "SYNC: %v", node.Keypath)
-
 			sub.nodeOutbox <- node
 		}
 	}
@@ -590,7 +591,7 @@ func (sub *chSub) unmarshalAndSend(itemPrefixSkip int, item *badger.Item) error 
 func (sub *chSub) sendStateToClient() {
 	scope := sub.chReq.GetOp.Scope
 
-    chPrefixLen := len(sub.chSess.keyPrefix)
+	chPrefixLen := len(sub.chSess.keyPrefix)
 	opKeypath := append(sub.chSess.keyPrefix, sub.chReq.GetOp.Keypath...)
 	readTxn := sub.chSess.stateDB.NewTransaction(false)
 	defer readTxn.Discard()
@@ -607,7 +608,8 @@ func (sub *chSub) sendStateToClient() {
 		}
 	}
 
-	if (scope & KeypathScope_ChildEntries) == KeypathScope_ChildEntries {
+	if (scope & (KeypathScope_Shallow | KeypathScope_ShallowAndDeep)) != 0 {
+		shallowOnly := (scope & KeypathScope_ShallowAndDeep) == 0
 
 		// Add a path sep char to ensure that we don't read items past the entry
 		opts := badger.DefaultIteratorOptions
@@ -617,9 +619,13 @@ func (sub *chSub) sendStateToClient() {
 
 		for itr.Rewind(); itr.Valid(); itr.Next() {
 
-			// If the sub is cancelled, bail
+			// If the sub is cancelled, stop son!
 			if sub.CtxRunning() == false {
 				break
+			}
+
+			if shallowOnly && !PathIsShallow(itr.Item().Key(), opKeypath) {
+				continue
 			}
 
 			err := sub.unmarshalAndSend(chPrefixLen, itr.Item())
@@ -693,7 +699,31 @@ func (sub *chSub) sendStateToClient() {
 // 	subWait.Done()
 // }()
 
+// SplitPath splits path immediately following the final slash, separating it into a directory and file name component.
+// If there is no slash in path, Split returns an empty dir and file set to path.
+// The returned values have the property that path = dir+file.
+func SplitPath(path []byte) (dir, file []byte) {
+	i := bytes.LastIndexByte(path, '/')
+	return path[:i+1], path[i+1:]
+}
+
+// PathIsShallow returns true if the item path's parent is the given parent path
+func PathIsShallow(path []byte, mustHaveParent []byte) bool {
+
+	// Skip last char to ignore trailing '/'
+	idx := len(path) - 1
+	for ; idx >= 0; idx-- {
+		if path[idx] == '/' {
+			return bytes.Equal(path[:idx], mustHaveParent)
+		}
+	}
+
+	return len(mustHaveParent) == 0
+}
+
 // NormalizeKeypath checks that there are no problems with the given keypath string and returns a standardized Keypath.
+//
+// This means removing a leading and trailing '/' (if present)
 func NormalizeKeypath(keypath string) (string, error) {
 	pathLen := len(keypath)
 
