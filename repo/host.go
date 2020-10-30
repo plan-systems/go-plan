@@ -159,7 +159,7 @@ func (host *host) SubmitTx(tx *Tx) error {
 	var err error
 	{
 		// Use the same time value each node we're commiting
-		timestampFS := TimeNowFS()
+        timestampFS := TimeNowFS()
 		for _, entry := range tx.TxOp.Entries {
 			entry.Keypath, err = NormalizeKeypath(entry.Keypath)
 			if err != nil {
@@ -174,7 +174,9 @@ func (host *host) SubmitTx(tx *Tx) error {
 				err = ErrCode_CommitFailed.ErrWithMsg("unsupported NodeOp for entry")
 			}
 
-			entry.LastModified = int64(timestampFS)
+            if (entry.RevID == 0) {
+                entry.RevID = int64(timestampFS)
+            }
 		}
 	}
 
