@@ -87,11 +87,17 @@ func TimeNowFS() TimeFS {
 func (uri *ChStateURI) AssignFromURI(uriStr string) error {
 	uri.StateURI = ""
 
-	sep := strings.IndexRune(uriStr, '/')
+    // Ignore leading path sep
+    sep := strings.IndexByte(uriStr, '/')
+    if sep == 0 {
+        uriStr = uriStr[1:]
+        sep = strings.IndexByte(uriStr, '/')
+    }
+
 	if sep >= 0 {
 		uri.DomainName, uri.ChID = uriStr[:sep], uriStr[sep+1:]
 
-		sep = strings.IndexRune(uri.ChID, '/')
+		sep = strings.IndexByte(uri.ChID, '/')
 		if sep >= 0 {
 			uri.ChID, uri.StateURI = uri.ChID[:sep], uri.ChID[sep+1:]
 		}
