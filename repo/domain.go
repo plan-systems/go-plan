@@ -559,7 +559,7 @@ func (sub *chSub) processChange(change *Node) {
 		}
 
 		if isMatch {
-			node := sub.chReq.newResponseFromCopy(NodeOp_ChEntry, change)
+			node := sub.chReq.newResponseFromCopy(change)
 
 			sub.Infof(2, "SYNC: %v", node.Keypath)
 			sub.nodeOutbox <- node

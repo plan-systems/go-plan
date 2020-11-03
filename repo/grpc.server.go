@@ -518,18 +518,15 @@ type nodeFilters struct {
 	regexTypeID  *regexp.Regexp
 }
 
-func (req *ChReq) newResponseFromCopy(op NodeOp, src *Node) *Node {
+func (req *ChReq) newResponseFromCopy(src *Node) *Node {
 
 	// TODO: use sync.pool
-	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
-	node := &Node{}
+    // https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
 
-	*node = *src
-
-	node.Op = op
+    node := *src
 	node.ReqID = req.ReqID
 
-	return node
+	return &node
 }
 
 func (req *ChReq) newResponse(op NodeOp, err error) *Node {
@@ -568,7 +565,6 @@ func (req *ChReq) newChEntry(NodeBuf []byte) (*Node, error) {
 		return nil, err
 	}
 
-	node.Op = NodeOp_ChEntry
 	node.ReqID = req.ReqID
 
 	return node, nil

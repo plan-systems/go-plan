@@ -167,9 +167,9 @@ func (host *host) SubmitTx(tx *Tx) error {
 			}
 
 			switch entry.Op {
-			case NodeOp_ChEntry:
-			case NodeOp_ChEntryRemove:
-			case NodeOp_ChEntryRemoveAll:
+			case NodeOp_NodeUpdate:
+			case NodeOp_NodeRemove:
+			case NodeOp_NodeRemoveAll:
 			default:
 				err = ErrCode_CommitFailed.ErrWithMsg("unsupported NodeOp for entry")
 			}
