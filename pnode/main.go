@@ -42,7 +42,10 @@ func main() {
 		host.Ctx().Fatalf("failed to start: %v", err)
 	}
 
-	srv := repo.NewGrpcServer(host, "tcp", fmt.Sprintf("127.0.0.1:%v", hostGrpcPort))
+    // Little known fact: using "127.0.0.1" specifically binds to localhost, so incoming outside connections will be refused.
+    // Later, when pnode is embedded in the client app for each platform, we'll want to use 127.0.0.1 (or IPC).
+    // Until then, we want to need to accept incoming outside connections.
+	srv := repo.NewGrpcServer(host, "tcp", fmt.Sprintf("0.0.0.0:%v", hostGrpcPort))
 	err = srv.Start()
 	if err != nil {
 		srv.Fatalf("failed to start: %v", err)
