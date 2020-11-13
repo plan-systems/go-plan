@@ -19,38 +19,11 @@ import (
 	"github.com/plan-systems/plan-go/ctx"
 )
 
-/*
-   For a given stateURI:
-
-        any/path/parent/Node567/<fieldByteID>/<nodeFieldKey>  => (field value)
-                               /childNode123
-                               /childNode987
-
-        Given: NodeIDs must be longer than 1 char (allowing easy child node iteration to occur by scanning starting at key "\001\001").
-
-*/
-
-// var (
-//     nodeFields    = []byte{1}
-//     nodeTags      = []byte{2}
-//     nodeSpaceRoot = []byte{2}
-//     nodeAttribs   = []byte{4}
-//     nodeBlock     = []byte{5}
-// )
-
-// func formNodePath(parentPath string, nodeID string) tree.Keypath {
-// 	k := make(tree.Keypath, 0, 192)
-// 	k = append(k, tree.Keypath(parentPath)...)
-// 	k = append(k, tree.Keypath(nodeID)...)
-// 	return k
-// }
-
 // GrpcServer is the GRPC implementation of repo.proto
 type GrpcServer struct {
 	ctx.Context
 
-	sessCount int32
-	//repoSess      []*repoSess
+	sessCount     int32
 	host          Host
 	server        *grpc.Server
 	listenNetwork string
@@ -108,8 +81,6 @@ func (srv *GrpcServer) Start() error {
 	)
 }
 
-type strMap = map[string]interface{}
-
 type reqJob struct {
 	req      *ChReq
 	sess     *repoSess
@@ -117,8 +88,6 @@ type reqJob struct {
 	scrap    []byte
 	canceled bool
 	chSub    ChSub
-	// ctx       context.Context
-	// ctxCancel context.CancelFunc
 }
 
 // Debugf prints output to the output log
@@ -305,13 +274,11 @@ func (sess *repoSess) lookupJob(reqID int32) *reqJob {
 
 func (sess *repoSess) removeJob(reqID int32) {
 	sess.openReqsMu.Lock()
-	{
-		delete(sess.openReqs, reqID)
-
-		// Send an empty msg to wake up pipe shutdown
-		sess.nodeOutbox <- nil
-	}
+	delete(sess.openReqs, reqID)
 	sess.openReqsMu.Unlock()
+
+	// Send an empty msg to wake up and check for shutdown
+	sess.nodeOutbox <- nil
 }
 
 func (sess *repoSess) numJobsOpen() int {
@@ -326,8 +293,6 @@ func (sess *repoSess) addNewJob(reqIn *ChReq) *reqJob {
 		req:  reqIn,
 		sess: sess,
 	}
-
-	//job.ctx, job.ctxCancel = context.WithCancel(sess.Ctx())
 
 	sess.openReqsMu.Lock()
 	sess.openReqs[reqIn.ReqID] = job
@@ -418,101 +383,6 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 	return nil
 }
 
-// 	var err error
-// 	{
-// 		if err == nil && req.RegexNodeID != "" {
-// 			filters.regexNodeID, err = regexp.Compile(req.RegexNodeID)
-// 			if err != nil {
-// 				return errors.Errorf("failed to compile RegexNodeID: '%v' (%v)", req.RegexNodeID, err)
-// 			}
-// 		}
-// 		if err == nil && req.RegexName != "" {
-// 			filters.regexName, err = regexp.Compile(req.RegexName)
-// 			if err != nil {
-// 				return errors.Errorf("failed to compile RegexName: '%v' (%v)", req.RegexName, err)
-// 			}
-// 		}
-// 		if err == nil && req.RegexTags != "" {
-// 			filters.regexTags, err = regexp.Compile(req.RegexTags)
-// 			if err != nil {
-// 				return errors.Errorf("failed to compile RegexTags: '%v' (%v)", req.RegexTags, err)
-// 			}
-// 		}
-// 		if err == nil && req.RegexTypeID != "" {
-// 			filters.regexTypeID, err = regexp.Compile(req.RegexTypeID)
-// 			if err != nil {
-// 				return errors.Errorf("failed to compile RegexTypeID: '%v' (%v)", req.RegexTypeID, err)
-// 			}
-// 		}
-// 	}
-
-// 	// // If only doing layers, don't search through EVERY node and be dum, step through the layer list and step through each layer, son!
-// 	// if (req.FilterFlags & FilterFlags_LAYERS_ONLY) != 0 {
-// 	// 	iter := state.ChildIterator(tree.Keypath(layersFork), false, 0)
-// 	// 	defer iter.Close()
-
-// 	// 	nodeBasePath = append(nodeBasePath[:0], tree.Keypath(nodesFork)...)
-
-// 	// 	for iter.Rewind(); iter.Valid(); iter.Next() {
-// 	// 		// Extract "<ParentID>/<NodeID>"
-// 	// 		subPath := iter.Node().Keypath().LastNParts(2)
-// 	// 		if subPath == nil {
-// 	// 			continue
-// 	// 		}
-// 	// 		nodePath := append(nodeBasePath[:], subPath...)
-// 	// 		nodePB := srv.filterAndExportNode(state.NodeAt(nodePath, nil), &exportFilters)
-// 	// 		if nodePB == nil {
-// 	// 			continue
-// 	// 		}
-
-// 	// 		err = server.Send(nodePB)
-// 	// 		if err != nil {
-// 	// 			return err
-// 	// 		}
-// 	// 	}
-
-// 	// } else {
-// 	// 	iter := state.ChildIterator(tree.Keypath(nodesFork), true, 20)
-// 	// 	defer iter.Close()
-
-// 	// 	for iter.Rewind(); iter.Valid(); iter.Next() {
-// 	// 		nodePB := srv.filterAndExportNode(iter.Node(), &exportFilters)
-// 	// 		if nodePB == nil {
-// 	// 			continue
-// 	// 		}
-
-// 	// 		err = server.Send(nodePB)
-// 	// 		if err != nil {
-// 	// 			return err
-// 	// 		}
-// 	// 	}
-// 	// }
-
-// 	// if req.Subscribe {
-// 	//     idx := 0
-// 	//     for i := 0; i < 20; i++ {
-// 	//         N := 200
-// 	//         srv.Infof(0, "Sending #%v", N);
-
-// 	//         for j := 0; j < N; j++ {
-// 	//             idx++
-// 	//             server.Send( &Node{
-// 	//                 ID: "dummyID_" + strconv.Itoa(idx),
-// 	//                 Name: "He bought?  DUMP IT.",
-// 	//                 X1: mrand.NormFloat64() * 1000,
-// 	//                 X2: mrand.NormFloat64() * 1000,
-// 	//             })
-// 	//         }
-// 	//     }
-// 	// }
-
-// 	return nil
-
-var (
-	nodeEntryKey = byte('\x10')
-	//nodeEntryPath = tree.Keypath([]byte{tree.PathSepChar, nodeEntryKey})
-)
-
 type nodeFilters struct {
 	regexKeypath *regexp.Regexp
 	regexTypeID  *regexp.Regexp
@@ -521,9 +391,8 @@ type nodeFilters struct {
 func (req *ChReq) newResponseFromCopy(src *Node) *Node {
 
 	// TODO: use sync.pool
-    // https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
-
-    node := *src
+	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
+	node := *src
 	node.ReqID = req.ReqID
 
 	return &node
@@ -533,10 +402,10 @@ func (req *ChReq) newResponse(op NodeOp, err error) *Node {
 
 	// TODO: use sync.pool
 	// https://medium.com/a-journey-with-go/go-understand-the-design-of-sync-pool-2dde3024e277
-	node := &Node{}
-
-	node.Op = op
-	node.ReqID = req.ReqID
+	node := &Node{
+		Op:    op,
+		ReqID: req.ReqID,
+	}
 
 	if err != nil {
 		var reqErr *ReqErr
@@ -578,198 +447,6 @@ func releaseMsg(node *Node) {
 	// 	node.Attachment = node.Attachment[:0]
 	// }
 }
-
-// 	// Internal nodes (storing Node fields
-// 	leafName := node.Keypath().Pop()
-// 	if len(leafName) <= 1 {
-// 		return nil
-// 	}
-
-// 	nLastModified, exists, _ := node.IntValue(tree.Keypath(NodeModifiedKey))
-// 	if exists == false {
-// 		return nil
-// 	}
-
-// 	srv.Debugf("filterAndExportNode: %v", nLastModified)
-
-// 	// nSpaceType, isLayer, err := node.StringValue(tree.Keypath(SpaceTypeKey))
-// 	// if isLayer && (filters.FilterFlags&FilterFlags_EXCLUDE_LAYERS) != 0 {
-// 	// 	return nil
-// 	// }
-// 	// if isLayer == false && (filters.FilterFlags&FilterFlags_LAYERS_ONLY) != 0 {
-// 	// 	return nil
-// 	// }
-
-// 	// subPath := iter.Node().Keypath().LastNParts(1)
-// 	// if subPath == nil {
-// 	//     continue
-// 	// }
-// 	// nodePath := append(nodeBasePath[:], subPath...)
-
-// 	passesStringFilter := func(node tree.Node, r *regexp.Regexp, key string, requiredField bool) (string, bool) {
-// 		value, exists, err := node.StringValue(tree.Keypath(key))
-// 		if err != nil {
-// 			srv.Warnf("error fetching node key '%v': %v", key, err)
-// 			return "", false
-// 		} else if !exists && requiredField {
-// 			srv.Warnf("node has no '%v' key", key)
-// 			return "", false
-// 		} else if exists == true && r != nil && r.Match([]byte(value)) == false {
-// 			return "", false
-// 		}
-// 		return value, true
-// 	}
-
-// 	if job.filters.regexTypeID != nil && filters.regexNodeID.Match(nNodeID) == false {
-// 		return nil
-// 	}
-
-// 	nName, passes := passesStringFilter(node, filters.regexName, NodeNameKey, false)
-// 	if !passes {
-// 		return nil
-// 	}
-// 	nTags, passes := passesStringFilter(node, filters.regexTags, NodeTagsKey, false)
-// 	if !passes {
-// 		return nil
-// 	}
-// 	nTypeID, passes := passesStringFilter(node, job.filters.regexTypeID, NodeTypeIDKey, false)
-// 	if !passes {
-// 		return nil
-// 	}
-// 	nT, _, _ := node.FloatValue(tree.Keypath(NodeTKey))
-// 	nTSpan, _, err := node.FloatValue(tree.Keypath(NodeTSpanKey))
-// 	if filters.timeSearch {
-// 		tmax, tmin := filters.req.TMax, filters.req.TMin
-// 		passes = tmin >= nT && nT <= tmax
-// 		if passes {
-// 			nTend := nT + nTSpan
-// 			passes = tmin >= nTend && nTend <= tmax
-// 		}
-// 		if passes == false {
-// 			return nil
-// 		}
-// 	}
-
-// 	outNode := &Node{
-// 		ID:           string(nNodeID),
-// 		ParentPath:   string(nParentPath),
-// 		Tags:         nTags,
-// 		Name:         nName,
-// 		TypeID:       nTypeID,
-// 		LastModified: nLastModified,
-// 		T:            nT,
-// 		TSpan:        nTSpan,
-// 	}
-
-// 	outNode.Value, _, _ = node.StringValue(tree.Keypath(NodeValueKey))
-// 	outNode.Glyph, _, _ = node.StringValue(tree.Keypath(NodeGlyphKey))
-
-// 	outNode.X1, _, err = node.FloatValue(tree.Keypath(NodeX1Key))
-// 	if err != nil {
-// 		srv.Warnf("error fetching 'x1' from node: %v", err)
-// 		return nil
-// 	}
-// 	outNode.X2, _, err = node.FloatValue(tree.Keypath(NodeX2Key))
-// 	if err != nil {
-// 		srv.Warnf("error fetching 'x2' from node: %v", err)
-// 		return nil
-// 	}
-// 	outNode.X3, _, err = node.FloatValue(tree.Keypath(NodeX3Key))
-// 	if err != nil {
-// 		srv.Warnf("error fetching 'x3' from node: %v", err)
-// 		return nil
-// 	}
-
-// 	{
-// 		if val, exists, _ := node.Value(tree.Keypath(NodeTransform), nil); exists {
-// 			array := val.([]interface{})
-// 			if len(array) > 0 {
-// 				outNode.Transform = make([]float32, len(array))
-// 				for i, v := range array {
-// 					outNode.Transform[i] = v.(float32)
-// 				}
-// 			}
-// 		}
-// 	}
-
-// if (filters.NodeFetchFlags & FetchFlags_LINKS) != 0 {
-//     if val, exists, _ := node.Value(tree.Keypath(NodeURIsKey), nil); exists {
-//         array := val.([]interface{})
-//         if len(array) > 0 {
-//             outNode.Links = make([]string, len(array))
-//             for i, v := range array {
-//                 outNode.Links[i] = v.(string)
-//             }
-//         }
-//     }
-// }
-
-// if (filters.NodeFetchFlags & FetchFlags_LINKS_RESOLVED) != 0 {
-// 	linkexportFilters := exportFilters{
-// 		NodeFetchFlags: filters.LinksFetchFlags,
-// 	}
-
-// 	for _, nodeURI := range outNode.Links {
-// 		func() {
-// 			linkType, linkValue := nelson.DetermineLinkType(nodeURI)
-
-// 			if linkType == nelson.LinkTypeState {
-// 				stateURI, keypath, version, err := nelson.ParseStateLink(linkValue)
-// 				if err != nil {
-// 					srv.Warnf("bad link URI: '%v'", nodeURI)
-// 					return
-// 				}
-
-// 				childNodeState, err := srv.host.Controllers().StateAtVersion(stateURI, version)
-// 				if err != nil {
-// 					srv.Warnf("can't fetch node from link URI: '%v': %v", nodeURI, err)
-// 					return
-// 				}
-// 				defer childNodeState.Close()
-
-// 				childNode := childNodeState.NodeAt(keypath, nil)
-// 				childNodePB := srv.filterAndExportNode(childNode, &linkexportFilters)
-// 				if childNodePB == nil {
-// 					return
-// 				}
-
-// 				outNode.LinksResolved = append(outNode.LinksResolved, childNodePB)
-// 			}
-// 		}()
-// 	}
-// }
-
-// if (filters.req.LoadFields & NodeFields_BLOCK) != 0 {
-// 	val, exists, err := node.BytesValue(tree.Keypath(BlockRawKey))
-// 	if err != nil {
-// 		srv.Warnf("error fetching '%v' subelement from node: %v", BlockRawKey, err)
-// 	} else if !exists {
-// 		// no-op
-// 	} else {
-// 		outNode.BlockRaw = val
-// 	}
-// }
-
-// if len(outNode.BlockRaw) > 0 && (filters.NodeFetchFlags&FetchFlags_BLOCK_DECODED) != 0 {
-// 	outNode.Block = &Block{}
-// 	err := proto.Unmarshal(outNode.BlockRaw, outNode.Block)
-// 	if err != nil {
-// 		srv.Warnf("error unmarshalling Block: %v", err)
-// 	}
-// }
-
-// if len(nSpaceType) > 0 {
-// 	outNode.Layer = &NodeLayer{
-// 		SpaceType: nSpaceType,
-// 	}
-// 	outNode.Layer.X1UnitType, _, _ = node.StringValue(tree.Keypath(SpaceX1UnitType))
-// 	outNode.Layer.X2UnitType, _, _ = node.StringValue(tree.Keypath(SpaceX2UnitType))
-// 	outNode.Layer.X3UnitType, _, _ = node.StringValue(tree.Keypath(SpaceX3UnitType))
-// 	outNode.Layer.T0AsUTC, _, _ = node.FloatValue(tree.Keypath(SpaceT0AsUTCKey))
-// }
-
-// 	return outNode
-// }
 
 // UnaryServerInterceptor is a debugging helper
 func (srv *GrpcServer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
