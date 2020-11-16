@@ -1,4 +1,4 @@
-package psys
+package plan
 
 import (
 	"os"
