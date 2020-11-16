@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/plan-systems/plan-go/ctx"
-	"github.com/plan-systems/plan-go/plan"
+	"github.com/plan-systems/plan-go/device"
 	"github.com/plan-systems/plan-go/ski"
 
 	// CryptoKits always available

@@ -12,9 +12,7 @@ import (
 	mrand "math/rand"
 
 	"github.com/plan-systems/plan-go/ctx"
-	"github.com/plan-systems/plan-go/localfs"
-
-	//"github.com/plan-systems/plan-go/bufs"
+	"github.com/plan-systems/plan-go/device"
 
 	"github.com/dgraph-io/badger/v2"
 	// "google.golang.org/grpc"
@@ -35,7 +33,7 @@ func NewHost(
 	pn.SetLogLabel("host")
 
 	var err error
-	if params.BasePath, err = localfs.ExpandAndCheckPath(params.BasePath, true); err != nil {
+	if params.BasePath, err = device.ExpandAndCheckPath(params.BasePath, true); err != nil {
 		return nil, err
 	}
 
@@ -159,7 +157,7 @@ func (host *host) SubmitTx(tx *Tx) error {
 	var err error
 	{
 		// Use the same time value each node we're commiting
-        timestampFS := TimeNowFS()
+        timestampFS := device.TimeNowFS()
 		for _, entry := range tx.TxOp.Entries {
 			entry.Keypath, err = NormalizeKeypath(entry.Keypath)
 			if err != nil {

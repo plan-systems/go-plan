@@ -16,7 +16,7 @@ import (
 
 	"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
-	"github.com/plan-systems/plan-go/plan"
+	"github.com/plan-systems/plan-go/device"
 )
 
 const (
@@ -567,7 +567,7 @@ func (tome *KeyTome) GenerateFork(
 
 	tome.Rev++
 
-	timeCreated := plan.TimeNowFS()
+	timeCreated := device.TimeNowFS()
 
 	var (
 		err      error

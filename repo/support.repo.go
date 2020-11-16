@@ -2,11 +2,10 @@ package repo
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/plan-systems/plan-go/bufs"
+	"github.com/plan-systems/plan-go/device"
 )
 
 // TIDSz is the byte size of a TID, a hash with a leading embedded big endian binary time index.
@@ -18,72 +17,9 @@ const TIDEncodedLen = int(Const_TIDEncodedLen)
 // nilTID is a zeroed TID that denotes a void/nil/zero value of a TID
 var nilTID = TIDBuf{}
 
-func (err *ReqErr) Error() string {
-	codeStr, exists := ErrCode_name[int32(err.Code)]
-	if exists == false {
-		codeStr = ErrCode_name[int32(ErrCode_UnnamedErr)]
-	}
-
-	if len(err.Msg) == 0 {
-		return codeStr
-	}
-
-	return codeStr + ": " + err.Msg
-}
-
-// Err returns a ReqErr with the given error code
-func (code ErrCode) Err() error {
-	if code == ErrCode_NoErr {
-		return nil
-	}
-	return &ReqErr{
-		Code: code,
-	}
-}
-
-// ErrWithMsg returns a ReqErr with the given error code and msg set.
-func (code ErrCode) ErrWithMsg(msg string) error {
-	if code == ErrCode_NoErr {
-		return nil
-	}
-	return &ReqErr{
-		Code: code,
-		Msg:  msg,
-	}
-}
-
-// ErrWithMsgf returns a ReqErr with the given error code and formattable msg set.
-func (code ErrCode) ErrWithMsgf(msgFormat string, msgArgs ...interface{}) error {
-	if code == ErrCode_NoErr {
-		return nil
-	}
-	return &ReqErr{
-		Code: code,
-		Msg:  fmt.Sprintf(msgFormat, msgArgs...),
-	}
-}
-
-// Wrap returns a ReqErr with the given error code and "cause" error
-func (code ErrCode) Wrap(cause error) error {
-	if cause == nil {
-		return nil
-	}
-	return &ReqErr{
-		Code: code,
-		Msg:  cause.Error(),
-	}
-}
-
-// TimeNowFS returns the current time (a standard unix UTC timestamp in 1/1<<16 seconds)
-func TimeNowFS() TimeFS {
-	t := time.Now()
-
-	timeFS := t.Unix() << 16
-	frac := uint16((2199 * (uint32(t.Nanosecond()) >> 10)) >> 15)
-	return TimeFS(timeFS | int64(frac))
-}
-
-// AssignFromURI parses the given uri string and sets all the fields of this ChStateURI
+// AssignFromURI parses the given POSIX-style uri string and sets all the fields of this ChStateURI
+//
+// Input form: "[/]DomainName/ChID"
 func (uri *ChStateURI) AssignFromURI(uriStr string) error {
 	uri.StateURI = ""
 
@@ -124,66 +60,44 @@ func (uri *ChStateURI) AssignFromURI(uriStr string) error {
 
 // FormChURI is the inverse of AssignFromURI()
 func (uri *ChStateURI) FormChURI() (string, error) {
-    
-    var b strings.Builder
 
-    var err error
     if len(uri.DomainName) == 0 {
-        err = ErrCode_InvalidURI.ErrWithMsg("missing domain name")
+        return "", ErrCode_InvalidURI.ErrWithMsg("missing domain name")
     }
 
+    var b strings.Builder
     b.Grow(127)
     b.WriteString(uri.DomainName)
     b.WriteByte('/')
 
     switch {
 
-    case len(uri.ChID) > 0:
+    case len(uri.ChID) > 0: {
         b.WriteString(uri.ChID)
+    }
 
     case len(uri.ChID_TID) == TIDEncodedLen: {
         var chID [TIDEncodedLen]byte
         bufs.Base32Encoding.Encode(chID[:], uri.ChID_TID)
-        b.Write(chID[:]) }
- 
-    case len(uri.ChID_TID) > 0:
+        b.Write(chID[:])
+    }
+
+    case len(uri.ChID_TID) > 0: {
         uri.ChID = bufs.Base32Encoding.EncodeToString(uri.ChID_TID)
         b.WriteString(uri.ChID)
+    }
 
-    case err == nil:
-        err = ErrCode_InvalidURI.ErrWithMsg("missing channel ID")
+    default:
+        return "", ErrCode_InvalidURI.ErrWithMsg("missing channel ID")
 
     }
 
-    return b.String(), err
+    return b.String(), nil
 }
 
 
 // ChKey is a keypath used in a repo db
 type ChKey []byte
-
-
-// // FormChURI forms "ChURI" string expresses the domain and channel ID of a channel state URI, expressed in human-readable form.
-// //
-// // "<DomainName>/<ChID>/"
-// func (uri *ChStateURI) FormChURI() (ChKey, error) {
-
-//     if len(uri.DomainName) == 0 {
-//         return nil, ErrCode_InvalidURI.ErrWithMsg("no domain name given")
-//     }
-    
-//     if len(uri.ChID_TID) == 0 {
-//         return nil, ErrCode_InvalidURI.ErrWithMsg("no channel TID given")
-//     }
-    
-//     chKey := make(ChKey, 0, 128)
-//     chKey = append(chKey, ChKey(uri.DomainName)...)
-//     chKey = append(chKey, '/')
-//     chKey = append(chKey, uri.ChID_TID...)
-//     chKey = append(chKey, '/')
-
-//     return chKey, nil
-// }
 
 
 // TID is a convenience function that returns the TID contained within this TIDBuf.
@@ -228,11 +142,11 @@ func (tid TID) Base32() string {
 	return bufs.Base32Encoding.EncodeToString(tid)
 }
 
-const summaryStrLen = 5
-
 // SuffixStr returns the last few digits of this TID in string form (for easy reading, logs, etc)
 func (tid TID) SuffixStr() string {
-	R := len(tid)
+    const summaryStrLen = 5
+
+    R := len(tid)
 	L := R - summaryStrLen
 	if L < 0 {
 		L = 0
@@ -243,14 +157,13 @@ func (tid TID) SuffixStr() string {
 // SetTimeAndHash writes the given timestamp and the right-most part of inSig into this TID.
 //
 // See comments for Const_TIDSz
-func (tid TID) SetTimeAndHash(time TimeFS, hash []byte) {
+func (tid TID) SetTimeAndHash(time device.TimeFS, hash []byte) {
 	tid.SetTimeFS(time)
 	tid.SetHash(hash)
 }
 
 // SetHash sets the sig/hash portion of this ID
 func (tid TID) SetHash(hash []byte) {
-
 	const TIDHashSz = int(Const_TIDSz - Const_TIDTimestampSz)
 	pos := len(hash) - TIDHashSz
 	if pos >= 0 {
@@ -263,7 +176,7 @@ func (tid TID) SetHash(hash []byte) {
 }
 
 // SetTimeFS writes the given timestamp into this TIS
-func (tid TID) SetTimeFS(t TimeFS) {
+func (tid TID) SetTimeFS(t device.TimeFS) {
 	tid[0] = byte(t >> 56)
 	tid[1] = byte(t >> 48)
 	tid[2] = byte(t >> 40)
@@ -275,7 +188,7 @@ func (tid TID) SetTimeFS(t TimeFS) {
 }
 
 // ExtractTimeFS returns the unix timestamp embedded in this TID (a unix timestamp in 1<<16 seconds UTC)
-func (tid TID) ExtractTimeFS() TimeFS {
+func (tid TID) ExtractTimeFS() device.TimeFS {
 	t := int64(tid[0])
 	t = (t << 8) | int64(tid[1])
 	t = (t << 8) | int64(tid[2])
@@ -285,7 +198,7 @@ func (tid TID) ExtractTimeFS() TimeFS {
 	t = (t << 8) | int64(tid[6])
 	t = (t << 8) | int64(tid[7])
 
-	return TimeFS(t)
+	return device.TimeFS(t)
 }
 
 // ExtractTime returns the unix timestamp embedded in this TID (a unix timestamp in seconds UTC)
@@ -305,11 +218,11 @@ func (tid TID) ExtractTime() int64 {
 // If t is later than the time embedded in this TID, then this function has no effect and returns false.
 //
 // If t is earlier, then this TID is initialized to t (and the rest zeroed out) and returns true.
-func (tid TID) SelectEarlier(t TimeFS) bool {
+func (tid TID) SelectEarlier(t device.TimeFS) bool {
 
 	TIDt := tid.ExtractTimeFS()
 
-	// Timestamp value of 0 is reserved and should only reflect an invalid/uninitialized TID.
+	// Timestamp of 0 is reserved and should only reflect an invalid/uninitialized TID.
 	if t < 0 {
 		t = 0
 	}
