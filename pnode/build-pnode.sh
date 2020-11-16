@@ -15,6 +15,7 @@ SELF_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 BUILD_GO_PROTO="$SELF_DIR/../../plan-protobufs/build-proto.sh"
 DST_DIR="$SELF_DIR/.."
 
+$BUILD_GO_PROTO ski   gofast "$DST_DIR"
 $BUILD_GO_PROTO repo  gofast "$DST_DIR"
 $BUILD_GO_PROTO vault gofast "$DST_DIR"
 
