@@ -1,59 +1,56 @@
-
 // Package ski (Secure Key Interface) contains PLAN's crypto abstractions and pluggable interfaces
 package ski
 
 import (
 	"io"
 	"sync"
-
-	"github.com/plan-systems/plan-core/plan"
 )
-
-
 
 // CryptoKit is a generic pluggable interface that any crypto package can implement.
 // It can even be partially implemented (just set nil values for funcs not implemented).
 // All calls are assumed to be threadsafe.
-type CryptoKit struct {
-	CryptoKitID CryptoKitID
+type CryptoKit interface {
+
+	// CryptoKitID univeserally identifies a specific crypto suite and version.
+	CryptoKitID() CryptoKitID
 
 	// Pre: ioEntry.KeyType, .KeyDomain, .CryptoKitID, and .TimeCreated is already set.
-	// inRequestedKeyLen is the requested length of the private key. It is ignored 
-    //     if this implementation uses fixed or implicit key lengths.
-	GenerateNewKey func(
-		inRand io.Reader,
-		inRequestedKeyLen int,
-		ioEntry *KeyEntry,
+	// inRequestedKeySz is the requested length of the private key. It is ignored
+	//     if this implementation uses fixed or implicit key lengths.
+	GenerateNewKey(
+		inRequestedKeySz int,
+		ioRand           io.Reader,
+		ioEntry          *KeyEntry,
 	) error
 
 	/*****************************************************
 	** Symmetric encryption (via arbitrary password)
 	**/
 
-    // Encrypts a buffer using any arbitrary-length password
-    EncryptUsingPassword func(
-		inRand io.Reader,
-		inMsg []byte,
-        inPwd []byte,
-    ) ([]byte, error)
+	// Encrypts a buffer using any arbitrary-length password
+	EncryptUsingPassword(
+		ioRand io.Reader,
+		inMsg  []byte,
+		inPwd  []byte,
+	) ([]byte, error)
 
-    // Decrypt a buffer encrypted via EncryptUsingPassword()
-    DecryptUsingPassword func(
+	// Decrypt a buffer encrypted via EncryptUsingPassword()
+	DecryptUsingPassword(
 		inMsg []byte,
 		inPwd []byte,
-    ) ([]byte, error)
+	) ([]byte, error)
 
 	/*****************************************************
 	** Symmetric encryption
 	**/
 
-	Encrypt func(
-		inRand io.Reader,
-		inMsg []byte,
-		inKey []byte,
+	Encrypt(
+		ioRand io.Reader,
+		inMsg  []byte,
+		inKey  []byte,
 	) ([]byte, error)
 
-	Decrypt func(
+	Decrypt(
 		inMsg []byte,
 		inKey []byte,
 	) ([]byte, error)
@@ -62,31 +59,31 @@ type CryptoKit struct {
 	** Asymmetric encryption
 	**/
 
-	EncryptFor func(
-		inRand io.Reader,
-		inMsg []byte,
+	EncryptFor(
+		ioRand       io.Reader,
+		inMsg        []byte,
 		inPeerPubKey []byte,
-		inPrivKey []byte,
+		inPrivKey    []byte,
 	) ([]byte, error)
 
-	DecryptFrom func(
-		inMsg []byte,
+	DecryptFrom(
+		inMsg        []byte,
 		inPeerPubKey []byte,
-		inPrivKey []byte,
+		inPrivKey    []byte,
 	) ([]byte, error)
 
 	/*****************************************************
 	** Signing & Verification
 	**/
 
-	Sign func(
-		inDigest []byte,
+	Sign(
+		inDigest        []byte,
 		inSignerPrivKey []byte,
 	) ([]byte, error)
 
-	VerifySignature func(
-		inSig []byte,
-		inDigest []byte,
+	VerifySignature(
+		inSig          []byte,
+		inDigest       []byte,
 		inSignerPubKey []byte,
 	) error
 }
@@ -98,24 +95,24 @@ type CryptoKit struct {
 // gCryptoKitRegistry maps a CryptoKitID to an available ("registered") implementation
 var gCryptoKitRegistry struct {
 	sync.RWMutex
-	Lookup       map[CryptoKitID]*CryptoKit
+	Lookup map[CryptoKitID]CryptoKit
 }
 
 // RegisterCryptoKit is convenience fuction that registers the given provider so it can be invoked via ski.StartSession()
 func RegisterCryptoKit(
-	inPkg *CryptoKit,
+	inKit CryptoKit,
 ) error {
-
 	var err error
 	gCryptoKitRegistry.Lock()
-    if gCryptoKitRegistry.Lookup == nil {
-        gCryptoKitRegistry.Lookup = map[CryptoKitID]*CryptoKit{} 
-    }
-	pkg := gCryptoKitRegistry.Lookup[inPkg.CryptoKitID]
-	if pkg == nil {
-		gCryptoKitRegistry.Lookup[inPkg.CryptoKitID] = inPkg
-	} else if pkg != inPkg {
-		err = plan.Errorf(nil, plan.CryptoKitIDAlreadyRegistered, "the CryptoKitID %d (%s) is already registered", inPkg.CryptoKitID, CryptoKitID_name[int32(inPkg.CryptoKitID)])
+	if gCryptoKitRegistry.Lookup == nil {
+		gCryptoKitRegistry.Lookup = map[CryptoKitID]CryptoKit{}
+	}
+	kitID := inKit.CryptoKitID()
+	existing := gCryptoKitRegistry.Lookup[kitID]
+	if existing == nil {
+		gCryptoKitRegistry.Lookup[kitID] = inKit
+	} else if existing != inKit {
+		err = ErrCode_CryptoKitAlreadyRegistered.ErrWithMsgf("the CryptoKit %d (%s) is already registered", kitID, kitID.String())
 	}
 	gCryptoKitRegistry.Unlock()
 
@@ -130,26 +127,26 @@ func RegisterCryptoKit(
 // If the associated CryptoKit has not been registered, an error is returned.
 func GetCryptoKit(
 	inCryptoKitID CryptoKitID,
-) (*CryptoKit, error) {
+) (CryptoKit, error) {
 
 	gCryptoKitRegistry.RLock()
-	pkg := gCryptoKitRegistry.Lookup[inCryptoKitID]
+	kit := gCryptoKitRegistry.Lookup[inCryptoKitID]
 	gCryptoKitRegistry.RUnlock()
 
-	if pkg == nil {
-		return nil, plan.Errorf(nil, plan.CryptoKitNotFound, "CryptoKitID %d not found", inCryptoKitID)
+	if kit == nil {
+		return nil, ErrCode_CryptoKitAlreadyRegistered.ErrWithMsgf("CryptoKit %d not found", inCryptoKitID)
 	}
 
-	return pkg, nil
+	return kit, nil
 }
 
 // VerifySignature is a convenience function that performs signature validation for any registered CryptoKit.
 //  Returns nil err if the signature of inDigest plus the signer's private key matches the given signature.
 // This function is threadsafe.
 func VerifySignature(
+	inCryptoKitID  CryptoKitID,
 	inSig          []byte,
 	inDigest       []byte,
-	inCryptoKitID  CryptoKitID,
 	inSignerPubKey []byte,
 ) error {
 
@@ -163,6 +160,5 @@ func VerifySignature(
 		inDigest,
 		inSignerPubKey,
 	)
-
 	return err
 }

@@ -1,17 +1,16 @@
 package main
 
 import (
-	"github.com/plan-systems/plan-core/plan"
 	"bytes"
 	crypto_rand "crypto/rand"
 	math_rand "math/rand"
 
 	"testing"
 
-	"github.com/plan-systems/plan-core/ski"
+	"github.com/plan-systems/plan-go/ski"
 
-	"github.com/plan-systems/plan-core/ski/CryptoKits/nacl"
-	"github.com/plan-systems/plan-core/ski/CryptoKits/ed25519"
+	_ "github.com/plan-systems/plan-go/ski/CryptoKits/ed25519"
+	_ "github.com/plan-systems/plan-go/ski/CryptoKits/nacl"
 )
 
 var gTesting *testing.T
@@ -21,21 +20,24 @@ func TestCryptoKits(t *testing.T) {
 	gTesting = t
 
 	// Register providers to test
-	cryptoKitsToTest := []*ski.CryptoKit{
-		&nacl.CryptoKit,
-		&ed25519.CryptoKit,
+	cryptoKitsToTest := []ski.CryptoKitID{
+		ski.CryptoKitID_ED25519,
+		ski.CryptoKitID_NaCl,
 	}
 
-	for _, kit := range cryptoKitsToTest {
+	for _, kitID := range cryptoKitsToTest {
 		for i := 0; i < 200; i++ {
+			kit, err := ski.GetCryptoKit(kitID)
+			if err != nil {
+				gTesting.Fatal(err)
+			}
 			testKit(kit, 32)
 		}
 	}
 }
 
-func testKit(kit *ski.CryptoKit, inKeyLen int) {
-
-	msgSz := int(1 + math_rand.Int31n(5) + 7 * math_rand.Int31n(10))
+func testKit(kit ski.CryptoKit, inKeyLen int) {
+	msgSz := int(1 + math_rand.Int31n(5) + 7*math_rand.Int31n(10))
 
 	msg := make([]byte, msgSz)
 	msgOrig := make([]byte, msgSz)
@@ -51,18 +53,18 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 	}
 
 	var crypt []byte
-    var passBuf [200]byte
+	var passBuf [200]byte
 
 	/*****************************************************
 	** Symmetric password test
 	**/
 	{
-        passLen := 1 + math_rand.Int31n(30)
-        pass := passBuf[:passLen]
-        math_rand.Read(pass)
+		passLen := 1 + math_rand.Int31n(30)
+		pass := passBuf[:passLen]
+		math_rand.Read(pass)
 
 		crypt, err := kit.EncryptUsingPassword(reader, msgOrig, pass)
-		if ! plan.IsError(err, plan.Unimplemented) {
+		if ski.IsError(err, ski.ErrCode_Unimplemented) == false {
 			if err != nil {
 				gTesting.Fatal(err)
 			}
@@ -78,20 +80,19 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 		}
 	}
 
-
 	entry := ski.KeyEntry{
-        KeyInfo: &ski.KeyInfo{
-            CryptoKit: kit.CryptoKitID,
-        },
-    }
+		KeyInfo: &ski.KeyInfo{
+			CryptoKitID: kit.CryptoKitID(),
+		},
+	}
 
 	/*****************************************************
 	** Symmetric test
 	**/
 	{
 		entry.KeyInfo.KeyType = ski.KeyType_SymmetricKey
-		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
-		if ! plan.IsError(err, plan.Unimplemented) {
+		err := kit.GenerateNewKey(inKeyLen, reader, &entry)
+		if ski.IsError(err, ski.ErrCode_Unimplemented) == false {
 			if err != nil {
 				gTesting.Fatal(err)
 			}
@@ -131,8 +132,8 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 	**/
 	{
 		entry.KeyInfo.KeyType = ski.KeyType_AsymmetricKey
-		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
-		if ! plan.IsError(err, plan.Unimplemented) {
+		err := kit.GenerateNewKey(inKeyLen, reader, &entry)
+		if ski.IsError(err, ski.ErrCode_Unimplemented) == false {
 			if err != nil {
 				gTesting.Fatal(err)
 			}
@@ -142,7 +143,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 			}
 			*recipient.KeyInfo = *entry.KeyInfo
 
-			err = kit.GenerateNewKey(reader, inKeyLen, &recipient)
+			err = kit.GenerateNewKey(inKeyLen, reader, &recipient)
 			if err != nil {
 				gTesting.Fatal(err)
 			}
@@ -182,8 +183,8 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 	**/
 	{
 		entry.KeyInfo.KeyType = ski.KeyType_SigningKey
-		err := kit.GenerateNewKey(reader, inKeyLen, &entry)
-		if ! plan.IsError(err, plan.Unimplemented) {
+		err := kit.GenerateNewKey(inKeyLen, reader, &entry)
+		if ski.IsError(err, ski.ErrCode_Unimplemented) == false {
 			if err != nil {
 				gTesting.Fatal(err)
 			}
@@ -211,7 +212,7 @@ func testKit(kit *ski.CryptoKit, inKeyLen int) {
 				badMsg[rndPos] += rndAdj
 
 				err = kit.VerifySignature(badMsg, msgOrig, entry.KeyInfo.PubKey)
- 				if ! plan.IsError(err, plan.VerifySignatureFailed) {
+				if ski.IsError(err, ski.ErrCode_VerifySignatureFailed) == false {
 					gTesting.Fatal("there should have been a sig failed error!")
 				}
 			}
