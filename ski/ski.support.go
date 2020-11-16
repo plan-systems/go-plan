@@ -16,7 +16,7 @@ import (
 
 	"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
-	"github.com/plan-systems/plan-go/psys"
+	"github.com/plan-systems/plan-go/plan"
 )
 
 const (
@@ -326,7 +326,6 @@ func (kr *Keyring) MergeKeys(srcKeyring *Keyring) {
 func (kr *Keyring) FetchKeyWithPrefix(
 	inPubKeyPrefix []byte,
 ) *KeyEntry {
-
 	N := len(kr.Keys)
 	pos := 0
 
@@ -386,7 +385,6 @@ func (kr *Keyring) FetchNewestKey() *KeyEntry {
 	var newest *KeyEntry
 
 	if len(kr.Keys) > 0 {
-
 		if len(kr.NewestPubKey) > 0 {
 			newest = kr.FetchKey(kr.NewestPubKey)
 		} else {
@@ -425,7 +423,6 @@ func (tome *KeyTome) ZeroOut() {
 func (tome *KeyTome) FetchKeyring(
 	inKeyringName []byte,
 ) *Keyring {
-
 	N := len(tome.Keyrings)
 	pos := 0
 
@@ -564,13 +561,13 @@ func (tome *KeyTome) Optimize() {
 // GenerateFork returns a new KeyTome identical to this KeyTome, but with newly generated PubKey/PrivKey pairs.
 // For each generated key, each originating KeyEntry's fields are reset (except for PrivKey which is set to to nil)
 func (tome *KeyTome) GenerateFork(
-	ioRand io.Reader,
-	inRequestedKeyLen int,
+	ioRand           io.Reader,
+	inRequestedKeySz int,
 ) (*KeyTome, error) {
 
 	tome.Rev++
 
-	timeCreated := psys.TimeNowFS()
+	timeCreated := plan.TimeNowFS()
 
 	var (
 		err      error
@@ -610,7 +607,7 @@ func (tome *KeyTome) GenerateFork(
 			}
 
 			err = curKit.GenerateNewKey(
-				inRequestedKeyLen,
+				inRequestedKeySz,
 				ioRand,
 				newEntry,
 			)
@@ -732,7 +729,7 @@ func NewHashKit(hashKitID HashKitID) (HashKit, error) {
 // GenerateNewKeys is a convenience bulk function for CryptoKit.GenerateNewKey()
 func GenerateNewKeys(
 	inRand io.Reader,
-	inRequestedKeyLen int,
+	inRequestedKeySz int,
 	inKeySpecs []*KeyEntry,
 ) ([]*KeyEntry, error) {
 
@@ -762,7 +759,7 @@ func GenerateNewKeys(
 
 		err = kit.GenerateNewKey(
 			inRand,
-			inRequestedKeyLen,
+			inRequestedKeySz,
 			newKey,
 		)
 		if err != nil {
@@ -778,9 +775,9 @@ func GenerateNewKeys(
 
 // GenerateNewKey creates a new key, blocking until completion
 func GenerateNewKey(
-	inSession Session,
+	inSession     Session,
 	inKeyringName []byte,
-	inKeyInfo KeyInfo,
+	inKeyInfo     KeyInfo,
 ) (*KeyInfo, error) {
 
 	tomeOut, err := inSession.GenerateKeys(&KeyTome{
@@ -834,12 +831,13 @@ type SessionTool struct {
 
 // NewSessionTool creates a new tool for helping manage a SKI session.
 func NewSessionTool(
-	inSession Session,
-	inUserID string,
+	inSession     Session,
+	inUserID      string,
 	inCommunityID []byte,
 ) (*SessionTool, error) {
 
 	st := &SessionTool{
+		Logger:      ctx.NewLogger("ski_" + inUserID),
 		UserID:      inUserID,
 		Session:     inSession,
 		CryptoKitID: CryptoKitID_NaCl,
@@ -850,8 +848,6 @@ func NewSessionTool(
 			KeyringName: append([]byte(inUserID), inCommunityID...),
 		},
 	}
-
-	st.SetLogLabel("ski_" + inUserID)
 
 	err := st.GetLatestKey(&st.P2PKey, KeyType_AsymmetricKey)
 	if err != nil {
@@ -873,7 +869,7 @@ func (st *SessionTool) DoOp(args CryptOpArgs) ([]byte, error) {
 
 // GetLatestKey updates the given KeyRef with the newest pub key on a given keyring (using ioKeyRef.KeyringName)
 func (st *SessionTool) GetLatestKey(
-	ioKeyRef *KeyRef,
+	ioKeyRef     *KeyRef,
 	inAutoCreate KeyType,
 ) error {
 
@@ -987,10 +983,10 @@ func (P *PayloadPacker) ResetSession(
 // THREADSAFE
 func (P *PayloadPacker) PackAndSign(
 	inHeaderCodec uint32,
-	inHeader []byte,
-	inBody []byte,
-	inExtraAlloc int,
-	out *PackingInfo,
+	inHeader      []byte,
+	inBody        []byte,
+	inExtraAlloc  int,
+	out          *PackingInfo,
 ) error {
 
 	err := P.checkReady()
@@ -1050,7 +1046,7 @@ func (P *PayloadPacker) PackAndSign(
 
 	// 5) Sign the hash
 	signOut, err := P.signSession.DoCryptOp(&CryptOpArgs{
-		CryptOp: CryptOp_SIGN,
+		CryptOp: CryptOp_Sign,
 		BufIn:   out.Hash,
 		OpKey:   P.signingKeyRef,
 	})
@@ -1208,7 +1204,7 @@ func (U *PayloadUnpacker) UnpackAndVerify(
 
 	// 5) Verify the sig
 	if err == nil {
-		err = VerifySignature(inSignedBuf[sigPos:sigEnd], out.Hash, hdr.SignerCryptoKit, hdr.SignerPubKey)
+		err = VerifySignature(hdr.SignerCryptoKit, inSignedBuf[sigPos:sigEnd], out.Hash, hdr.SignerPubKey)
 	}
 
 	out.Header = inSignedBuf[headerPos:headerEnd]
