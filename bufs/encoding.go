@@ -4,9 +4,10 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
-    //"github.com/mmcloughlin/geohash"
 
-    "reflect"
+	//"github.com/mmcloughlin/geohash"
+
+	"reflect"
 )
 
 // GeohashBase32Alphabet is the alphabet used for Base32Encoding
@@ -63,14 +64,14 @@ func SmartMarshal(item Marshalable, tryDst []byte) []byte {
 // If tryDst is not large enough, a new buffer is allocated and returned in its place.
 func SmartMarshalToBase32(item Marshalable, tryDst []byte) []byte {
 	bufSz := cap(tryDst)
-    binSz := item.Size()
-    {
-        safeSz := 4 + 4*((binSz+2)/3)
-        if safeSz > bufSz {
-            bufSz = (safeSz + 7) &^ 7
-            tryDst = make([]byte, bufSz)
-        }
-    }
+	binSz := item.Size()
+	{
+		safeSz := 4 + 4*((binSz+2)/3)
+		if safeSz > bufSz {
+			bufSz = (safeSz + 7) &^ 7
+			tryDst = make([]byte, bufSz)
+		}
+	}
 
 	// First, marshal the item to the right-side of the scrap buffer
 	binBuf := tryDst[bufSz-binSz : bufSz]
@@ -198,4 +199,37 @@ func checkText(in []byte) ([]byte, error) {
 		N -= 2
 	}
 	return in, nil
+}
+
+// BufDesc returns a base32 encoding of a binary string, limiting it to a short number of character for debugging and logging.
+func BufDesc(inBuf []byte) string {
+	if len(inBuf) == 0 {
+		return "nil"
+	}
+
+	buf := inBuf
+
+	const limit = 12
+	alreadyASCII := true
+	for _, b := range buf {
+		if b < 32 || b > 126 {
+			alreadyASCII = false
+			break
+		}
+	}
+
+	suffix := ""
+	if len(buf) > limit {
+		buf = buf[:limit]
+		suffix = "…"
+	}
+
+	outStr := ""
+	if alreadyASCII {
+		outStr = string(buf)
+	} else {
+		outStr = Base32Encoding.EncodeToString(buf)
+	}
+
+	return outStr + suffix
 }
