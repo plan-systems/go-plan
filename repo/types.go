@@ -10,14 +10,6 @@ type TID []byte
 // TIDBuf is the blob version of a TID
 type TIDBuf [Const_TIDSz]byte
 
-// TimeFS is the UTC in 1/1<<16 seconds elapsed since Jan 1, 1970 UTC ("FS" = fractional seconds)
-//
-// timeFS := TimeNowFS()
-//
-// Shifting this right 16 bits will yield stanard Unix time.
-// This means there are 47 bits dedicated for seconds, implying max timestamp of 4.4 million years.
-type TimeFS int64
-
 // ChSub returns a stream of requested entries, closing Outbox() when complete (or when Close() is called)
 type ChSub interface {
 	ctx.Ctx
@@ -51,14 +43,6 @@ type Domain interface {
 	// DomainName uniquely identifies this Domain
 	DomainName() string
 }
-
-// HostSess is a session with a given host
-// type HostSess struct {
-//     ctx.Context
-//     Host Host
-//     ReqInbox chan<- *ChReq
-//     NodeOutbox <-chan *Node
-// }
 
 // Host is the highest level repo controller.  It accepts incoming txns, report status of their processing, and serves channel content.
 type Host interface {
