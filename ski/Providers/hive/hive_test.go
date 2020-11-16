@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/plan-systems/plan-core/ski"
+	"github.com/plan-systems/plan-go/ski"
 )
 
 var gTesting *testing.T
@@ -44,8 +44,8 @@ func TestFileStorage(t *testing.T) {
 		sess,
 		keyRef.KeyringName,
 		ski.KeyInfo{
-			KeyType:   ski.KeyType_SymmetricKey,
-			CryptoKit: ski.CryptoKitID_NaCl,
+			KeyType:     ski.KeyType_SymmetricKey,
+			CryptoKitID: ski.CryptoKitID_NaCl,
 		},
 	)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestFileStorage(t *testing.T) {
 
 	out, err := sess.DoCryptOp(
 		&ski.CryptOpArgs{
-			CryptOp: ski.CryptOp_ENCRYPT_SYM,
+			CryptOp: ski.CryptOp_EncryptSym,
 			OpKey:   &keyRef,
 			BufIn:   testMsgIn,
 		},
@@ -68,7 +68,7 @@ func TestFileStorage(t *testing.T) {
 		gTesting.Fatal(err)
 	}
 
-	sess.EndSession("end test sess (should trigger save to disk")
+	sess.EndSession("end test sess (should trigger save to disk)")
 
 	sess, err = StartSession(baseDir, "hive-test", pass[:len(pass)-2])
 	if err == nil {
@@ -82,7 +82,7 @@ func TestFileStorage(t *testing.T) {
 
 	out, err = sess.DoCryptOp(
 		&ski.CryptOpArgs{
-			CryptOp: ski.CryptOp_DECRYPT_SYM,
+			CryptOp: ski.CryptOp_DecryptSym,
 			OpKey:   &keyRef,
 			BufIn:   testMsgEnc,
 		},
@@ -94,5 +94,4 @@ func TestFileStorage(t *testing.T) {
 	if !bytes.Equal(out.BufOut, testMsgIn) {
 		gTesting.Fatal("test msg didn't match")
 	}
-
 }

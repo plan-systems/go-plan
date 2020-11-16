@@ -2,88 +2,78 @@
 package hive
 
 import (
-	"path"
 	"io/ioutil"
 	"os"
+	"path"
 	"time"
-	//io"
-	"sync"
-	crypto_rand "crypto/rand"
 
-	"github.com/plan-systems/plan-core/tools/ctx"
-	"github.com/plan-systems/plan-core/ski"
-	"github.com/plan-systems/plan-core/plan"
+	//io"
+	crypto_rand "crypto/rand"
+	"sync"
+
+	"github.com/plan-systems/plan-go/ctx"
+	"github.com/plan-systems/plan-go/plan"
+	"github.com/plan-systems/plan-go/ski"
 
 	// CryptoKits always available
-	_ "github.com/plan-systems/plan-core/ski/CryptoKits/nacl"
-	_ "github.com/plan-systems/plan-core/ski/CryptoKits/ed25519"
+	_ "github.com/plan-systems/plan-go/ski/CryptoKits/ed25519"
+	_ "github.com/plan-systems/plan-go/ski/CryptoKits/nacl"
 )
 
-const (
-
-	// ProviderInvocation should be passed for inInvocation when calling SKI.provider.StartSession()
-	providerInvocation = "/plan/ski/Provider/hive/1"
-)
-
-// Session represents a local implementation of the SKI
-type Session struct {
+// hiveSess is an implementation of the SKI
+type hiveSess struct {
 	ski.Session
 	ctx.Logger
 
-    hiveCryptoKit    *ski.CryptoKit
-	autoSaveMutex	 sync.Mutex
-	nextAutoSave	 time.Time
-	StoreName		 string
-	BaseDir			 string
-	keyTomeMgr		 *ski.KeyTomeMgr	   
-	saveTicker		 *time.Ticker
-    savePending      bool
-	hivePass		 []byte
+	hiveCryptoKit ski.CryptoKit
+	autoSaveMutex sync.Mutex
+	nextAutoSave  time.Time
+	StoreName     string
+	BaseDir       string
+	keyTomeMgr    *ski.KeyTomeMgr
+	saveTicker    *time.Ticker
+	savePending   bool
+	hivePass      []byte
 }
 
 // StartSession starts a new hive SKI session locally, using a locally encrypted file.
 // If len(BaseDir) == 0, then this session is heap only (and will be zeroed/lost when the session ends)
 func StartSession(
-	inBaseDir   string,
+	inBaseDir string,
 	inStoreName string,
-	inPass		[]byte,
+	inPass []byte,
 ) (ski.Session, error) {
 
-	sess := &Session{
-		nextAutoSave: time.Now(),
-		BaseDir: inBaseDir,
-		StoreName: inStoreName,
-		keyTomeMgr: ski.NewKeyTomeMgr(),
-		hivePass: make([]byte, len(inPass)),
+	cryptoKit, err := ski.GetCryptoKit(ski.CryptoKitID_NaCl)
+	if err != nil {
+		return nil, err
 	}
 
-	copy(sess.hivePass, inPass)
-
-	sess.SetLogLabel("ski.hive") 
-
-    var err error
-    sess.hiveCryptoKit, err = ski.GetCryptoKit(ski.CryptoKitID_NaCl)
-    if err != nil {
-        return nil, err
-    }
+	sess := &hiveSess{
+		Logger:        ctx.NewLogger("ski.hive"),
+		hiveCryptoKit: cryptoKit,
+		nextAutoSave:  time.Now(),
+		BaseDir:       inBaseDir,
+		StoreName:     inStoreName,
+		keyTomeMgr:    ski.NewKeyTomeMgr(),
+		hivePass:      make([]byte, 0, 64),
+	}
+	sess.hivePass = append(sess.hivePass, inPass...)
 
 	if err = sess.loadFromFile(); err != nil {
 		return nil, err
 	}
-
 	return sess, nil
 }
 
-func (sess *Session) dbPathname() string {
-
+func (sess *hiveSess) dbPathname() string {
 	if len(sess.BaseDir) == 0 || len(sess.StoreName) == 0 {
 		return ""
 	}
-	
 	return path.Join(sess.BaseDir, sess.StoreName)
 }
 
-func (sess *Session) loadFromFile() error {
+func (sess *hiveSess) loadFromFile() error {
 
 	sess.autoSaveMutex.Lock()
 	defer sess.autoSaveMutex.Unlock()
@@ -92,42 +82,39 @@ func (sess *Session) loadFromFile() error {
 
 	doClear := true
 
-    var err error
+	var err error
 
 	pathname := sess.dbPathname()
 	if len(pathname) > 0 {
 		var buf []byte
 		buf, err = ioutil.ReadFile(pathname)
-        if err == nil {
+		if err == nil {
 			buf, err = sess.hiveCryptoKit.DecryptUsingPassword(buf, sess.hivePass)
 
-            if err == nil && len(buf) > 0 {
-			    err = sess.keyTomeMgr.Unmarshal(buf)
-                if err == nil {
-			        doClear = false
-                }
-		    }
-        } else {
-            // If file doesn't exist, don't consider it an error
-			if os.IsNotExist(err) {
-				err = nil 
-			} else {
-				err = plan.Errorf(err, plan.KeyTomeFailedToLoad, "failed to load key hive %v", pathname)
+			if err == nil && len(buf) > 0 {
+				err = sess.keyTomeMgr.Unmarshal(buf)
+				if err == nil {
+					doClear = false
+				}
 			}
-        }
-
+		} else {
+			// If file doesn't exist, don't consider it an error
+			if os.IsNotExist(err) {
+				err = nil
+			} else {
+				err = ski.ErrCode_KeyHiveFailedToLoad.ErrWithMsgf("failed to load key hive %v", pathname)
+			}
+		}
 		ski.Zero(buf)
 	}
 
 	if doClear {
 		sess.keyTomeMgr.Clear()
 	}
-
 	return err
 }
 
-func (sess *Session) saveToFile() error {
-
+func (sess *hiveSess) saveToFile() error {
 	sess.autoSaveMutex.Lock()
 	defer sess.autoSaveMutex.Unlock()
 
@@ -138,52 +125,49 @@ func (sess *Session) saveToFile() error {
 
 			if err == nil {
 				buf, err = sess.hiveCryptoKit.EncryptUsingPassword(crypto_rand.Reader, buf, sess.hivePass)
-                if err == nil {
-                    err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
-                    if err != nil {
-                        err = plan.Errorf(err, plan.KeyTomeFailedToWrite, "failed to write hive")
-                    }
-                }
-            }
+				if err == nil {
+					err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
+					if err != nil {
+						err = ski.ErrCode_KeyTomeFailedToSave.ErrWithMsgf("failed to save hive at %v", pathname)
+					}
+				}
+			}
 
-            // TODO: on key save failure, save to crash file?
+			// TODO: on key save failure, save to crash file?
 			if err != nil {
 				sess.Error("couldn't save to file: ", err)
-    			return err
+				return err
 			}
 		}
 		sess.clearSave()
 	}
-
 	return nil
 }
 
-func (sess *Session) clearSave() {
+func (sess *hiveSess) clearSave() {
 
 	// When we save out successfully, stop the autosave goroutine
 	{
 		if sess.savePending {
-            sess.savePending = false
+			sess.savePending = false
 			sess.saveTicker.Stop()
 		}
 	}
 }
 
 // EndSession -- see ski.Session
-func (sess *Session) EndSession(inReason string) {
-
+func (sess *hiveSess) EndSession(inReason string) {
 	sess.saveToFile()
-
 	ski.Zero(sess.hivePass)
 }
 
 // GenerateKeys -- see ski.Session
-func (sess *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
+func (sess *hiveSess) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
 
-	// The ONLY reason we'd need to keep trying is natural key collisions. 
+	// The ONLY reason we'd need to keep trying is natural key collisions.
 	// If this ever happened, congratulations, you've beaten the odds of a meteor hitting your house millions of times in a row.
 	tries := 3
-	
+
 	for ; tries > 0; tries-- {
 		newKeys, err := srcTome.GenerateFork(crypto_rand.Reader, 32)
 		if err != nil {
@@ -192,36 +176,33 @@ func (sess *Session) GenerateKeys(srcTome *ski.KeyTome) (*ski.KeyTome, error) {
 
 		sess.keyTomeMgr.MergeTome(newKeys)
 		if failCount := len(newKeys.Keyrings); failCount > 0 {
-    		sess.Warnf("%d generated keys failed to merge", failCount) 
+			sess.Warnf("%d generated keys failed to merge", failCount)
 		} else {
-            break
-        }
+			break
+		}
 	}
 
 	if tries == 0 {
-		return nil, plan.Error(nil, plan.AssertFailed, "generated keys failed to merge")
+		return nil, ski.ErrCode_AssertFailed.ErrWithMsg("generated keys failed to merge")
 	}
 
 	sess.bumpAutoSave()
-	
+
 	return srcTome, nil
 }
 
 // FetchKeyInfo -- see ski.Session
-func (sess *Session) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
-
+func (sess *hiveSess) FetchKeyInfo(inKeyRef *ski.KeyRef) (*ski.KeyInfo, error) {
 	opKey, err := sess.keyTomeMgr.FetchKey(inKeyRef.KeyringName, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	return opKey.KeyInfo, nil
-
 }
 
 // DoCryptOp -- see ski.Session
-func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
-
+func (sess *hiveSess) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error) {
 	var err error
 	opOut := &ski.CryptOpOut{}
 
@@ -231,9 +212,10 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 	if err == nil {
 		switch opArgs.CryptOp {
 
-			case ski.CryptOp_EXPORT_TO_PEER, ski.CryptOp_EXPORT_USING_PW: {
+		case ski.CryptOp_ExportToPeer, ski.CryptOp_ExportUsingPw:
+			{
 				if opArgs.TomeIn == nil {
-					err = plan.Error(nil, plan.AssertFailed, "op requires TomeIn")
+					err = ski.ErrCode_AssertFailed.ErrWithMsg("missing CryptOpArgs.TomeIn")
 				} else {
 					opArgs.BufIn, err = sess.keyTomeMgr.ExportUsingGuide(opArgs.TomeIn, ski.ErrorOnKeyNotFound)
 				}
@@ -245,25 +227,25 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 	** 1) LOAD OP CRYPTO KEY & KIT
 	**/
 	var (
-		opKey *ski.KeyEntry
-		cryptoKit *ski.CryptoKit
+		opKey     *ski.KeyEntry
+		cryptoKit ski.CryptoKit
 	)
 	if err == nil {
 		switch opArgs.CryptOp {
-			case ski.CryptOp_EXPORT_USING_PW, 
-				 ski.CryptOp_IMPORT_USING_PW:
-				cryptoKit, err = ski.GetCryptoKit(opArgs.DefaultCryptoKit)
+		case ski.CryptOp_ExportUsingPw,
+			ski.CryptOp_ImportUsingPw:
+			cryptoKit, err = ski.GetCryptoKit(opArgs.DefaultCryptoKit)
 
-			default:
-				if opArgs.OpKey == nil {
-					err = plan.Error(nil, plan.AssertFailed, "op requires a valid KeyRef")
-				} else {
-					opKey, err = sess.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
-					if err == nil {
-						opOut.OpPubKey = opKey.KeyInfo.PubKey
-						cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKit)
-					}
+		default:
+			if opArgs.OpKey == nil {
+				err = ski.ErrCode_AssertFailed.ErrWithMsg("missing CryptOpArgs.KeyRef")
+			} else {
+				opKey, err = sess.keyTomeMgr.FetchKey(opArgs.OpKey.KeyringName, opArgs.OpKey.PubKey)
+				if err == nil {
+					opOut.OpPubKey = opKey.KeyInfo.PubKey
+					cryptoKit, err = ski.GetCryptoKit(opKey.KeyInfo.CryptoKitID)
 				}
+			}
 		}
 	}
 
@@ -273,50 +255,50 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 	if err == nil {
 		switch opArgs.CryptOp {
 
-			case ski.CryptOp_SIGN:
-				opOut.BufOut, err = cryptoKit.Sign(
-					opArgs.BufIn, 
-					opKey.PrivKey)
-			
-			case ski.CryptOp_ENCRYPT_SYM:
-				opOut.BufOut, err = cryptoKit.Encrypt(
-					crypto_rand.Reader, 
-					opArgs.BufIn, 
-					opKey.PrivKey)
+		case ski.CryptOp_Sign:
+			opOut.BufOut, err = cryptoKit.Sign(
+				opArgs.BufIn,
+				opKey.PrivKey)
 
-			case ski.CryptOp_DECRYPT_SYM:
-				opOut.BufOut, err = cryptoKit.Decrypt(
-					opArgs.BufIn, 
-					opKey.PrivKey)
+		case ski.CryptOp_EncryptSym:
+			opOut.BufOut, err = cryptoKit.Encrypt(
+				crypto_rand.Reader,
+				opArgs.BufIn,
+				opKey.PrivKey)
 
-			case ski.CryptOp_ENCRYPT_TO_PEER, 
-				 ski.CryptOp_EXPORT_TO_PEER:
-				opOut.BufOut, err = cryptoKit.EncryptFor(
-					crypto_rand.Reader, 
-					opArgs.BufIn, 
-					opArgs.PeerKey,
-					opKey.PrivKey)
+		case ski.CryptOp_DecryptSym:
+			opOut.BufOut, err = cryptoKit.Decrypt(
+				opArgs.BufIn,
+				opKey.PrivKey)
 
-			case ski.CryptOp_DECRYPT_FROM_PEER,
-				 ski.CryptOp_IMPORT_FROM_PEER:
-				opOut.BufOut, err = cryptoKit.DecryptFrom(
-					opArgs.BufIn, 
-					opArgs.PeerKey,
-					opKey.PrivKey)
+		case ski.CryptOp_EncryptToPeer,
+			ski.CryptOp_ExportToPeer:
+			opOut.BufOut, err = cryptoKit.EncryptFor(
+				crypto_rand.Reader,
+				opArgs.BufIn,
+				opArgs.PeerKey,
+				opKey.PrivKey)
 
-			case ski.CryptOp_EXPORT_USING_PW:
-				opOut.BufOut, err = cryptoKit.EncryptUsingPassword(
-					crypto_rand.Reader, 
-					opArgs.BufIn, 
-					opArgs.PeerKey)
+		case ski.CryptOp_DecryptFromPeer,
+			ski.CryptOp_ImportFromPeer:
+			opOut.BufOut, err = cryptoKit.DecryptFrom(
+				opArgs.BufIn,
+				opArgs.PeerKey,
+				opKey.PrivKey)
 
-			case ski.CryptOp_IMPORT_USING_PW:
-				opOut.BufOut, err = cryptoKit.DecryptUsingPassword(
-					opArgs.BufIn, 
-					opArgs.PeerKey)
-				
-			default:
-				err = plan.Errorf(nil, plan.UnknownSKIOpName, "unrecognized SKI operation %v", opArgs.CryptOp)
+		case ski.CryptOp_ExportUsingPw:
+			opOut.BufOut, err = cryptoKit.EncryptUsingPassword(
+				crypto_rand.Reader,
+				opArgs.BufIn,
+				opArgs.PeerKey)
+
+		case ski.CryptOp_ImportUsingPw:
+			opOut.BufOut, err = cryptoKit.DecryptUsingPassword(
+				opArgs.BufIn,
+				opArgs.PeerKey)
+
+		default:
+			err = ski.ErrCode_UnrecognizedCryptOp.ErrWithMsgf("unrecognized SKI operation %v", opArgs.CryptOp)
 		}
 	}
 
@@ -326,11 +308,12 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 	if err == nil {
 		switch opArgs.CryptOp {
 
-			case ski.CryptOp_EXPORT_TO_PEER:
-				ski.Zero(opArgs.BufIn)
+		case ski.CryptOp_ExportToPeer:
+			ski.Zero(opArgs.BufIn)
 
-			case ski.CryptOp_IMPORT_FROM_PEER,
-				 ski.CryptOp_IMPORT_USING_PW: {
+		case ski.CryptOp_ImportFromPeer,
+			ski.CryptOp_ImportUsingPw:
+			{
 				newTome := ski.KeyTome{}
 				err = newTome.Unmarshal(opOut.BufOut)
 				ski.Zero(opOut.BufOut)
@@ -350,19 +333,19 @@ func (sess *Session) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error)
 
 	if err != nil {
 		return nil, err
-	}   
+	}
 
 	return opOut, nil
 }
- 
-func (sess *Session) bumpAutoSave() {
+
+func (sess *hiveSess) bumpAutoSave() {
 
 	sess.autoSaveMutex.Lock()
 	sess.nextAutoSave = time.Now().Add(1600 * time.Millisecond)
 
-    // If there's already a save pending/queued, then we can move on.
-	if ! sess.savePending {
-        sess.savePending = true
+	// If there's already a save pending/queued, then we can move on.
+	if !sess.savePending {
+		sess.savePending = true
 		sess.saveTicker = time.NewTicker(500 * time.Millisecond)
 		go func() {
 			for t := range sess.saveTicker.C {

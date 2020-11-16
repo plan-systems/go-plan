@@ -6,10 +6,10 @@ import (
 
 	"testing"
 
-	"github.com/plan-systems/plan-core/ski"
-	//"github.com/plan-systems/plan-core/plan"
+	"github.com/plan-systems/plan-go/ski"
+	//"github.com/plan-systems/plan-go/plan"
 
-	"github.com/plan-systems/plan-core/ski/Providers/hive"
+	"github.com/plan-systems/plan-go/ski/Providers/hive"
 )
 
 var gTesting *testing.T
@@ -39,7 +39,7 @@ func doProviderTest(A, B *testSession) {
 
 	// 2) export the community key from A
 	opBuf := A.doOp(ski.CryptOpArgs{
-		CryptOp: ski.CryptOp_EXPORT_TO_PEER,
+		CryptOp: ski.CryptOp_ExportToPeer,
 		OpKey:   &A.P2PKey,
 		PeerKey: B.P2PKey.PubKey,
 		TomeIn: &ski.KeyTome{
@@ -53,7 +53,7 @@ func doProviderTest(A, B *testSession) {
 
 	// 3) insert the new community key into B
 	opBuf = B.doOp(ski.CryptOpArgs{
-		CryptOp: ski.CryptOp_IMPORT_FROM_PEER,
+		CryptOp: ski.CryptOp_ImportFromPeer,
 		BufIn:   opBuf,
 		OpKey:   &B.P2PKey,
 		PeerKey: A.P2PKey.PubKey,
@@ -63,7 +63,7 @@ func doProviderTest(A, B *testSession) {
 
 	// 4) Encrypt a new community msg (sent from A)
 	opBuf = A.doOp(ski.CryptOpArgs{
-		CryptOp: ski.CryptOp_ENCRYPT_SYM,
+		CryptOp: ski.CryptOp_EncryptSym,
 		BufIn:   clearMsg,
 		OpKey:   &A.CommunityKey,
 	})
@@ -72,7 +72,7 @@ func doProviderTest(A, B *testSession) {
 
 	// 5) Send the encrypted community message to B
 	opBuf = B.doOp(ski.CryptOpArgs{
-		CryptOp: ski.CryptOp_DECRYPT_SYM,
+		CryptOp: ski.CryptOp_DecryptSym,
 		BufIn:   encryptedAtoB,
 		OpKey:   &B.CommunityKey,
 	})
@@ -81,13 +81,13 @@ func doProviderTest(A, B *testSession) {
 
 	// 6) Now check that B can send an encrypted community msg to A
 	opBuf = B.doOp(ski.CryptOpArgs{
-		CryptOp: ski.CryptOp_ENCRYPT_SYM,
+		CryptOp: ski.CryptOp_EncryptSym,
 		BufIn:   decryptedMsg,
 		OpKey:   &B.CommunityKey,
 	})
 	encryptedBtoA := opBuf
 	opBuf = A.doOp(ski.CryptOpArgs{
-		CryptOp: ski.CryptOp_DECRYPT_SYM,
+		CryptOp: ski.CryptOp_DecryptSym,
 		BufIn:   encryptedBtoA,
 		OpKey:   &A.CommunityKey,
 	})
@@ -109,7 +109,7 @@ func doProviderTest(A, B *testSession) {
 		badMsg[rndPos] += rndAdj
 
 		_, opErr := B.DoOp(ski.CryptOpArgs{
-			CryptOp: ski.CryptOp_DECRYPT_SYM,
+			CryptOp: ski.CryptOp_DecryptSym,
 			BufIn:   badMsg,
 			OpKey:   &B.CommunityKey,
 		})
