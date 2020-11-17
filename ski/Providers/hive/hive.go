@@ -126,7 +126,7 @@ func (sess *hiveSess) saveToFile() error {
 			if err == nil {
 				buf, err = sess.hiveCryptoKit.EncryptUsingPassword(crypto_rand.Reader, buf, sess.hivePass)
 				if err == nil {
-					err = ioutil.WriteFile(pathname, buf, plan.DefaultFileMode)
+					err = ioutil.WriteFile(pathname, buf, device.DefaultFileMode)
 					if err != nil {
 						err = ski.ErrCode_KeyTomeFailedToSave.ErrWithMsgf("failed to save hive at %v", pathname)
 					}
@@ -232,8 +232,8 @@ func (sess *hiveSess) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error
 	)
 	if err == nil {
 		switch opArgs.CryptOp {
-		case ski.CryptOp_ExportUsingPw,
-			ski.CryptOp_ImportUsingPw:
+
+		case ski.CryptOp_ExportUsingPw, ski.CryptOp_ImportUsingPw:
 			cryptoKit, err = ski.GetCryptoKit(opArgs.DefaultCryptoKit)
 
 		default:
@@ -271,16 +271,14 @@ func (sess *hiveSess) DoCryptOp(opArgs *ski.CryptOpArgs) (*ski.CryptOpOut, error
 				opArgs.BufIn,
 				opKey.PrivKey)
 
-		case ski.CryptOp_EncryptToPeer,
-			ski.CryptOp_ExportToPeer:
+		case ski.CryptOp_EncryptToPeer, ski.CryptOp_ExportToPeer:
 			opOut.BufOut, err = cryptoKit.EncryptFor(
 				crypto_rand.Reader,
 				opArgs.BufIn,
 				opArgs.PeerKey,
 				opKey.PrivKey)
 
-		case ski.CryptOp_DecryptFromPeer,
-			ski.CryptOp_ImportFromPeer:
+		case ski.CryptOp_DecryptFromPeer, ski.CryptOp_ImportFromPeer:
 			opOut.BufOut, err = cryptoKit.DecryptFrom(
 				opArgs.BufIn,
 				opArgs.PeerKey,
