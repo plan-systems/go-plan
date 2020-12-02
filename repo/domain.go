@@ -47,10 +47,11 @@ type chSess struct {
 type chSub struct {
 	ctx.Context
 
-	chSess     *chSess
-	chReq      *ChReq
-	nodeOutbox chan *Node
-	txInbox    chan *Tx
+	chSess          *chSess
+	chReq           *ChReq
+	nodeOutbox      chan *Node
+	txInbox         chan *Tx
+	clientSuspended bool
 }
 
 func newDomain(
@@ -434,9 +435,10 @@ func (ch *chSess) ctxOnStopping() {
 func (ch *chSess) OpenChSub(chReq *ChReq) (ChSub, error) {
 
 	sub := &chSub{
-		chSess:     ch,
-		chReq:      chReq,
-		nodeOutbox: make(chan *Node),
+		chSess:          ch,
+		chReq:           chReq,
+		nodeOutbox:      make(chan *Node),
+		clientSuspended: true,
 	}
 
 	// Start the subscription as a child ctx of each ch session
@@ -504,19 +506,24 @@ func (sub *chSub) ctxStartup() error {
 
 		sub.sendStateToClient()
 
-		if sub.txInbox != nil {
-			for {
+		for {
+			if sub.clientSuspended {
 				sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
+				sub.clientSuspended = false
+			}
 
-				// This blocks until new txs appear or until the sub is stopping
-				tx, running := <-sub.txInbox
-				if running == false {
-					break
-				}
-				for _, change := range tx.TxOp.Entries {
-					sub.processChange(change)
-				}
-				sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncResume, nil)
+            // If we're only sending state, we're done.
+			if sub.txInbox == nil {
+				break
+			}
+
+			// This blocks until new txs appear or until the sub is stopping (or if it never began)
+			tx, running := <-sub.txInbox
+			if running == false {
+				break
+			}
+			for _, change := range tx.TxOp.Entries {
+				sub.processChange(change)
 			}
 		}
 
@@ -559,6 +566,10 @@ func (sub *chSub) processChange(change *Node) {
 		}
 
 		if isMatch {
+			if sub.clientSuspended == false {
+				sub.nodeOutbox <- sub.chReq.newResponse(NodeOp_ChSyncSuspend, nil)
+				sub.clientSuspended = true
+			}
 			node := sub.chReq.newResponseFromCopy(change)
 
 			sub.Infof(2, "SYNC: %v", node.Keypath)
