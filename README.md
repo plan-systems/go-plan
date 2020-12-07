@@ -67,7 +67,7 @@ If you are contributing new features to `plan-go`, you may end up needing to upd
        _Don't use macOS's default unarchiver since it does not restore `.nupkg` filenames properly. Instead:_
 
         ```
-        unzip grpc.tools.1.22.0.nupkg
+        unzip grpc.tools.1.22.0.nupkg -d Grpc.Tools
         ```
 
     3. Copy the binary appropriate for your platform to somewhere on your `$PATH` and give it executable permissions:
