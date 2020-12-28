@@ -2,10 +2,10 @@
 package ski
 
 /*****************************************************
-** ski.Session
+** ski.EnclaveSession
 **/
 
-// EnclaveSession provides crypto services from an opaque service provider.
+// EnclaveSession provides crypto services from an opaque crypto services provider
 type EnclaveSession interface {
 
 	// Merges all keys in the given KeyTome with this host KeyTome.
@@ -25,29 +25,7 @@ type EnclaveSession interface {
 	// Performs signing, encryption, and decryption.
 	DoCryptOp(inArgs *CryptOpArgs) (*CryptOpOut, error)
 
-	// EndSession ends this SKI session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
-	// Following a call to EndSession(), no more references to this session should be made.
+	// EndSession ends this session, resulting in the host Provider to call its inOnSessionEnded() callback followed by inOnCompletion.
+	// Following a call to EndSession(), no more calls into this interface should be made.
 	EndSession(reason string)
 }
-
-/*****************************************************
-** ski.Provider AccessScopes
-**
-** FUTURE
-**/
-
-// AccessScopes specifies a set of SKI ops allowed to occur in a SKI session.  A clients requests this set when starting a new session,
-//     allowing the SKI provider to provision for the requested access (e.g. getting user permission of not already granted).
-type AccessScopes []string
-
-const (
-
-	// ContentDecryptAccess only allows the client to decrypt data
-	ContentDecryptAccess = "ContentDecryptAccess"
-
-	// ContentAuthoringAccess allows the client to encrypt and sign data
-	ContentAuthoringAccess = "ContentDecryptAccess"
-
-	// AddKeysAccess allows keys to be imported and generated
-	AddKeysAccess = "AddKeysAccess"
-)
