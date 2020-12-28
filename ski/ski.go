@@ -5,8 +5,8 @@ package ski
 ** ski.Session
 **/
 
-// Session provides crypto services from an opaque service provider.
-type Session interface {
+// EnclaveSession provides crypto services from an opaque service provider.
+type EnclaveSession interface {
 
 	// Merges all keys in the given KeyTome with this host KeyTome.
 	// See docs for KeyTome.MergeTome() on how error conditions are addressed.

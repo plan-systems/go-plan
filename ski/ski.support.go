@@ -15,7 +15,6 @@ import (
 	"golang.org/x/crypto/blake2b"
 
 	"github.com/plan-systems/plan-go/bufs"
-	"github.com/plan-systems/plan-go/ctx"
 	"github.com/plan-systems/plan-go/device"
 )
 
@@ -775,7 +774,7 @@ func GenerateNewKeys(
 
 // GenerateNewKey creates a new key, blocking until completion
 func GenerateNewKey(
-	inSession     Session,
+	inSession     EnclaveSession,
 	inKeyringName []byte,
 	inKeyInfo     KeyInfo,
 ) (*KeyInfo, error) {
@@ -818,96 +817,9 @@ func GenerateNewKey(
 
 }
 
-// SessionTool is a small set of util functions for creating a SKI session.
-type SessionTool struct {
-	ctx.Logger
-
-	UserID       string
-	Session      Session
-	CryptoKitID  CryptoKitID
-	CommunityKey KeyRef
-	P2PKey       KeyRef
-}
-
-// NewSessionTool creates a new tool for helping manage a SKI session.
-func NewSessionTool(
-	inSession     Session,
-	inUserID      string,
-	inCommunityID []byte,
-) (*SessionTool, error) {
-
-	st := &SessionTool{
-		Logger:      ctx.NewLogger("ski_" + inUserID),
-		UserID:      inUserID,
-		Session:     inSession,
-		CryptoKitID: CryptoKitID_NaCl,
-		CommunityKey: KeyRef{
-			KeyringName: inCommunityID,
-		},
-		P2PKey: KeyRef{
-			KeyringName: append([]byte(inUserID), inCommunityID...),
-		},
-	}
-
-	err := st.GetLatestKey(&st.P2PKey, KeyType_AsymmetricKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return st, nil
-}
-
-// DoOp performs the given op, blocking until completion
-func (st *SessionTool) DoOp(args CryptOpArgs) ([]byte, error) {
-	out, err := st.Session.DoCryptOp(&args)
-	if err != nil {
-		return nil, err
-	}
-
-	return out.BufOut, nil
-}
-
-// GetLatestKey updates the given KeyRef with the newest pub key on a given keyring (using ioKeyRef.KeyringName)
-func (st *SessionTool) GetLatestKey(
-	ioKeyRef     *KeyRef,
-	inAutoCreate KeyType,
-) error {
-
-	ioKeyRef.PubKey = nil
-
-	keyInfo, err := st.Session.FetchKeyInfo(ioKeyRef)
-	if IsError(err, ErrCode_KeyringNotFound, ErrCode_KeyEntryNotFound) {
-		if inAutoCreate != KeyType_Unspecified {
-			keyInfo, err = GenerateNewKey(
-				st.Session,
-				ioKeyRef.KeyringName,
-				KeyInfo{
-					KeyType:     inAutoCreate,
-					CryptoKitID: st.CryptoKitID,
-				},
-			)
-			if err == nil {
-				st.Infof(1, "created %v %v", inAutoCreate.String(), bufs.BufDesc(keyInfo.PubKey))
-			}
-		}
-	}
-	if err != nil {
-		return err
-	}
-
-	ioKeyRef.PubKey = keyInfo.PubKey
-
-	return nil
-}
-
-// EndSession ends the current session
-func (st *SessionTool) EndSession(inReason string) {
-	st.Session.EndSession(inReason)
-}
-
 // PayloadPacker signs and packs payload buffers IAW ski.SigHeader
 type PayloadPacker struct {
-	signSession   Session
+	signSession   EnclaveSession
 	hashKit       HashKit
 	signingKeyRef *KeyRef
 	signingKey    KeyInfo
@@ -936,10 +848,10 @@ func NewPacker(
 
 // ResetSession prepares this packer for use.
 func (P *PayloadPacker) ResetSession(
-	inSession Session,
+	inSession    EnclaveSession,
 	inSigningKey KeyRef,
-	inHashKit HashKitID,
-	outKeyInfo *KeyInfo,
+	inHashKit    HashKitID,
+	outKeyInfo   *KeyInfo,
 ) error {
 
 	P.signSession = nil

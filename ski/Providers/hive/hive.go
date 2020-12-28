@@ -22,7 +22,7 @@ import (
 
 // hiveSess is an implementation of the SKI
 type hiveSess struct {
-	ski.Session
+	ski.EnclaveSession
 	ctx.Logger
 
 	hiveCryptoKit ski.CryptoKit
@@ -42,7 +42,7 @@ func StartSession(
 	inBaseDir string,
 	inStoreName string,
 	inPass []byte,
-) (ski.Session, error) {
+) (ski.EnclaveSession, error) {
 
 	cryptoKit, err := ski.GetCryptoKit(ski.CryptoKitID_NaCl)
 	if err != nil {

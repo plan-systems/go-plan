@@ -123,8 +123,8 @@ func (host *host) DomainName() string {
 }
 
 // NewSession -- see interface Host
-func (host *host) NewSession() HostSession {
-	return &hostSess{}
+func (host *host) NewSession() MemberSession {
+	return &membSess{}
 }
 
 // OpenChSub -- see interface Host
@@ -248,12 +248,17 @@ func (host *host) stopDomainIfIdle(d Domain) bool {
 	return didStop
 }
 
-type hostSess struct {
+type membSess struct {
 	//ctx.Context
 
 }
 
-func (ms *hostSess) EncodeToTxAndSign(txOp *TxOp) (*Tx, error) {
+func (ms *membSess) ExpandAccess(access *EnclaveAccess) error {
+	return nil
+}
+
+
+func (ms *membSess) EncodeToTxAndSign(txOp *TxOp) (*Tx, error) {
 
 	if txOp == nil {
 		return nil, ErrCode_NothingToCommit.ErrWithMsg("missing txOp")
@@ -261,6 +266,10 @@ func (ms *hostSess) EncodeToTxAndSign(txOp *TxOp) (*Tx, error) {
 
 	if len(txOp.Entries) == 0 {
 		return nil, ErrCode_NothingToCommit.ErrWithMsg("no entries to commit")
+	}
+
+	if len(txOp.ChStateURI.ChID_TID) < 16 {
+		return nil, ErrCode_NothingToCommit.ErrWithMsg("invalid ChID (missing TID)")
 	}
 
 	//

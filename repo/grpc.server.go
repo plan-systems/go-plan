@@ -132,7 +132,7 @@ func (job *reqJob) exeTxOp() (*Node, error) {
 		job.req.TxOp.ChStateURI = job.req.ChStateURI
 	}
 
-	tx, err := job.sess.hostSess.EncodeToTxAndSign(job.req.TxOp)
+	tx, err := job.sess.membSess.EncodeToTxAndSign(job.req.TxOp)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ type repoSess struct {
 	openReqs   map[int32]*reqJob
 	openReqsMu sync.Mutex
 	nodeOutbox chan *Node
-	hostSess   HostSession
+	membSess   MemberSession
 	scrap      [512]byte
 	rpc        RepoGrpc_RepoServiceSessionServer
 }
@@ -354,7 +354,7 @@ func (srv *GrpcServer) RepoServiceSession(rpc RepoGrpc_RepoServiceSessionServer)
 		srv:        srv,
 		openReqs:   make(map[int32]*reqJob),
 		nodeOutbox: make(chan *Node, 4),
-		hostSess:   srv.host.NewSession(),
+		membSess:   srv.host.NewSession(),
 		rpc:        rpc,
 	}
 

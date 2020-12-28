@@ -6,7 +6,10 @@ import (
 
 	"testing"
 
+	"github.com/plan-systems/plan-go/bufs"
+	"github.com/plan-systems/plan-go/ctx"
 	"github.com/plan-systems/plan-go/ski"
+
 	//"github.com/plan-systems/plan-go/plan"
 
 	"github.com/plan-systems/plan-go/ski/Providers/hive"
@@ -29,7 +32,7 @@ func TestFileSysSKI(t *testing.T) {
 	}
 }
 
-func doProviderTest(A, B *testSession) {
+func doProviderTest(A, B *SessionTool) {
 
 	// 1) Generate a new community key (on A)
 	err := A.GetLatestKey(&A.CommunityKey, ski.KeyType_SymmetricKey)
@@ -119,29 +122,15 @@ func doProviderTest(A, B *testSession) {
 	}
 }
 
-type testSession struct {
-	ski.SessionTool
-}
-
-func (ts *testSession) doOp(inOpArgs ski.CryptOpArgs) []byte {
-
-	results, err := ts.DoOp(inOpArgs)
-
-	if err != nil {
-		gTesting.Fatal(err)
-	}
-	return results
-}
-
 // test setup helper
-func newSession(inUserName string) *testSession {
+func newSession(inUserName string) *SessionTool {
 
 	session, err := hive.StartSession("", "test", nil)
 	if err != nil {
 		gTesting.Fatal(err)
 	}
 
-	tool, err := ski.NewSessionTool(
+	st, err := NewSessionTool(
 		session,
 		inUserName,
 		gCommunityID[:],
@@ -150,9 +139,101 @@ func newSession(inUserName string) *testSession {
 		gTesting.Fatal(err)
 	}
 
-	ts := &testSession{
-		*tool,
+	return st
+}
+
+// SessionTool is a small set of util functions for creating a SKI session.
+type SessionTool struct {
+	ctx.Logger
+
+	UserID       string
+	Session      ski.EnclaveSession
+	CryptoKitID  ski.CryptoKitID
+	CommunityKey ski.KeyRef
+	P2PKey       ski.KeyRef
+}
+
+// NewSessionTool creates a new tool for helping manage a SKI enclave session.
+func NewSessionTool(
+	enclaveSess ski.EnclaveSession,
+	userID string,
+	communityID []byte,
+) (*SessionTool, error) {
+
+	st := &SessionTool{
+		Logger:      ctx.NewLogger("ski_" + userID),
+		UserID:      userID,
+		Session:     enclaveSess,
+		CryptoKitID: ski.CryptoKitID_NaCl,
+		CommunityKey: ski.KeyRef{
+			KeyringName: communityID,
+		},
+		P2PKey: ski.KeyRef{
+			KeyringName: append([]byte(userID), communityID...),
+		},
 	}
 
-	return ts
+	err := st.GetLatestKey(&st.P2PKey, ski.KeyType_AsymmetricKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return st, nil
+}
+
+func (st *SessionTool) doOp(args ski.CryptOpArgs) []byte {
+	results, err := st.DoOp(args)
+
+	if err != nil {
+		gTesting.Fatal(err)
+	}
+	return results
+}
+
+// DoOp performs the given op, blocking until completion
+func (st *SessionTool) DoOp(args ski.CryptOpArgs) ([]byte, error) {
+	out, err := st.Session.DoCryptOp(&args)
+	if err != nil {
+		return nil, err
+	}
+
+	return out.BufOut, nil
+}
+
+// GetLatestKey updates the given KeyRef with the newest pub key on a given keyring (using ioKeyRef.KeyringName)
+func (st *SessionTool) GetLatestKey(
+	ioKeyRef *ski.KeyRef,
+	inAutoCreate ski.KeyType,
+) error {
+
+	ioKeyRef.PubKey = nil
+
+	keyInfo, err := st.Session.FetchKeyInfo(ioKeyRef)
+	if ski.IsError(err, ski.ErrCode_KeyringNotFound, ski.ErrCode_KeyEntryNotFound) {
+		if inAutoCreate != ski.KeyType_Unspecified {
+			keyInfo, err = ski.GenerateNewKey(
+				st.Session,
+				ioKeyRef.KeyringName,
+				ski.KeyInfo{
+					KeyType:     inAutoCreate,
+					CryptoKitID: st.CryptoKitID,
+				},
+			)
+			if err == nil {
+				st.Infof(1, "created %v %v", inAutoCreate.String(), bufs.BufDesc(keyInfo.PubKey))
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	ioKeyRef.PubKey = keyInfo.PubKey
+
+	return nil
+}
+
+// EndSession ends the current session
+func (st *SessionTool) EndSession(inReason string) {
+	st.Session.EndSession(inReason)
 }

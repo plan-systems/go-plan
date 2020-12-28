@@ -18,10 +18,16 @@ type ChSub interface {
 	Close()
 }
 
-// HostSession wraps a client who has authenticated.
-type HostSession interface {
+// MemberSession wraps access to a secure enclave, allowing an interface consumer to perform security services (on behalf of a community member).
+type MemberSession interface {
 	//ctx.Ctx
+	
+	// ExpandAccess enables access into secure enclave (for key direct or indirect access).
+	// Currently, this is simply a master key that unlocks a key hive so that the user associated with this session can sign newly authored txns and decrypt private traffic.
+	// In the future, these are paramters that connect (and drive) a physical keyfob to prompt the user to authenticate (via physical interaction or biometric input).
+	ExpandAccess(access *EnclaveAccess) error
 
+	// Accesses the currently set of activated enclaves and attempts to sign a newly authored transaction
 	EncodeToTxAndSign(txOp *TxOp) (*Tx, error)
 }
 
@@ -29,7 +35,7 @@ type HostSession interface {
 type Domain interface {
 	ctx.Ctx
 
-	// Places this Domain on servce
+	// Places this Domain on service
 	Start() error
 
 	// OpenChSub services a channel Get request.
@@ -51,7 +57,7 @@ type Host interface {
 	Domain
 
 	// TODO: see comments in RepoServiceSession()
-	NewSession() HostSession
+	NewSession() MemberSession
 
 	//SubscribeToTIDUpdates(TID tTID)
 }
