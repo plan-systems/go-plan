@@ -29,7 +29,7 @@ func main() {
 
 	hostGrpcPort := *flag.Int("port", int(repo.Const_DefaultGrpcServicePort), "Sets the port used to bind the Repo service")
 	params := repo.HostParams{
-		BasePath: *flag.String("data", "~/__PLAN.pnode", "Specifies the path for all file access and storage"),
+		BasePath: *flag.String("data", "./PLAN.data", "Specifies the path for all file access and storage"),
 	}
 
 	host, err := repo.NewHost(params)
@@ -42,7 +42,7 @@ func main() {
 		host.Ctx().Fatalf("failed to start: %v", err)
 	}
 
-	// Little known fact: using "127.0.0.1" specifically binds to localhost, so incoming outside connections will be refused.
+	// Fun fact: using "127.0.0.1" specifically binds to localhost, so incoming outside connections will be refused.
 	// Later, when pnode is embedded in the client app for each platform, we'll want to use 127.0.0.1 (or IPC).
 	// Until then, we want to need to accept incoming outside connections.
 	srv := repo.NewGrpcServer(host, "tcp", fmt.Sprintf("0.0.0.0:%v", hostGrpcPort))

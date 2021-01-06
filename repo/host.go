@@ -268,7 +268,7 @@ func (ms *membSess) EncodeToTxAndSign(txOp *TxOp) (*Tx, error) {
 		return nil, ErrCode_NothingToCommit.ErrWithMsg("no entries to commit")
 	}
 
-	if len(txOp.ChStateURI.ChID_TID) < 16 {
+	if txOp.ChannelGenesis == false && len(txOp.ChStateURI.ChID_TID) < 16 {
 		return nil, ErrCode_NothingToCommit.ErrWithMsg("invalid ChID (missing TID)")
 	}
 
