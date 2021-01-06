@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"path"
 	"time"
 
 	"github.com/plan-systems/klog"
 	"github.com/plan-systems/plan-go/repo"
+	"github.com/plan-systems/plan-go/device"
 )
 
 func main() {
@@ -27,9 +29,15 @@ func main() {
 
 	klog.Flush()
 
+	exePath, err := device.GetExePath()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defaultDataDir := path.Join(exePath, "PLAN.data")
+	
 	hostGrpcPort := *flag.Int("port", int(repo.Const_DefaultGrpcServicePort), "Sets the port used to bind the Repo service")
 	params := repo.HostParams{
-		BasePath: *flag.String("data", "./PLAN.data", "Specifies the path for all file access and storage"),
+		BasePath: *flag.String("data", defaultDataDir, "Specifies the path for all file access and storage"),
 	}
 
 	host, err := repo.NewHost(params)
