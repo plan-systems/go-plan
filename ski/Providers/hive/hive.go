@@ -1,4 +1,4 @@
-// Package hive implements ski.Provider for keys stored on the local file system (via encrypted file)
+// Package hive implements ski.EnclaveSession for keys stored on the local file system (via encrypted file)
 package hive
 
 import (

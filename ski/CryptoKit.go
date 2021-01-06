@@ -14,9 +14,8 @@ type CryptoKit interface {
 	// CryptoKitID univeserally identifies a specific crypto suite and version.
 	CryptoKitID() CryptoKitID
 
-	// Pre: ioEntry.KeyType, .KeyDomain, .CryptoKitID, and .TimeCreated is already set.
-	// inRequestedKeySz is the requested length of the private key. It is ignored
-	//     if this implementation uses fixed or implicit key lengths.
+	// Pre: ioEntry.KeyType, .KeyDomain, .CryptoKitID, and .TimeCreated are set.
+	// inRequestedKeySz is the requested length of the private key (ignored for some implementations)
 	GenerateNewKey(
 		inRequestedKeySz int,
 		ioRand           io.Reader,
@@ -141,7 +140,7 @@ func GetCryptoKit(
 }
 
 // VerifySignature is a convenience function that performs signature validation for any registered CryptoKit.
-//  Returns nil err if the signature of inDigest plus the signer's private key matches the given signature.
+// Returns nil err if the signature of inDigest plus the signer's private key matches the given signature.
 // This function is threadsafe.
 func VerifySignature(
 	inCryptoKitID  CryptoKitID,
