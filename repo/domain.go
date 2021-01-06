@@ -108,7 +108,6 @@ func (d *domain) ctxStartup() error {
 	//
 	d.txsToMerge = make(chan *Tx, 1)
 	d.CtxGo(func() {
-
 		for tx := range d.txsToMerge {
 			chSess, err := d.getChSess(tx.TxOp.ChStateURI.ChID, true)
 			if chSess != nil {
@@ -411,16 +410,18 @@ func (ch *chSess) ctxStartup() error {
 
 func (ch *chSess) onChSubStopping(child ctx.Ctx) {
 
+	// When closing the last ch subscription, set up an autocheck that spins down this ch session (if it's still idle)
 	if ch.CtxChildCount() <= 1 {
 		ch.CtxGo(func() {
 			ticker := time.NewTicker(ch.domain.chAutoStopDelay)
+			defer ticker.Stop()
+
 			select {
 			case <-ticker.C:
 				ch.domain.stopChSessIfIdle(ch)
 			case <-ch.CtxStopping():
 				break
 			}
-			ticker.Stop()
 		})
 	}
 }
@@ -512,7 +513,7 @@ func (sub *chSub) ctxStartup() error {
 				sub.clientSuspended = false
 			}
 
-            // If we're only sending state, we're done.
+			// If we're only sending state, we're done.
 			if sub.txInbox == nil {
 				break
 			}

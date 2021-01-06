@@ -42,8 +42,7 @@ type Domain interface {
 	OpenChSub(chReq *ChReq) (ChSub, error)
 
 	// SubmitTx takes ownership of the given tx and inserts it into the Host pipeline to be validated and merged.
-	// Progress of this commit can be monitorted via subscribing to the TID for updates.
-	// From this point on, the given Tx should be treated as read-only.
+	// If the given Tx is retained, it should be treated as read-only at this point onward.
 	SubmitTx(tx *Tx) error
 
 	// DomainName uniquely identifies this Domain
@@ -58,6 +57,4 @@ type Host interface {
 
 	// TODO: see comments in RepoServiceSession()
 	NewSession() MemberSession
-
-	//SubscribeToTIDUpdates(TID tTID)
 }
