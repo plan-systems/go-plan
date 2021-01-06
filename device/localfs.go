@@ -75,6 +75,16 @@ func CreateNewDir(basePath, dirPath string) (string, error) {
 	return pathname, nil
 }
 
+// GetExePath returns the pathname of the dir containing the host exe
+func GetExePath() (string, error) {
+	hostExe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	hostDir := path.Dir(hostExe)
+	return hostDir, nil
+}
+
 var remapCharset = map[rune]rune{
 	' ':  '-',
 	'.':  '-',
