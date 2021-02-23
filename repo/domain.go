@@ -10,7 +10,7 @@ import (
 	//"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v2"
 )
 
 // LID is the local assigned ID, an integer assigned the given channel for brevity and look
@@ -601,10 +601,13 @@ func (sub *chSub) unmarshalAndSend(itemPrefixSkip int, item *badger.Item) error 
 }
 
 func (sub *chSub) sendStateToClient() {
-	scope := sub.chReq.GetOp.Scope
-
 	chPrefixLen := len(sub.chSess.keyPrefix)
-	opKeypath := append(sub.chSess.keyPrefix, sub.chReq.GetOp.Keypath...)
+	
+	// When forming opKeypath, ensure that we get a copy (vs sub.chSess.keyPrefix gettine appended)
+	opKeypath := append([]byte{}, sub.chSess.keyPrefix...)
+	opKeypath = append(opKeypath, sub.chReq.GetOp.Keypath...)
+
+	scope := sub.chReq.GetOp.Scope
 	readTxn := sub.chSess.stateDB.NewTransaction(false)
 	defer readTxn.Discard()
 
