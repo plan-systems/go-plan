@@ -10,7 +10,7 @@ import (
 	//"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
 
-	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v3"
 )
 
 // LID is the local assigned ID, an integer assigned the given channel for brevity and look
@@ -636,13 +636,14 @@ func (sub *chSub) sendStateToClient() {
 				break
 			}
 
-			if shallowOnly && !PathIsShallow(itr.Item().Key(), opKeypath) {
+			itrItem := itr.Item()
+			if shallowOnly && PathIsShallow(itrItem.Key(), opKeypath) == false {
 				continue
 			}
 
-			err := sub.unmarshalAndSend(chPrefixLen, itr.Item())
+			err := sub.unmarshalAndSend(chPrefixLen, itrItem)
 			if err != nil {
-				sub.Errorf("failed to itr item %v: %v", string(itr.Item().Key()), err)
+				sub.Errorf("failed to itr item %v: %v", string(itrItem.Key()), err)
 			}
 		}
 	}
