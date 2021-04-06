@@ -781,10 +781,10 @@ func GenerateNewKey(
 
 	tomeOut, err := inSession.GenerateKeys(&KeyTome{
 		Keyrings: []*Keyring{
-			&Keyring{
+			{
 				Name: inKeyringName,
 				Keys: []*KeyEntry{
-					&KeyEntry{
+					{
 						KeyInfo: &inKeyInfo,
 					},
 				},

@@ -22,7 +22,7 @@ type ChSub interface {
 type MemberSession interface {
 	//ctx.Ctx
 	
-	// ExpandAccess enables access into secure enclave (for key direct or indirect access).
+	// ExpandAccess enables access into a secure enclave (for key direct or indirect access).
 	// Currently, this is simply a master key that unlocks a key hive so that the user associated with this session can sign newly authored txns and decrypt private traffic.
 	// In the future, these are paramters that connect (and drive) a physical keyfob to prompt the user to authenticate (via physical interaction or biometric input).
 	ExpandAccess(access *EnclaveAccess) error

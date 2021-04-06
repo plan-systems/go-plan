@@ -90,11 +90,11 @@ func keyTomeTest(testKeys []*KeyEntry) {
 	}
 
 	missing := [][]byte{
-		[]byte{0, 0, 1},
-		[]byte{0, 1},
-		[]byte{5, 4},
-		[]byte{255},
-		[]byte{255, 0},
+		{0, 0, 1},
+		{0, 1},
+		{5, 4},
+		{255},
+		{255, 0},
 	}
 
 	// Check that MergeKeys works as expected -- exact dupes are dropped.
