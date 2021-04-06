@@ -10,7 +10,7 @@ import (
 	//"github.com/plan-systems/plan-go/bufs"
 	"github.com/plan-systems/plan-go/ctx"
 
-	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v3"
 )
 
 // LID is the local assigned ID, an integer assigned the given channel for brevity and look

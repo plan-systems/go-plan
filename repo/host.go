@@ -14,8 +14,7 @@ import (
 	"github.com/plan-systems/plan-go/ctx"
 	"github.com/plan-systems/plan-go/device"
 
-	"github.com/dgraph-io/badger/v2"
-	// "google.golang.org/grpc"
+	"github.com/dgraph-io/badger/v3"
 )
 
 // NewHost is the highest level interface for what this repo package is all about
