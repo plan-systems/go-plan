@@ -1,48 +1,52 @@
 {
     "folders": [
-        {
-            "path": "."
-        },
-        {
-            "path": "../plan-protobufs"
-        },
-        {
-            "path": "../design-docs"
-        },
-        {
-            "path": "../klog"
-        }
-    ],
+		{
+			"path": "."
+		},
+		{
+			"path": "../plan-protobufs"
+		},
+		{
+			"path": "../design-docs"
+		},
+		{
+			"path": "../klog"
+		},
+		{
+			"path": "../plan-internal-docs"
+		}
+	],
     "settings": {
     
         "cSpell.words": [
-            "Err",
-            "access",
-            "asym",
-            "attribs",
-            "ch",
-            "ckid",
-            "crypto",
-            "grpc",
-            "hashname",
-            "hashnames",
-            "jerr",
-            "key",
-            "nuls",
-            "op",
-            "perr",
-            "pgateway",
-            "pnode",
-            "priv",
-            "privs",
-            "pservice",
-            "readwrite",
-            "recip",
-            "repo",
-            "rnode",
-            "sz",
-            "uuid"
-        ],
+			"Err",
+			"POSIX",
+			"access",
+			"asym",
+			"attribs",
+			"ch",
+			"ckid",
+			"crypto",
+			"grpc",
+			"hashname",
+			"hashnames",
+			"jerr",
+			"key",
+			"nuls",
+			"op",
+			"perr",
+			"pgateway",
+			"pnode",
+			"priv",
+			"privs",
+			"pservice",
+			"readwrite",
+			"recip",
+			"repo",
+			"rnode",
+			"sz",
+			"uuid"
+		],
         "cSpell.enabledLanguageIds": [
             "asciidoc",
             "c",
