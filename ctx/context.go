@@ -16,7 +16,7 @@ import (
 
 // Ctx is an abstraction for a context that can stopped/aborted.
 //
-// Ctx serves as a vehicle between a Content expressed as *struct or as an interface (which can be upcast).
+// Ctx serves as a vehicle between a Context expressed as *struct or as an interface (which can be upcast).
 type Ctx interface {
 	Ctx() *Context
 }
@@ -61,9 +61,10 @@ func (c *Context) CtxStopping() <-chan struct{} {
 	return c.Context.Done()
 }
 
-// CtxStart blocks until the given onStartup proc is complete  started up or stopped (if an err is returned).
+// CtxStart calls the given start func and returns the error.
+// If no error occurred, this Context is in a "running" state until CtxStop() is called.
 //
-// See notes for CtxInitiateStop()
+// See notes for CtxStop()
 func (c *Context) CtxStart(
 	onStartup func() error,
 	onStopIssued func(),
@@ -72,7 +73,7 @@ func (c *Context) CtxStart(
 ) error {
 
 	if c.CtxRunning() {
-		panic("plan.Context already running")
+		panic("Context already running")
 	}
 
 	c.onStopIssued = onStopIssued
@@ -85,7 +86,7 @@ func (c *Context) CtxStart(
 		err = onStartup()
 	}
 
-	// Even if onStopping == nil, we still need this call since the resulting c.stopComplete.Add(1) ensures
+	// Even if onStopping == nil, we still call the below since the resulting c.stopComplete.Add(1) ensures
 	// that this context's CtxStop() has actually somethong to wait on.
 	c.CtxGo(func() {
 
@@ -126,10 +127,10 @@ func (c *Context) CtxStart(
 //          }
 //
 // When c.CtxStop() is called (for the first time):
-//  1. c.onStopIssued() is called (if it was provided to c.CtxStart)
+//  1. c.onStopIssued() is called (if provided to c.CtxStart)
 //  2. if c has a parent, c is detached and the parent's onChildAboutToStop(c) is called (if provided to c.CtxStart).
 //  3. c.CtxStopChildren() is called, blocking until all children are stopped (recursive)
-//  4. c.Context is canceled, causing onStopping() to be called (if provided) and any <-CtxStopping() calls to be unblocked.
+//  4. c.Context is canceled, causing any <-CtxStopping() calls to be unblocked.
 //  5. c's onStopping() is called (if provided to c.CtxStart)
 //  6. After the last call to c.CtxGo() has completed, c.CtxWait() is released.
 //
@@ -174,7 +175,7 @@ func (c *Context) CtxStop(
 	return initiated
 }
 
-// CtxWait blocks until this Context has completed stopping (following a CtxInitiateStop). Returns true if this call initiated the shutdown (vs another cause)
+// CtxWait blocks until this Context has completed stopping (following a CtxStop). Returns true if this call initiated the shutdown (vs another cause)
 //
 // THREADSAFE
 func (c *Context) CtxWait() {
@@ -183,7 +184,6 @@ func (c *Context) CtxWait() {
 
 // CtxStopChildren initiates a stop on each child and blocks until complete.
 func (c *Context) CtxStopChildren(stopReason string) {
-
 	childrenRunning := &sync.WaitGroup{}
 
 	logInfo := c.LogV(2)
