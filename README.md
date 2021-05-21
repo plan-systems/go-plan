@@ -15,22 +15,6 @@ This repo contains PLAN's backend infrastructure that ultimately hosts [plan-cli
 
 The [PLAN Design Docs](https://github.com/plan-systems/design-docs) lay out PLAN's architecture in detail.
 
-## Milestone Log
-
-
-|    Date     | Status                                                                  |
-|:-----------:|-------------------------------------------------------------------------|
-| Nov 2020 | Preliminary unification of Go-based [vault](https://github.com/plan-systems/plan-vault-libp2p) and [pnode](https://github.com/plan-systems/plan-go)
-| Sep 2020 | Pilot implementation of v3 arch, marring trie+state semantics, efficient binary content integration, and the requisite [security model](https://github.com/plan-systems/design-docs/blob/master/PLAN-Proof-of-Correctness.md)  
-| Jan 2020 | Experimental integration with [redwood](https://github.com/brynbellomy/redwood) on a v2 implementation  |
-| Jul 2019 | pre-alpha prototype demonstrates `ch/talk` and `ch/space` at [DWeb 2019](https://www.plan-systems.org/2019/05/13/decentralized-web-camp-and-beyond/)               |
-| May 2019 | pnode community genesis and basic channel ops implemented               |
-| Feb 2019 | pdi-datastore now implements [StorageProvider](https://github.com/plan-systems/design-docs/blob/master/PLAN-API-Documentation.md#Persistent-Data-Interface) using a centralized db |
-| Dec 2018 | Architecture docs complete; resuming active development                 |
-| Sep 2018 | Pausing active development to work on PLAN PoC                          |
-| Aug 2018 | SKI makeover following permissions model proof of concept               |
-| Jul 2018 | Active development begins                                               |
-
 
 
 ## Links
